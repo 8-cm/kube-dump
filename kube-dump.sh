@@ -36,13 +36,13 @@ usage() {
   echo "Options:"
   echo "  -l, --label          Label selector to find multiple pods [default: dumpme=yes]"
   echo "  -L, --node-label     Label selector to find multiple nodes (for node-level commands)"
-  echo "  -n, --namespace      Namespace (optional, defaults to current namespace)"
-  echo "  --to-namespace       Namespace where debug pods should be created (optional)"
+  echo "  -n, --namespace      Namespace where debug pods should be created (optional)"
+  echo "  --to-namespace       Alias for -n/--namespace (deprecated, use -n instead)"
   echo "  --cri                Container runtime interface (containerd, crio, docker) [default: containerd]"
   echo "  --cri-socket         Custom CRI socket path (absolute path on node)"
   echo "  --install-deps       Allow automatic installation of CRI dependencies (crictl only)"
   echo "  --no-cleanup         Skip cleanup, leave debug pods running for log inspection"
-  echo "  --include-nodes      Also run -E on nodes with -l pods not selected by -L"
+  echo "  --include-nodes      Also run -E on nodes hosting pods selected by -l"
   echo "  -e, --execute        Command to execute [default: tcpdump -i any -nn -s 0]"
   echo "  -E, --node-execute   Command to execute on nodes [default: tcpdump -i any -nn -s 0]"
   echo "  -s, --select-to-download  Command to list files for download (space-delimited output)"
@@ -53,6 +53,7 @@ usage() {
   echo "  --kill-switch-rel    Kill pods when free space falls below relative threshold (e.g., 10%)"
   echo "  --pod-volume         Volume path to monitor for pod-based kill switches (e.g., /tmp)"
   echo "  --node-volume        Volume path to monitor for node-based kill switches (e.g., /var)"
+  echo "  --image              Container image for debug/discovery/killswitch pods [default: nicolaka/netshoot]"
   echo "  --no-glyphs          Disable emojis and use text labels like [INFO], [ERROR], [OK]"
   echo "  -h, --help           Show this help message and exit"
   echo ""
@@ -66,8 +67,8 @@ usage() {
   echo "  # Capture from pods with multiple labels:"
   echo "  $0 -l 'tier=frontend,env=prod'"
   echo ""
-  echo "  # Capture across namespaces:"
-  echo "  $0 -l app=backend -n production --to-namespace monitoring"
+  echo "  # Create debug pods in specific namespace (pods found cluster-wide):"
+  echo "  $0 -l app=backend -n monitoring"
   echo ""
   echo "  # Custom complex command:"
   echo "  $0 -l app=web -e 'tcpdump -i any -w /tmp/capture.pcap host 10.1.1.1'"
@@ -107,6 +108,12 @@ usage() {
   echo ""
   echo "  # Use kill switch to prevent disk pressure (relative threshold):"
   echo "  $0 -L worker=true --kill-switch-rel 10% --node-volume /var"
+  echo ""
+  echo "  # Also run commands on nodes hosting selected pods:"
+  echo "  $0 -l app=web --include-nodes -E 'ss -tuln'"
+  echo ""
+  echo "  # Use custom container image for all debug pods:"
+  echo "  $0 -l app=web --image alpine/network-tools"
   echo ""
   echo "Note: Script automatically selects first container from each pod for PID discovery."
   echo "All containers in a pod share the same network namespace."
@@ -164,12 +171,11 @@ initialize_variables() {
   POD_DEBUG_HOSTNAMES=()     # Array to store debug pod hostnames for pod targets
   NODE_DEBUG_HOSTNAMES=()    # Array to store debug pod hostnames for node targets
   EXECUTION_MODE="pod"  # pod or node execution mode
-  NAMESPACE=""
   DEBUG_NAMESPACE=""
   DEBUG_POD_NAMES=()  # Array for multiple debug pods
   CAPTURE_COMMAND="tcpdump -i any -nn -s 0"  # Default tcpdump command
   CUSTOM_COMMAND=""  # Base64 encoded custom command from -e
-  TARGET_PODS=()  # Array of pod info: "pod_name:container_name:node_name"
+  TARGET_PODS=()  # Array of pod info: "pod_name:container_name:node_name:namespace"
   TARGET_NODES=()  # Array for node info: "node_name"
   CRI_RUNTIME="containerd"  # Default container runtime interface
   CRI_SOCKET=""  # Custom CRI socket path (absolute path on node)
@@ -181,6 +187,7 @@ initialize_variables() {
   POD_VOLUME=""  # Volume path to monitor for pod-based kill switches
   NODE_VOLUME=""  # Volume path to monitor for node-based kill switches
   KILL_SWITCH_MONITOR_PODS=()  # Array for kill switch monitor pods
+  DEBUG_IMAGE="nicolaka/netshoot"  # Default container image for debug/discovery/killswitch pods
   KUBE_CLI=""  # Will be set to 'oc' or '$KUBE_CLI' based on availability
 }
 
@@ -411,10 +418,10 @@ parse_arguments() {
         ;;
       -n|--namespace)
         if [[ $1 == --namespace=* ]]; then
-          NAMESPACE="$val"
+          DEBUG_NAMESPACE="$val"
         else
           validate_option_value "$val" "-n|--namespace"
-          NAMESPACE="$val"
+          DEBUG_NAMESPACE="$val"
           shift
         fi
         ;;
@@ -549,6 +556,15 @@ parse_arguments() {
           shift
         fi
         ;;
+      --image)
+        if [[ $1 == --image=* ]]; then
+          DEBUG_IMAGE="$val"
+        else
+          validate_option_value "$val" "--image"
+          DEBUG_IMAGE="$val"
+          shift
+        fi
+        ;;
       --no-glyphs)
         NO_GLYPHS=true
         ;;
@@ -587,6 +603,8 @@ validate_arguments() {
   # Set execution mode based on options provided
   if [[ "$has_pod_options" == "true" && "$has_node_options" == "true" ]]; then
     EXECUTION_MODE="mixed"
+  elif [[ "$has_pod_options" == "true" && "$INCLUDE_NODES" == "true" ]]; then
+    EXECUTION_MODE="mixed"  # --include-nodes with pod options becomes mixed mode
   elif [[ "$has_node_options" == "true" ]]; then
     EXECUTION_MODE="node"
   else
@@ -603,12 +621,24 @@ validate_arguments() {
   fi
 
   if [[ "$EXECUTION_MODE" == "node" || "$EXECUTION_MODE" == "mixed" ]]; then
-    validate_variable "NODE_LABEL" "$NODE_LABEL" "string" "" "true"
     validate_variable "NODE_COMMAND" "$NODE_COMMAND" "string" "" "true"
     validate_variable "CUSTOM_NODE_COMMAND" "$CUSTOM_NODE_COMMAND" "string" "" "false"
+    
+    # For mixed mode triggered by --include-nodes, NODE_LABEL is optional
+    if [[ "$EXECUTION_MODE" == "mixed" && "$INCLUDE_NODES" == "true" && -z "$NODE_LABEL" ]]; then
+      # --include-nodes case: NODE_LABEL is not required
+      :
+    else
+      validate_variable "NODE_LABEL" "$NODE_LABEL" "string" "" "true"
+    fi
   fi
 
-  validate_variable "NAMESPACE" "$NAMESPACE" "string" "" "false"
+  # Specific validation for --include-nodes
+  if [[ "$INCLUDE_NODES" == "true" && -z "$CUSTOM_NODE_COMMAND" ]]; then
+    echo "Error: --include-nodes requires -E/--node-execute to specify what command to run on nodes" >&2
+    usage
+  fi
+
   validate_variable "DEBUG_NAMESPACE" "$DEBUG_NAMESPACE" "string" "" "false"
   validate_variable "CRI_RUNTIME" "$CRI_RUNTIME" "enum" "containerd,crio,docker" "true"
   validate_variable "INSTALL_DEPS" "$INSTALL_DEPS" "boolean" "" "true"
@@ -703,12 +733,11 @@ validate_arguments() {
 # Function: select_target_pods
 # -------------------------------------------------------------------------------
 select_target_pods() {
-  # Determine namespace if not provided
-  if [ -z "$NAMESPACE" ]; then
-    NAMESPACE=$($KUBE_CLI config view --minify --output 'jsonpath={..namespace}' 2>/dev/null)
-    if [ -z "$NAMESPACE" ]; then
-      echo "Error: No namespace specified and no current namespace found" >&2
-      return 1
+  # Determine debug namespace if not provided (for creating debug pods)
+  if [ -z "$DEBUG_NAMESPACE" ]; then
+    DEBUG_NAMESPACE=$($KUBE_CLI config view --minify --output 'jsonpath={..namespace}' 2>/dev/null)
+    if [ -z "$DEBUG_NAMESPACE" ]; then
+      DEBUG_NAMESPACE="default"
     fi
   fi
 
@@ -734,10 +763,11 @@ prepare_target_pods() {
     local pod_name=$(echo "$pod_info" | cut -d':' -f1)
     local containers=$(echo "$pod_info" | cut -d':' -f2)
     local node_name=$(echo "$pod_info" | cut -d':' -f3)
+    local pod_namespace=$(echo "$pod_info" | cut -d':' -f4)
 
     # Check if pod is running
     local pod_phase
-    if ! pod_phase=$($KUBE_CLI get pod "${pod_name}" -n "${NAMESPACE}" -o jsonpath='{.status.phase}' 2>/dev/null); then
+    if ! pod_phase=$($KUBE_CLI get pod "${pod_name}" -n "${pod_namespace}" -o jsonpath='{.status.phase}' 2>/dev/null); then
       echo "  Warning: Failed to get status for pod '$pod_name', skipping" >&2
       continue
     fi
@@ -751,8 +781,8 @@ prepare_target_pods() {
     # All containers share the same network namespace, so we just need any running container
     local target_container=$(echo "$containers" | awk '{print $1}')
     # Add to target pods array
-    TARGET_PODS+=("${pod_name}:${target_container}:${node_name}")
-    format_message "   ✅ ${pod_name} -> ${target_container} on ${node_name}"
+    TARGET_PODS+=("${pod_name}:${target_container}:${node_name}:${pod_namespace}")
+    format_message "   ✅ ${pod_name} (${pod_namespace}) -> ${target_container} on ${node_name}"
   done
 
   if [[ ${#TARGET_PODS[@]} -eq 0 ]]; then
@@ -796,7 +826,7 @@ select_target_nodes() {
 
   # If --include-nodes is enabled and we have pod selections, also include nodes with selected pods
   if [[ "$INCLUDE_NODES" == "true" && ${#TARGET_PODS[@]} -gt 0 ]]; then
-    format_message "🔍 Processing --include-nodes: adding nodes with selected pods not already selected by -L"
+    format_message "🔍 Processing --include-nodes: adding nodes hosting selected pods"
 
     # Get nodes from selected pods
     local pod_nodes=()
@@ -847,13 +877,13 @@ find_pods_by_label() {
   echo ""
 
   local pod_list
-  if ! pod_list=$($KUBE_CLI get pods -n "${NAMESPACE}" -l "${POD_LABEL}" -o jsonpath='{range .items[*]}{.metadata.name}{":"}{.spec.containers[*].name}{":"}{.spec.nodeName}{"\n"}{end}' 2>/dev/null); then
+  if ! pod_list=$($KUBE_CLI get pods --all-namespaces -l "${POD_LABEL}" -o jsonpath='{range .items[*]}{.metadata.name}{":"}{.spec.containers[*].name}{":"}{.spec.nodeName}{":"}{.metadata.namespace}{"\n"}{end}' 2>/dev/null); then
     echo "Error: Failed to find pods with label '$POD_LABEL'" >&2
     return 1
   fi
 
   if [[ -z "$pod_list" ]]; then
-    echo "Error: No pods found with label '$POD_LABEL' in namespace '$NAMESPACE'" >&2
+    echo "Error: No pods found with label '$POD_LABEL' (searched cluster-wide)" >&2
     return 1
   fi
 
@@ -867,7 +897,8 @@ find_pods_by_label() {
   format_message "✅ Found ${#POD_NAMES[@]} pods:"
   for pod_info in "${POD_NAMES[@]}"; do
     local pod_name=$(echo "$pod_info" | cut -d':' -f1)
-    format_message "   📦 $pod_name"
+    local pod_namespace=$(echo "$pod_info" | cut -d':' -f4)
+    format_message "   📦 $pod_name (namespace: $pod_namespace)"
   done
   echo ""
 
@@ -1016,7 +1047,7 @@ spec:
   hostIPC: true
   containers:
   - name: debugger
-    image: nicolaka/netshoot
+    image: ${DEBUG_IMAGE}
     command: ["/bin/bash", "-c"]
     args:
     - |
@@ -1095,7 +1126,7 @@ metadata:
 spec:
   containers:
   - name: debugger
-    image: nicolaka/netshoot
+    image: ${DEBUG_IMAGE}
     command: ["/bin/bash", "-c"]
     args:
     - |
@@ -1469,13 +1500,34 @@ handle_file_downloads() {
       if [[ -n "$file_path" ]]; then
         local output_file="$OUTPUT_DIR/${original_debug_pod_name}_$(basename "$file_path")"
 
-        if $KUBE_CLI cp "$debug_ns/$discovery_pod_name:$file_path" "$output_file" 2>/dev/null; then
-          format_message_stderr "   ✅ $(basename "$file_path")"
-          downloaded_files+=("$file_path")
-        else
-          format_message_stderr "   ❌ Failed: $(basename "$file_path") from pod $discovery_pod_name on node $node_name"
-          pod_had_failure=true
-        fi
+        # Try download with up to 3 attempts (handles transient network/pod issues)
+        local download_success=false
+        local attempt=1
+        local max_attempts=3
+        
+        while [[ $attempt -le $max_attempts && "$download_success" == "false" ]]; do
+          if [[ $attempt -gt 1 ]]; then
+            sleep 1  # Brief pause between retries to allow pod/network recovery
+          fi
+          
+          if $KUBE_CLI cp "$debug_ns/$discovery_pod_name:$file_path" "$output_file" 2>/dev/null; then
+            if [[ $attempt -gt 1 ]]; then
+              format_message_stderr "   ✅ $(basename "$file_path") (succeeded on attempt $attempt)"
+            else
+              format_message_stderr "   ✅ $(basename "$file_path")"
+            fi
+            downloaded_files+=("$file_path")
+            download_success=true
+          else
+            if [[ $attempt -eq $max_attempts ]]; then
+              format_message_stderr "   ❌ Failed: $(basename "$file_path") from pod $discovery_pod_name on node $node_name (after $max_attempts attempts)"
+              pod_had_failure=true
+            else
+              format_message_stderr "   ⚠️  Retrying $(basename "$file_path") (attempt $((attempt + 1))/$max_attempts)"
+            fi
+          fi
+          ((attempt++))
+        done
       fi
     done <<< "$files_list"
 
@@ -1557,7 +1609,7 @@ spec:
     kubernetes.io/hostname: ${node_name}
   containers:
   - name: discovery
-    image: ubuntu:22.04
+    image: ${DEBUG_IMAGE}
     command: ["tail", "-f", "/dev/null"]
     securityContext:
       privileged: true
@@ -1596,7 +1648,7 @@ spec:
     kubernetes.io/hostname: ${node_name}
   containers:
   - name: discovery
-    image: ubuntu:22.04
+    image: ${DEBUG_IMAGE}
     command: ["tail", "-f", "/dev/null"]
     securityContext:
       privileged: true
@@ -1750,7 +1802,7 @@ spec:
     kubernetes.io/hostname: ${node_name}
   containers:
   - name: monitor
-    image: ubuntu:22.04
+    image: ${DEBUG_IMAGE}
     command: ["/bin/bash", "-c"]
     args:
     - |
@@ -1825,12 +1877,9 @@ parse_size_to_bytes() {
   echo "\$bytes"
 }
 
-# Install bc for floating point calculations
-apt-get update >/dev/null 2>&1 && apt-get install -y bc >/dev/null 2>&1 || echo "Warning: Could not install bc" >&2
-
 KILL_SWITCH_ABS="${KILL_SWITCH_ABS}"
 KILL_SWITCH_REL="${KILL_SWITCH_REL}"
-CHECK_INTERVAL=10  # Check every 10 seconds
+CHECK_INTERVAL=1  # Check every 1 second for fast response
 
 if [[ -n "\$KILL_SWITCH_ABS" ]]; then
   echo "Monitoring storage with absolute threshold: \$KILL_SWITCH_ABS" >&2
@@ -1896,7 +1945,7 @@ SCRIPT
 # -------------------------------------------------------------------------------
 monitor_kill_switches() {
   local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE}}"
-  local check_interval=5  # Check every 5 seconds
+  local check_interval=1  # Check every 1 second for fast response
   local killed_pods=()
 
   while true; do
