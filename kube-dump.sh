@@ -305,6 +305,78 @@ format_message_stderr() {
 }
 
 # -------------------------------------------------------------------------------
+# Function: get_effective_cri_socket
+# -------------------------------------------------------------------------------
+get_effective_cri_socket() {
+  if [[ -n "$CRI_SOCKET" ]]; then
+    echo "$CRI_SOCKET"
+  else
+    case "$CRI_RUNTIME" in
+      "containerd")
+        echo "/run/containerd/containerd.sock"
+        ;;
+      "crio")
+        echo "/run/crio/crio.sock"
+        ;;
+      "docker")
+        echo "/var/run/cri-dockerd.sock"
+        ;;
+      *)
+        echo "/run/containerd/containerd.sock"
+        ;;
+    esac
+  fi
+}
+
+# -------------------------------------------------------------------------------
+# Function: show_configuration
+# -------------------------------------------------------------------------------
+show_configuration() {
+  echo ""
+  format_message "📋 Configuration Summary:"
+  echo "=================================================="
+  echo "Execution Mode:      $EXECUTION_MODE"
+  echo "Kubernetes CLI:      $KUBE_CLI"
+  echo ""
+  echo "Pod Selection:"
+  echo "  Label Selector:    ${POD_LABEL:-"(not set)"}"
+  echo "  Namespace:         ${DEBUG_NAMESPACE:-"(current/default)"}"
+  echo ""
+  echo "Node Selection:"
+  echo "  Node Label:        ${NODE_LABEL:-"(not set)"}"
+  echo "  Include Nodes:     ${INCLUDE_NODES}"
+  echo ""
+  echo "Commands:"
+  echo "  Pod Command:       ${CUSTOM_COMMAND:-"$CAPTURE_COMMAND"}"
+  echo "  Node Command:      ${CUSTOM_NODE_COMMAND:-"$NODE_COMMAND"}"
+  echo ""
+  echo "Container Settings:"
+  echo "  Image:             $DEBUG_IMAGE"
+  echo "  CRI Runtime:       $CRI_RUNTIME"
+  echo "  CRI Socket:        $(get_effective_cri_socket)"
+  echo "  Install Deps:      $INSTALL_DEPS"
+  echo ""
+  echo "File Operations:"
+  echo "  Pod File Cmd:      ${SELECT_TO_DOWNLOAD_COMMAND:-"(not set)"}"
+  echo "  Node File Cmd:     ${NODE_SELECT_TO_DOWNLOAD_COMMAND:-"(not set)"}"
+  echo "  Output Dir:        ${OUTPUT_DIR:-"(not set)"}"
+  echo "  Placeholder:       $PLACEHOLDER_CHAR"
+  echo ""
+  echo "Kill Switch:"
+  echo "  Absolute:          ${KILL_SWITCH_ABS:-"(not set)"}"
+  echo "  Relative:          ${KILL_SWITCH_REL:-"(not set)"}"
+  echo "  Pod Volume:        ${POD_VOLUME:-"(not set)"}"
+  echo "  Node Volume:       ${NODE_VOLUME:-"(not set)"}"
+  echo ""
+  echo "Options:"
+  echo "  No Cleanup:        $NO_CLEANUP"
+  echo "  No Glyphs:         ${NO_GLYPHS:-"false"}"
+  echo "  Mock Mode:         ${MOCK_MODE:-"false"}"
+  echo "=================================================="
+  echo ""
+}
+
+# -------------------------------------------------------------------------------
 # Function: validate_variable
 # -------------------------------------------------------------------------------
 validate_variable() {
@@ -2048,7 +2120,6 @@ cleanup_kill_switch_monitor_pods() {
 main() {
   # Unified workflow for both pod and node execution
   initialize_variables
-  format_message "🔍 Initializing Kubernetes debug session..."
   detect_kube_cli
   parse_arguments "$@"
 
@@ -2057,7 +2128,11 @@ main() {
     usage
   fi
 
+  format_message "🔍 Initializing Kubernetes debug session..."
   validate_arguments
+
+  # Show complete configuration
+  show_configuration
 
   # Setup log file if -o (OUTPUT_DIR) is specified
   if [[ -n "$OUTPUT_DIR" ]]; then
