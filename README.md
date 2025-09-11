@@ -28,6 +28,9 @@ A powerful Kubernetes debugging tool that enables network capture, command execu
 - 📁 **Cross-namespace operations**: Create debug pods in specified namespaces
 - ⚙️ **Custom commands**: Execute any command instead of default tcpdump
 - 🔗 **Node auto-inclusion**: Automatically include nodes hosting selected pods
+- 🛡️ **Kill switch protection**: Automatically terminate debug pods when disk usage exceeds thresholds
+- 📊 **Comprehensive logging**: Detailed session logging when output directory is specified
+- 🖥️ **Text-only mode**: Disable emojis for terminal compatibility with `--no-glyphs`
 
 ## 🛠️ Installation
 
@@ -86,6 +89,11 @@ kubectl auth can-i create pods --all-namespaces
 | `--install-deps` | Auto-install CRI tools | Disabled |
 | `--no-cleanup` | Keep debug pods running | Disabled |
 | `--include-nodes` | Auto-include pod nodes | Disabled |
+| `--kill-switch-abs` | Kill pods when disk usage exceeds absolute threshold (e.g., 1GB, 500MB) | None |
+| `--kill-switch-rel` | Kill pods when free space falls below relative threshold (e.g., 10%) | None |
+| `--pod-volume` | Volume path to monitor for pod-based kill switches | None |
+| `--node-volume` | Volume path to monitor for node-based kill switches | None |
+| `--no-glyphs` | Disable emojis and use text labels like [INFO], [ERROR], [OK] | Disabled |
 
 ## 📚 Examples
 
@@ -169,6 +177,20 @@ kubectl auth can-i create pods --all-namespaces
 # Keep debug pods for manual inspection
 ./kube-dump.sh -l app=api --no-cleanup \
   -e 'tcpdump -i any -w capture.pcap'
+
+# Use kill switch to prevent disk pressure (absolute threshold)
+./kube-dump.sh -l app=database \
+  --kill-switch-abs 1GB --pod-volume /tmp \
+  -e 'tcpdump -i any -w /tmp/%.pcap'
+
+# Use kill switch with relative threshold on nodes
+./kube-dump.sh -L worker=true \
+  --kill-switch-rel 5% --node-volume /var \
+  -E 'tcpdump -i eth0 -w /var/%.pcap'
+
+# Text-only output without emojis
+./kube-dump.sh -l app=web --no-glyphs \
+  -e 'tcpdump -i any -c 100'
 ```
 
 ## 🔧 How It Works
@@ -210,6 +232,56 @@ kubectl auth can-i create pods --all-namespaces
 3. Uses `kubectl cp` to download discovered files
 4. Organizes files by pod/node in output directory
 5. Provides detailed download reports
+
+### Kill Switch Protection
+
+The kill switch feature provides automatic protection against disk pressure by monitoring storage usage and terminating debug pods when thresholds are exceeded.
+
+#### How Kill Switches Work
+1. **Monitor Pod Creation**: Additional monitoring pods are created alongside debug pods
+2. **Storage Monitoring**: Monitors continuously check disk usage on specified volume paths
+3. **Threshold Detection**: When thresholds are exceeded, monitor pods complete successfully
+4. **Automatic Cleanup**: Debug pods are immediately terminated to prevent disk issues
+
+#### Kill Switch Types
+- **Absolute Threshold** (`--kill-switch-abs`): Triggers when available space falls below a specific amount
+  - Examples: `1GB`, `500MB`, `2Gi`, `1Ti`
+  - Supports standard Kubernetes size units (K, Ki, M, Mi, G, Gi, T, Ti)
+- **Relative Threshold** (`--kill-switch-rel`): Triggers when free space percentage falls below threshold
+  - Examples: `10%`, `5%`
+  - Based on percentage of total filesystem capacity
+
+#### Volume Path Requirements
+- **Pod Operations**: Use `--pod-volume` to specify the path within pod containers (e.g., `/tmp`)
+- **Node Operations**: Use `--node-volume` to specify the host path to monitor (e.g., `/var`)
+- **Mixed Mode**: Both volume paths are required when using both pod and node operations
+
+### Comprehensive Logging
+
+When an output directory is specified with `-o/--output`, kube-dump automatically creates detailed session logs.
+
+#### Log File Features
+- **Automatic Creation**: Log file created when `-o` is specified
+- **Timestamped Entries**: Each log entry includes timestamp for tracking
+- **Complete Session Record**: Captures all script output and errors
+- **Unique Naming**: Prevents conflicts with date and epoch-based naming
+
+#### Log File Format
+```
+kube-dump-YYYY-MM-DD_EPOCH.log
+```
+
+Examples:
+- `kube-dump-2024-01-15_1705123456.log`
+- `kube-dump-2024-01-15_1705127890.log`
+
+#### Log Content
+- Command execution details
+- Pod and node discovery results
+- Debug pod creation status
+- File download operations
+- Error messages and warnings
+- Kill switch activations
 
 ## ⚠️ Important Considerations
 
@@ -258,6 +330,36 @@ kubectl get podsecuritypolicy
 
 # Check available runtime sockets on nodes
 ./kube-dump.sh -L worker=true -E 'ls -la /var/run/ | grep -E "(containerd|crio|docker)"'
+```
+
+#### Kill switch not triggering
+```bash
+# Check monitor pod logs
+kubectl logs <kill-switch-monitor-pod>
+
+# Verify volume path exists and is monitored
+./kube-dump.sh -L worker=true -E 'df -h /var'
+
+# Test threshold calculations manually  
+./kube-dump.sh -l app=web --kill-switch-abs 100MB --pod-volume /tmp -e 'dd if=/dev/zero of=/tmp/test.dat bs=1M count=200'
+```
+
+#### Log files not created
+```bash
+# Ensure output directory has write permissions
+ls -la /path/to/output/directory
+
+# Check if -o flag was provided
+./kube-dump.sh -l app=web -o ./logs -e 'echo test'
+```
+
+#### Text mode compatibility issues
+```bash
+# Use --no-glyphs for terminals that don't support emojis
+./kube-dump.sh -l app=web --no-glyphs
+
+# Combine with logging for clean text output
+./kube-dump.sh -l app=web --no-glyphs -o ./logs
 ```
 
 ### Debug Mode

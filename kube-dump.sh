@@ -49,6 +49,11 @@ usage() {
   echo "  -S, --node-select-to-download  Command to list node files for download"
   echo "  -o, --output         Output directory for downloaded files"
   echo "  -I, --placeholder    Set placeholder character for hostname substitution [default: %]"
+  echo "  --kill-switch-abs    Kill pods when disk usage exceeds absolute threshold (e.g., 1GB, 500MB)"
+  echo "  --kill-switch-rel    Kill pods when free space falls below relative threshold (e.g., 10%)"
+  echo "  --pod-volume         Volume path to monitor for pod-based kill switches (e.g., /tmp)"
+  echo "  --node-volume        Volume path to monitor for node-based kill switches (e.g., /var)"
+  echo "  --no-glyphs          Disable emojis and use text labels like [INFO], [ERROR], [OK]"
   echo "  -h, --help           Show this help message and exit"
   echo ""
   echo "Examples:"
@@ -96,6 +101,12 @@ usage() {
   echo ""
   echo "  # Use custom CRI socket path:"
   echo "  $0 -l app=web --cri-socket /var/run/podman/podman.sock"
+  echo ""
+  echo "  # Use kill switch to prevent disk pressure (absolute threshold):"
+  echo "  $0 -l app=web --kill-switch-abs 1GB --pod-volume /tmp"
+  echo ""
+  echo "  # Use kill switch to prevent disk pressure (relative threshold):"
+  echo "  $0 -L worker=true --kill-switch-rel 10% --node-volume /var"
   echo ""
   echo "Note: Script automatically selects first container from each pod for PID discovery."
   echo "All containers in a pod share the same network namespace."
@@ -165,6 +176,11 @@ initialize_variables() {
   INSTALL_DEPS="false"  # Default: do not install dependencies automatically
   NO_CLEANUP="false"  # Default: cleanup debug pods after execution
   INCLUDE_NODES="false"  # Default: do not auto-include nodes with selected pods
+  KILL_SWITCH_ABS=""  # Kill switch absolute threshold (e.g., 1GB, 500MB)
+  KILL_SWITCH_REL=""  # Kill switch relative threshold (e.g., 10%)
+  POD_VOLUME=""  # Volume path to monitor for pod-based kill switches
+  NODE_VOLUME=""  # Volume path to monitor for node-based kill switches
+  KILL_SWITCH_MONITOR_PODS=()  # Array for kill switch monitor pods
   KUBE_CLI=""  # Will be set to 'oc' or '$KUBE_CLI' based on availability
 }
 
@@ -194,6 +210,90 @@ validate_option_value() {
   if [[ -z "$val" || "$val" == -* ]]; then
     echo "Error: Argument $option_name requires a value" >&2
     usage
+  fi
+}
+
+# -------------------------------------------------------------------------------
+# Function: format_message
+# -------------------------------------------------------------------------------
+format_message() {
+  local message="$1"
+  
+  if [[ "$NO_GLYPHS" == "true" ]]; then
+    message="${message//🔍/[SEARCH]}"
+    message="${message//🔧/[SETUP]}"
+    message="${message//🛡️/[SECURITY]}"
+    message="${message//✅/[OK]}"
+    message="${message//🔴/[KILL]}"
+    message="${message//❌/[ERROR]}"
+    message="${message//🟢/[SUCCESS]}"
+    message="${message//⚠️/[WARNING]}"
+    message="${message//📋/[INFO]}"
+    message="${message//🔄/[PROGRESS]}"
+    message="${message//📥/[DOWNLOAD]}"
+    message="${message//🚫/[BLOCKED]}"
+    message="${message//💾/[STORAGE]}"
+    message="${message//⏳/[WAITING]}"
+    message="${message//🖥️/[NODE]}"
+    message="${message//ℹ️/[INFO]}"
+    message="${message//⏸️/[PAUSE]}"
+    message="${message//🗑️/[CLEANUP]}"
+    message="${message//📦/[POD]}"
+    message="${message//🧹/[CLEAN]}"
+    message="${message//🚀/[LAUNCH]}"
+    message="${message//🎯/[TARGET]}"
+    message="${message//📊/[STATUS]}"
+    message="${message//🎉/[COMPLETE]}"
+    message="${message//━/=}"
+  fi
+  
+  echo "$message"
+  
+  # Log to file if OUTPUT_DIR is specified (indicating -o was used)
+  if [[ -n "$OUTPUT_DIR" && -n "$KUBE_DUMP_LOG_FILE" ]]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $message" >> "$KUBE_DUMP_LOG_FILE"
+  fi
+}
+
+# -------------------------------------------------------------------------------
+# Function: format_message_stderr
+# -------------------------------------------------------------------------------
+format_message_stderr() {
+  local message="$1"
+  
+  if [[ "$NO_GLYPHS" == "true" ]]; then
+    message="${message//🔍/[SEARCH]}"
+    message="${message//🔧/[SETUP]}"
+    message="${message//🛡️/[SECURITY]}"
+    message="${message//✅/[OK]}"
+    message="${message//🔴/[KILL]}"
+    message="${message//❌/[ERROR]}"
+    message="${message//🟢/[SUCCESS]}"
+    message="${message//⚠️/[WARNING]}"
+    message="${message//📋/[INFO]}"
+    message="${message//🔄/[PROGRESS]}"
+    message="${message//📥/[DOWNLOAD]}"
+    message="${message//🚫/[BLOCKED]}"
+    message="${message//💾/[STORAGE]}"
+    message="${message//⏳/[WAITING]}"
+    message="${message//🖥️/[NODE]}"
+    message="${message//ℹ️/[INFO]}"
+    message="${message//⏸️/[PAUSE]}"
+    message="${message//🗑️/[CLEANUP]}"
+    message="${message//📦/[POD]}"
+    message="${message//🧹/[CLEAN]}"
+    message="${message//🚀/[LAUNCH]}"
+    message="${message//🎯/[TARGET]}"
+    message="${message//📊/[STATUS]}"
+    message="${message//🎉/[COMPLETE]}"
+    message="${message//━/=}"
+  fi
+  
+  echo "$message" >&2
+  
+  # Log to file if OUTPUT_DIR is specified (indicating -o was used)
+  if [[ -n "$OUTPUT_DIR" && -n "$KUBE_DUMP_LOG_FILE" ]]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - STDERR: $message" >> "$KUBE_DUMP_LOG_FILE"
   fi
 }
 
@@ -413,6 +513,45 @@ parse_arguments() {
       --include-nodes)
         INCLUDE_NODES="true"
         ;;
+      --kill-switch-abs)
+        if [[ $1 == --kill-switch-abs=* ]]; then
+          KILL_SWITCH_ABS="$val"
+        else
+          validate_option_value "$val" "--kill-switch-abs"
+          KILL_SWITCH_ABS="$val"
+          shift
+        fi
+        ;;
+      --kill-switch-rel)
+        if [[ $1 == --kill-switch-rel=* ]]; then
+          KILL_SWITCH_REL="$val"
+        else
+          validate_option_value "$val" "--kill-switch-rel"
+          KILL_SWITCH_REL="$val"
+          shift
+        fi
+        ;;
+      --pod-volume)
+        if [[ $1 == --pod-volume=* ]]; then
+          POD_VOLUME="$val"
+        else
+          validate_option_value "$val" "--pod-volume"
+          POD_VOLUME="$val"
+          shift
+        fi
+        ;;
+      --node-volume)
+        if [[ $1 == --node-volume=* ]]; then
+          NODE_VOLUME="$val"
+        else
+          validate_option_value "$val" "--node-volume"
+          NODE_VOLUME="$val"
+          shift
+        fi
+        ;;
+      --no-glyphs)
+        NO_GLYPHS=true
+        ;;
       --mock)
         MOCK_MODE=true
         ;;
@@ -488,6 +627,40 @@ validate_arguments() {
     fi
   fi
 
+  # Validate kill switch arguments
+  validate_variable "KILL_SWITCH_ABS" "$KILL_SWITCH_ABS" "string" "" "false"
+  validate_variable "KILL_SWITCH_REL" "$KILL_SWITCH_REL" "string" "" "false"
+
+  # Kill switch arguments are mutually exclusive
+  if [[ -n "$KILL_SWITCH_ABS" && -n "$KILL_SWITCH_REL" ]]; then
+    echo "Error: --kill-switch-abs and --kill-switch-rel are mutually exclusive. Use only one." >&2
+    return 1
+  fi
+
+  # Kill switches require volume path arguments based on execution mode
+  if [[ -n "$KILL_SWITCH_ABS" || -n "$KILL_SWITCH_REL" ]]; then
+    case "$EXECUTION_MODE" in
+      "pod")
+        if [[ -z "$POD_VOLUME" ]]; then
+          echo "Error: Kill switches in pod mode require --pod-volume to specify the volume path to monitor" >&2
+          return 1
+        fi
+        ;;
+      "node")
+        if [[ -z "$NODE_VOLUME" ]]; then
+          echo "Error: Kill switches in node mode require --node-volume to specify the volume path to monitor" >&2
+          return 1
+        fi
+        ;;
+      "mixed")
+        if [[ -z "$POD_VOLUME" || -z "$NODE_VOLUME" ]]; then
+          echo "Error: Kill switches in mixed mode require both --pod-volume and --node-volume to specify volume paths to monitor" >&2
+          return 1
+        fi
+        ;;
+    esac
+  fi
+
   # Arrays are initialized in initialize_variables(), no need to validate here
 
   # Show message about execution mode and defaults
@@ -555,7 +728,7 @@ select_target_pods() {
 # Function: prepare_target_pods
 # -------------------------------------------------------------------------------
 prepare_target_pods() {
-  echo "🔧 Preparing target pods for debugging..."
+  format_message "🔧 Preparing target pods for debugging..."
 
   for pod_info in "${POD_NAMES[@]}"; do
     local pod_name=$(echo "$pod_info" | cut -d':' -f1)
@@ -579,7 +752,7 @@ prepare_target_pods() {
     local target_container=$(echo "$containers" | awk '{print $1}')
     # Add to target pods array
     TARGET_PODS+=("${pod_name}:${target_container}:${node_name}")
-    echo "   ✅ ${pod_name} -> ${target_container} on ${node_name}"
+    format_message "   ✅ ${pod_name} -> ${target_container} on ${node_name}"
   done
 
   if [[ ${#TARGET_PODS[@]} -eq 0 ]]; then
@@ -594,7 +767,7 @@ prepare_target_pods() {
 # Function: select_target_nodes
 # -------------------------------------------------------------------------------
 select_target_nodes() {
-  echo "🔍 Finding nodes with label selector: $NODE_LABEL"
+  format_message "🔍 Finding nodes with label selector: $NODE_LABEL"
   echo ""
 
   # Get nodes matching the label selector
@@ -614,16 +787,16 @@ select_target_nodes() {
     NODE_NAMES+=("$line")
   done <<< "$nodes_output"
 
-  echo "✅ Found ${#NODE_NAMES[@]} nodes:"
+  format_message "✅ Found ${#NODE_NAMES[@]} nodes:"
   for node_name in "${NODE_NAMES[@]}"; do
-    echo "   🖥️  $node_name"
+    format_message "   🖥️  $node_name"
     TARGET_NODES+=("$node_name")
   done
   echo ""
 
   # If --include-nodes is enabled and we have pod selections, also include nodes with selected pods
   if [[ "$INCLUDE_NODES" == "true" && ${#TARGET_PODS[@]} -gt 0 ]]; then
-    echo "🔍 Processing --include-nodes: adding nodes with selected pods not already selected by -L"
+    format_message "🔍 Processing --include-nodes: adding nodes with selected pods not already selected by -L"
 
     # Get nodes from selected pods
     local pod_nodes=()
@@ -655,11 +828,11 @@ select_target_nodes() {
     if [[ ${#additional_nodes[@]} -gt 0 ]]; then
       echo "   ➕ Added ${#additional_nodes[@]} additional nodes from pod selections:"
       for node in "${additional_nodes[@]}"; do
-        echo "      🖥️  $node"
+        format_message "      🖥️  $node"
       done
       echo ""
     else
-      echo "ℹ️  No additional nodes needed (all pod nodes already selected by -L)"
+      format_message "ℹ️  No additional nodes needed (all pod nodes already selected by -L)"
     fi
   fi
 
@@ -670,7 +843,7 @@ select_target_nodes() {
 # Function: find_pods_by_label
 # -------------------------------------------------------------------------------
 find_pods_by_label() {
-  echo "🔍 Finding pods with label selector: $POD_LABEL"
+  format_message "🔍 Finding pods with label selector: $POD_LABEL"
   echo ""
 
   local pod_list
@@ -691,10 +864,10 @@ find_pods_by_label() {
     fi
   done <<< "$pod_list"
 
-  echo "✅ Found ${#POD_NAMES[@]} pods:"
+  format_message "✅ Found ${#POD_NAMES[@]} pods:"
   for pod_info in "${POD_NAMES[@]}"; do
     local pod_name=$(echo "$pod_info" | cut -d':' -f1)
-    echo "   📦 $pod_name"
+    format_message "   📦 $pod_name"
   done
   echo ""
 
@@ -747,18 +920,26 @@ create_debug_pods_for_targets() {
     local container_name=$(echo "$target_pod" | cut -d':' -f2)
     local node_name=$(echo "$target_pod" | cut -d':' -f3)
 
-    # Generate unique debug pod name
-    local base_name="${node_name}-debug-${pod_name}-${epoch_time}"
-    local counter=1
-    local debug_pod_name="${base_name}-${counter}"
+    # Generate unique debug pod name with hash for shorter names
+    local pod_hash
+    if command -v md5sum >/dev/null 2>&1; then
+      pod_hash=$(echo "$pod_name" | md5sum | cut -c1-8)
+    elif command -v md5 >/dev/null 2>&1; then
+      pod_hash=$(echo "$pod_name" | md5 | cut -c1-8)
+    else
+      # Fallback to simple hash
+      pod_hash=$(echo "$pod_name" | cksum | cut -d' ' -f1 | cut -c1-8)
+    fi
+    local debug_pod_name="${node_name}-debug-${pod_hash}-${epoch_time}"
 
     # Check if pod name exists and increment until unique
+    local counter=1
     while $KUBE_CLI get pod "${debug_pod_name}" -n "${debug_ns}" &>/dev/null; do
       counter=$((counter + 1))
-      debug_pod_name="${base_name}-${counter}"
+      debug_pod_name="${node_name}-debug-${pod_hash}-${epoch_time}-${counter}"
     done
 
-    echo "   📦 Creating debug pod for ${pod_name}:${container_name} on ${node_name}"
+    format_message "   📦 Creating debug pod for ${pod_name}:${container_name} on ${node_name}"
 
     create_single_debug_pod "$pod_name" "$container_name" "$node_name" "$debug_pod_name" "$debug_ns"
     if [[ $? -eq 0 ]]; then
@@ -766,7 +947,7 @@ create_debug_pods_for_targets() {
       # Store debug pod hostname for file download phase
       POD_DEBUG_HOSTNAMES+=("$debug_pod_name")
     else
-      echo "      ❌ Failed to create debug pod for $pod_name"
+      format_message "      ❌ Failed to create debug pod for $pod_name"
     fi
   done
 
@@ -780,24 +961,32 @@ create_node_debug_pods() {
   local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE:-default}}"
 
   for node_name in "${TARGET_NODES[@]}"; do
-    local base_name="node-debug-${node_name}-$(date +%s)"
-    local debug_pod_name="${base_name}-1"
+    local node_hash
+    if command -v md5sum >/dev/null 2>&1; then
+      node_hash=$(echo "$node_name" | md5sum | cut -c1-6)
+    elif command -v md5 >/dev/null 2>&1; then
+      node_hash=$(echo "$node_name" | md5 | cut -c1-6)
+    else
+      # Fallback to simple hash
+      node_hash=$(echo "$node_name" | cksum | cut -d' ' -f1 | cut -c1-6)
+    fi
+    local debug_pod_name="node-${node_hash}-$(date +%s)"
     local counter=1
 
     # Check if pod name exists and increment until unique
     while $KUBE_CLI get pod "${debug_pod_name}" -n "${debug_ns}" &>/dev/null; do
       counter=$((counter + 1))
-      debug_pod_name="${base_name}-${counter}"
+      debug_pod_name="node-${node_hash}-$(date +%s)-${counter}"
     done
 
-    echo "   🖥️  Creating debug pod for node '${node_name}'"
+    format_message "   🖥️  Creating debug pod for node '${node_name}'"
 
     if create_single_node_debug_pod "$node_name" "$debug_pod_name" "$debug_ns"; then
       DEBUG_POD_NAMES+=("$debug_pod_name")
       # Store debug pod hostname for file download phase
       NODE_DEBUG_HOSTNAMES+=("$debug_pod_name")
     else
-      echo "      ❌ Failed to create debug pod for node $node_name"
+      format_message "      ❌ Failed to create debug pod for node $node_name"
     fi
   done
 
@@ -946,7 +1135,7 @@ echo "Starting network capture for ${pod_name}:${container_name}" >&2
 # Function to configure crictl socket
 configure_crictl_socket() {
   local socket_path
-  
+
   # Use custom socket if provided, otherwise use runtime defaults
   if [[ -n "${CRI_SOCKET}" ]]; then
     socket_path="unix:///host${CRI_SOCKET}"
@@ -966,7 +1155,7 @@ configure_crictl_socket() {
         ;;
     esac
   fi
-  
+
   echo "runtime-endpoint: \${socket_path}" > /etc/crictl.yaml
   echo "Configured crictl with runtime endpoint: \${socket_path}" >&2
 }
@@ -1069,7 +1258,7 @@ wait_for_debug_pods_ready() {
   local wait_time=0
 
   # Show initial status
-  printf "🔄 Checking %d debug pods" "${#DEBUG_POD_NAMES[@]}"
+  printf "$(format_message "🔄 Checking %d debug pods\n")" "${#DEBUG_POD_NAMES[@]}"
 
   while [ $wait_time -lt $max_wait ] && [ ${#ready_pods[@]} -lt ${#DEBUG_POD_NAMES[@]} ]; do
     for debug_pod in "${DEBUG_POD_NAMES[@]}"; do
@@ -1099,17 +1288,17 @@ wait_for_debug_pods_ready() {
 
   # Show final status
   if [ ${#failed_pods[@]} -gt 0 ]; then
-    echo "   ⚠️  Ready: ${#ready_pods[@]}, Failed: ${#failed_pods[@]}, Total: ${#DEBUG_POD_NAMES[@]}"
+    format_message "   ⚠️  Ready: ${#ready_pods[@]}, Failed: ${#failed_pods[@]}, Total: ${#DEBUG_POD_NAMES[@]}"
     for failed_pod in "${failed_pods[@]}"; do
-      echo "      ❌ $failed_pod failed to start"
+      format_message "      ❌ $failed_pod failed to start"
     done
   else
-    echo "   ✅ All ${#ready_pods[@]} debug pods are ready"
+    format_message "   ✅ All ${#ready_pods[@]} debug pods are ready"
   fi
   echo ""
 
   if [ ${#ready_pods[@]} -eq 0 ]; then
-    echo "   ❌ Error: No debug pods became ready"
+    format_message "   ❌ Error: No debug pods became ready"
     return 1
   fi
 
@@ -1126,7 +1315,7 @@ create_file_discovery_pods() {
 
   # Create discovery pods for pod targets (if -s is specified)
   if [[ -n "$SELECT_TO_DOWNLOAD_COMMAND" && ${#POD_DEBUG_HOSTNAMES[@]} -gt 0 ]]; then
-    echo "📦 Creating discovery pods for pod targets..."
+    format_message "📦 Creating discovery pods for pod targets..."
 
     local pod_index=0
     for target_pod in "${TARGET_PODS[@]}"; do
@@ -1175,7 +1364,7 @@ create_file_discovery_pods() {
   # Create discovery pods for node targets (if -S is specified)
   if [[ -n "$NODE_SELECT_TO_DOWNLOAD_COMMAND" && ${#NODE_DEBUG_HOSTNAMES[@]} -gt 0 ]]; then
     echo ""
-    echo "🖥️  Creating discovery pods for node targets..."
+    format_message "🖥️  Creating discovery pods for node targets..."
 
     local node_index=0
     for node_name in "${TARGET_NODES[@]}"; do
@@ -1215,12 +1404,12 @@ create_file_discovery_pods() {
   fi
 
   echo ""
-  echo "⏳ Waiting for discovery pods to be ready..."
+  format_message "⏳ Waiting for discovery pods to be ready..."
   if ! wait_for_discovery_pods_ready 2>/dev/null; then
-    echo "❌ Discovery pods failed to become ready" >&2
+    format_message_stderr "❌ Discovery pods failed to become ready"
     return 1
   fi
-  echo "   ✅ All discovery pods are ready"
+  format_message "   ✅ All discovery pods are ready"
 
   return 0
 }
@@ -1234,7 +1423,7 @@ handle_file_downloads() {
   local failed_pods=()
 
   echo ""
-  echo "📥 Downloading files..." >&2
+  format_message_stderr "📥 Downloading files..."
 
   # Create output directory if it doesn't exist
   if ! mkdir -p "$OUTPUT_DIR"; then
@@ -1267,7 +1456,7 @@ handle_file_downloads() {
     # Execute the select command to get list of files
     local files_list
     if ! files_list=$($KUBE_CLI exec "$discovery_pod_name" -n "$debug_ns" -- bash -c "$select_command" 2>/dev/null); then
-      echo "   ❌ Failed to execute select command on pod $discovery_pod_name (node $node_name)" >&2
+      format_message_stderr "   ❌ Failed to execute select command on pod $discovery_pod_name (node $node_name)"
       failed_pods+=("$discovery_pod_name")
       continue
     fi
@@ -1281,10 +1470,10 @@ handle_file_downloads() {
         local output_file="$OUTPUT_DIR/${original_debug_pod_name}_$(basename "$file_path")"
 
         if $KUBE_CLI cp "$debug_ns/$discovery_pod_name:$file_path" "$output_file" 2>/dev/null; then
-          echo "   ✅ $(basename "$file_path")" >&2
+          format_message_stderr "   ✅ $(basename "$file_path")"
           downloaded_files+=("$file_path")
         else
-          echo "   ❌ Failed: $(basename "$file_path") from pod $discovery_pod_name on node $node_name" >&2
+          format_message_stderr "   ❌ Failed: $(basename "$file_path") from pod $discovery_pod_name on node $node_name"
           pod_had_failure=true
         fi
       fi
@@ -1306,15 +1495,15 @@ handle_file_downloads() {
   # Clean up only successful pods, keep failed ones for inspection
   if [[ ${#successful_pods[@]} -gt 0 ]]; then
     echo ""
-    echo "🧹 Cleaning up ${#successful_pods[@]} successful discovery pods..."
+    format_message "🧹 Cleaning up ${#successful_pods[@]} successful discovery pods..."
     $KUBE_CLI delete pods "${successful_pods[@]}" -n "$debug_ns" --ignore-not-found >/dev/null 2>&1
   fi
 
   if [[ ${#failed_pods[@]} -gt 0 ]]; then
     echo ""
-    echo "⚠️  Keeping ${#failed_pods[@]} discovery pods with issues for inspection:"
+    format_message "⚠️  Keeping ${#failed_pods[@]} discovery pods with issues for inspection:"
     for failed_pod in "${failed_pods[@]}"; do
-      echo "   🔍 $failed_pod"
+      format_message "   🔍 $failed_pod"
     done
   fi
 
@@ -1459,6 +1648,321 @@ wait_for_discovery_pods_ready() {
 }
 
 # -------------------------------------------------------------------------------
+# Function: create_kill_switch_monitor_pods
+# -------------------------------------------------------------------------------
+# Description:
+#   Creates monitoring pods that watch storage usage and complete when thresholds are exceeded.
+#   These pods run alongside debug pods and signal when to kill the main debug pods.
+#
+# Parameters:
+#   None (uses global variables)
+#
+# Returns:
+#   0 on success, 1 on failure
+# -------------------------------------------------------------------------------
+create_kill_switch_monitor_pods() {
+  # Skip if no kill switches are configured
+  if [[ -z "$KILL_SWITCH_ABS" && -z "$KILL_SWITCH_REL" ]]; then
+    return 0
+  fi
+
+  local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE}}"
+  local epoch_time=$(date +"%s")
+
+  format_message "🛡️  Creating kill switch monitor pods..."
+
+  for debug_pod in "${DEBUG_POD_NAMES[@]}"; do
+    # Get the node where the debug pod is running
+    local node_name
+    if ! node_name=$($KUBE_CLI get pod "$debug_pod" -n "$debug_ns" -o jsonpath='{.spec.nodeName}' 2>/dev/null); then
+      format_message_stderr "   ⚠️  Warning: Could not get node for debug pod $debug_pod, skipping monitor"
+      continue
+    fi
+
+    # Determine volume path based on pod type (pod vs node debug pod)
+    local volume_path=""
+    if [[ "$debug_pod" == *"node-debug"* ]]; then
+      volume_path="$NODE_VOLUME"
+    else
+      volume_path="$POD_VOLUME"
+    fi
+
+    # Create shorter name: node + hash of original debug pod name
+    local debug_pod_hash
+    if command -v md5sum >/dev/null 2>&1; then
+      debug_pod_hash=$(echo "$debug_pod" | md5sum | cut -c1-8)
+    elif command -v md5 >/dev/null 2>&1; then
+      debug_pod_hash=$(echo "$debug_pod" | md5 | cut -c1-8)
+    else
+      # Fallback to simple hash
+      debug_pod_hash=$(echo "$debug_pod" | cksum | cut -d' ' -f1 | cut -c1-8)
+    fi
+    local monitor_pod_name="ks-${node_name}-${debug_pod_hash}"
+
+    if create_kill_switch_monitor_pod "$debug_pod" "$node_name" "$monitor_pod_name" "$debug_ns" "$volume_path"; then
+      KILL_SWITCH_MONITOR_PODS+=("$monitor_pod_name")
+      format_message "   ✅ Created kill switch monitor: $monitor_pod_name -> $debug_pod (volume: $volume_path)"
+    else
+      format_message "   ❌ Failed to create kill switch monitor for $debug_pod"
+    fi
+  done
+
+  return 0
+}
+
+# -------------------------------------------------------------------------------
+# Function: create_kill_switch_monitor_pod
+# -------------------------------------------------------------------------------
+# Description:
+#   Creates a single kill switch monitor pod that watches storage and completes when threshold exceeded.
+#
+# Parameters:
+#   $1 - Target debug pod name to monitor
+#   $2 - Node name where the debug pod is running
+#   $3 - Monitor pod name
+#   $4 - Namespace
+#   $5 - Volume path to monitor
+#
+# Returns:
+#   0 on success, 1 on failure
+# -------------------------------------------------------------------------------
+create_kill_switch_monitor_pod() {
+  local target_debug_pod="$1"
+  local node_name="$2"
+  local monitor_pod_name="$3"
+  local debug_ns="$4"
+  local volume_path="$5"
+
+  $KUBE_CLI apply -f - 2>/dev/null <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${monitor_pod_name}
+  namespace: ${debug_ns}
+  labels:
+    app: kill-switch-monitor
+    target-pod: ${target_debug_pod}
+spec:
+  restartPolicy: Never
+  hostNetwork: true
+  hostPID: true
+  nodeSelector:
+    kubernetes.io/hostname: ${node_name}
+  containers:
+  - name: monitor
+    image: ubuntu:22.04
+    command: ["/bin/bash", "-c"]
+    args:
+    - |
+$(build_kill_switch_monitor_script "$target_debug_pod" "$volume_path" | sed 's/^/      /')
+    securityContext:
+      privileged: true
+    volumeMounts:
+    - name: host-root
+      mountPath: /host
+      readOnly: true
+  volumes:
+  - name: host-root
+    hostPath:
+      path: /
+      type: Directory
+EOF
+}
+
+# -------------------------------------------------------------------------------
+# Function: build_kill_switch_monitor_script
+# -------------------------------------------------------------------------------
+# Description:
+#   Generates the monitoring script that runs inside kill switch monitor pods.
+#   The script continuously monitors storage and exits with code 0 when threshold is exceeded.
+#
+# Parameters:
+#   $1 - Target debug pod name to monitor
+#   $2 - Volume path to monitor
+#
+# Returns:
+#   Script content to stdout
+# -------------------------------------------------------------------------------
+build_kill_switch_monitor_script() {
+  local target_debug_pod="$1"
+  local volume_path="$2"
+
+  cat <<SCRIPT
+set -e
+echo "=== Kill switch monitor for ${target_debug_pod} ===" >&2
+
+# Function to parse size to bytes (supports OpenShift/k8s standard units)
+parse_size_to_bytes() {
+  local size_str="\$1"
+  local size_num=""
+  local size_unit=""
+
+  if [[ "\$size_str" =~ ^([0-9]+\.?[0-9]*)([A-Za-z]+)\$ ]]; then
+    size_num="\${BASH_REMATCH[1]}"
+    size_unit="\${BASH_REMATCH[2]}"
+  elif [[ "\$size_str" =~ ^([0-9]+\.?[0-9]*)\$ ]]; then
+    size_num="\${BASH_REMATCH[1]}"
+    size_unit="B"
+  else
+    echo ""
+    return 1
+  fi
+
+  local bytes=""
+  case "\$size_unit" in
+    "B"|"b") bytes="\$size_num" ;;
+    "K"|"k") bytes=\$((\${size_num%.*} * 1000)) ;;
+    "Ki"|"KiB"|"ki"|"kib") bytes=\$((\${size_num%.*} * 1024)) ;;
+    "M"|"m") bytes=\$((\${size_num%.*} * 1000000)) ;;
+    "Mi"|"MiB"|"mi"|"mib"|"MB"|"mb") bytes=\$((\${size_num%.*} * 1048576)) ;;
+    "G"|"g") bytes=\$((\${size_num%.*} * 1000000000)) ;;
+    "Gi"|"GiB"|"gi"|"gib"|"GB"|"gb") bytes=\$((\${size_num%.*} * 1073741824)) ;;
+    "T"|"t") bytes=\$((\${size_num%.*} * 1000000000000)) ;;
+    "Ti"|"TiB"|"ti"|"tib"|"TB"|"tb") bytes=\$((\${size_num%.*} * 1099511627776)) ;;
+    *) echo ""; return 1 ;;
+  esac
+
+  echo "\$bytes"
+}
+
+# Install bc for floating point calculations
+apt-get update >/dev/null 2>&1 && apt-get install -y bc >/dev/null 2>&1 || echo "Warning: Could not install bc" >&2
+
+KILL_SWITCH_ABS="${KILL_SWITCH_ABS}"
+KILL_SWITCH_REL="${KILL_SWITCH_REL}"
+CHECK_INTERVAL=10  # Check every 10 seconds
+
+if [[ -n "\$KILL_SWITCH_ABS" ]]; then
+  echo "Monitoring storage with absolute threshold: \$KILL_SWITCH_ABS" >&2
+elif [[ -n "\$KILL_SWITCH_REL" ]]; then
+  echo "Monitoring storage with relative threshold: \$KILL_SWITCH_REL" >&2
+else
+  echo "No kill switch thresholds configured - exiting" >&2
+  exit 1
+fi
+
+VOLUME_PATH="${volume_path}"
+
+while true; do
+  # Get filesystem stats for the specified volume path
+  if df_output=\$(df -B1 "\$VOLUME_PATH" 2>/dev/null); then
+    stats_line=\$(echo "\$df_output" | tail -n 1)
+    used_bytes=\$(echo "\$stats_line" | awk '{print \$3}')
+    available_bytes=\$(echo "\$stats_line" | awk '{print \$4}')
+    total_bytes=\$(echo "\$stats_line" | awk '{print \$2}')
+
+    # Check absolute threshold (available space falls below threshold)
+    if [[ -n "\$KILL_SWITCH_ABS" && -n "\$available_bytes" ]]; then
+      threshold_bytes=\$(parse_size_to_bytes "\$KILL_SWITCH_ABS")
+      if [[ -n "\$threshold_bytes" && "\$available_bytes" -lt "\$threshold_bytes" ]]; then
+        echo "KILL_SWITCH_TRIGGERED: Available space (\$available_bytes bytes) is below absolute threshold (\$KILL_SWITCH_ABS = \$threshold_bytes bytes)" >&2
+        exit 0  # Signal to kill the target pod
+      fi
+    fi
+
+    # Check relative threshold
+    if [[ -n "\$KILL_SWITCH_REL" && -n "\$available_bytes" && -n "\$total_bytes" && "\$total_bytes" -gt 0 ]]; then
+      rel_threshold="\${KILL_SWITCH_REL%\\%}"  # Remove % if present
+      if command -v bc >/dev/null 2>&1; then
+        free_percent=\$(echo "scale=2; (\$available_bytes * 100) / \$total_bytes" | bc 2>/dev/null || echo "")
+        if [[ -n "\$free_percent" && -n "\$rel_threshold" ]]; then
+          should_kill=\$(echo "\$free_percent < \$rel_threshold" | bc -l 2>/dev/null || echo "0")
+          if [[ "\$should_kill" == "1" ]]; then
+            echo "KILL_SWITCH_TRIGGERED: Free space (\${free_percent}%) is below relative threshold (\$KILL_SWITCH_REL)" >&2
+            exit 0  # Signal to kill the target pod
+          fi
+        fi
+      fi
+    fi
+  fi
+
+  sleep "\$CHECK_INTERVAL"
+done
+SCRIPT
+}
+
+# -------------------------------------------------------------------------------
+# Function: monitor_kill_switches
+# -------------------------------------------------------------------------------
+# Description:
+#   Monitors kill switch pods and kills debug pods when monitors complete successfully.
+#   This function runs in the background during the debug session.
+#
+# Parameters:
+#   None (uses global variables)
+#
+# Returns:
+#   None (runs until stopped or all monitors processed)
+# -------------------------------------------------------------------------------
+monitor_kill_switches() {
+  local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE}}"
+  local check_interval=5  # Check every 5 seconds
+  local killed_pods=()
+
+  while true; do
+    for monitor_pod in "${KILL_SWITCH_MONITOR_PODS[@]}"; do
+      # Skip if we already processed this monitor
+      if [[ " ${killed_pods[*]} " == *" $monitor_pod "* ]]; then
+        continue
+      fi
+
+      # Check monitor pod status
+      local pod_status
+      if pod_status=$($KUBE_CLI get pod "$monitor_pod" -n "$debug_ns" -o jsonpath='{.status.phase}' 2>/dev/null); then
+        if [[ "$pod_status" == "Succeeded" ]]; then
+          # Monitor completed - kill switch was triggered
+          local target_pod
+          if target_pod=$($KUBE_CLI get pod "$monitor_pod" -n "$debug_ns" -o jsonpath='{.metadata.labels.target-pod}' 2>/dev/null); then
+            format_message_stderr "🔴 Kill switch triggered by $monitor_pod - terminating debug pod $target_pod"
+            $KUBE_CLI delete pod "$target_pod" -n "$debug_ns" --ignore-not-found >/dev/null 2>&1
+
+            # Also clean up the monitor pod
+            $KUBE_CLI delete pod "$monitor_pod" -n "$debug_ns" --ignore-not-found >/dev/null 2>&1
+          fi
+          killed_pods+=("$monitor_pod")
+        elif [[ "$pod_status" == "Failed" ]]; then
+          format_message_stderr "⚠️  Kill switch monitor $monitor_pod failed - check logs for details"
+          killed_pods+=("$monitor_pod")
+        fi
+      else
+        # Monitor pod doesn't exist anymore
+        killed_pods+=("$monitor_pod")
+      fi
+    done
+
+    # Check if parent process still exists
+    if ! kill -0 $$ 2>/dev/null; then
+      break
+    fi
+
+    # Exit if all monitors are processed
+    if [[ ${#killed_pods[@]} -ge ${#KILL_SWITCH_MONITOR_PODS[@]} ]]; then
+      break
+    fi
+
+    sleep "$check_interval"
+  done
+}
+
+# -------------------------------------------------------------------------------
+# Function: cleanup_kill_switch_monitor_pods
+# -------------------------------------------------------------------------------
+# Description:
+#   Cleans up kill switch monitor pods.
+#
+# Parameters:
+#   None (uses global variables)
+# -------------------------------------------------------------------------------
+cleanup_kill_switch_monitor_pods() {
+  local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE}}"
+
+  if [[ ${#KILL_SWITCH_MONITOR_PODS[@]} -gt 0 ]]; then
+    format_message "🧹 Cleaning up kill switch monitor pods..."
+    $KUBE_CLI delete pods "${KILL_SWITCH_MONITOR_PODS[@]}" -n "${debug_ns}" --ignore-not-found >/dev/null 2>&1
+  fi
+}
+
+# -------------------------------------------------------------------------------
 # Function: main
 # -------------------------------------------------------------------------------
 # Description:
@@ -1495,27 +1999,42 @@ wait_for_discovery_pods_ready() {
 main() {
   # Unified workflow for both pod and node execution
   initialize_variables
-  echo "🔍 Initializing Kubernetes debug session..."
+  format_message "🔍 Initializing Kubernetes debug session..."
   detect_kube_cli
   parse_arguments "$@"
-  
+
   # Show usage if no arguments provided
   if [[ $# -eq 0 ]]; then
     usage
   fi
-  
+
   validate_arguments
+
+  # Setup log file if -o (OUTPUT_DIR) is specified
+  if [[ -n "$OUTPUT_DIR" ]]; then
+    local current_date=$(date '+%Y-%m-%d')
+    local epoch_time=$(date '+%s')
+    KUBE_DUMP_LOG_FILE="${OUTPUT_DIR}/kube-dump-${current_date}_${epoch_time}.log"
+    
+    # Create output directory if it doesn't exist
+    mkdir -p "$OUTPUT_DIR"
+    
+    # Initialize log file
+    echo "=== Kube-dump session started at $(date) ===" > "$KUBE_DUMP_LOG_FILE"
+    echo "Command: $0 $*" >> "$KUBE_DUMP_LOG_FILE"
+    echo "===============================================" >> "$KUBE_DUMP_LOG_FILE"
+  fi
 
   if [[ "$MOCK_MODE" != "true" ]]; then
     validate_all_requirements
   fi
   echo
 
-  echo "📋 PHASE 1: Target Selection & Debug Pod Creation"
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  format_message "📋 PHASE 1: Target Selection & Debug Pod Creation"
+  format_message "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
   if [[ "$EXECUTION_MODE" == "pod" ]]; then
-    echo "🎯 Pod-based execution mode"
+    format_message "🎯 Pod-based execution mode"
     echo ""
     if ! select_target_pods; then
       exit 1
@@ -1525,27 +2044,28 @@ main() {
       exit 1
     fi
 
-    echo "🚀 Creating debug pods for pod targets..."
+    echo ""
+    format_message "🚀 Creating debug pods for pod targets..."
     if ! create_debug_pods_for_targets; then
       exit 1
     fi
   elif [[ "$EXECUTION_MODE" == "node" ]]; then
-    echo "🎯 Node-based execution mode"
+    format_message "🎯 Node-based execution mode"
     echo ""
     if ! select_target_nodes; then
       exit 1
     fi
 
     echo ""
-    echo "🚀 Creating debug pods for node targets..."
+    format_message "🚀 Creating debug pods for node targets..."
     if ! create_node_debug_pods; then
       exit 1
     fi
   elif [[ "$EXECUTION_MODE" == "mixed" ]]; then
-    echo "🎯 Mixed execution mode (pods + nodes)"
+    format_message "🎯 Mixed execution mode (pods + nodes)"
     echo ""
 
-    echo "📦 Handling pod targets..."
+    format_message "📦 Handling pod targets..."
     echo ""
     if ! select_target_pods; then
       exit 1
@@ -1556,18 +2076,19 @@ main() {
     fi
 
     echo ""
-    echo "🖥️  Handling node targets..."
+    format_message "🖥️  Handling node targets..."
     if ! select_target_nodes; then
       exit 1
     fi
 
-    echo "🚀 Creating debug pods for pod targets..."
+    echo ""
+    format_message "🚀 Creating debug pods for pod targets..."
     if ! create_debug_pods_for_targets; then
       exit 1
     fi
 
     echo ""
-    echo "🚀 Creating debug pods for node targets..."
+    format_message "🚀 Creating debug pods for node targets..."
     if ! create_node_debug_pods; then
       exit 1
     fi
@@ -1578,17 +2099,27 @@ main() {
     exit 1
   fi
 
-  echo "✅ PHASE 2: Debug Pods Running - Monitor Output"
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo "📊 Debug pods are running with commands in their entrypoints."
+  # Create kill switch monitor pods if thresholds are configured
+  if [[ -n "$KILL_SWITCH_ABS" || -n "$KILL_SWITCH_REL" ]]; then
+    create_kill_switch_monitor_pods
+
+    # Start monitoring kill switches in background
+    monitor_kill_switches &
+    KILL_SWITCH_MONITOR_PID=$!
+  fi
+
+  echo ""
+  format_message "✅ PHASE 2: Debug Pods Running - Monitor Output"
+  format_message "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  format_message "📊 Debug pods are running with commands in their entrypoints."
   echo ""
   echo ""
-  echo "🔍 Monitor command output with these commands:"
+  format_message "🔍 Monitor command output with these commands:"
   for debug_pod in "${DEBUG_POD_NAMES[@]}"; do
     echo "   $KUBE_CLI logs ${debug_pod} -n ${DEBUG_NAMESPACE:-${NAMESPACE}} -f"
   done
   echo ""
-  echo "🗑️  Or delete all debug pods manually:"
+  format_message "🗑️  Or delete all debug pods manually:"
   echo "   $KUBE_CLI delete pods ${DEBUG_POD_NAMES[*]} -n ${DEBUG_NAMESPACE:-${NAMESPACE}}"
   echo ""
   echo ""
@@ -1596,27 +2127,30 @@ main() {
   # Skip cleanup if NO_CLEANUP is set
   if [[ "$NO_CLEANUP" != "true" ]]; then
     # Wait for user input before cleanup
-    echo "⏸️  PHASE 3: Waiting for User Input"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    read -p "🔄 Press Enter to cleanup all debug pods, or Ctrl+C to leave them running..."
+    format_message "⏸️  PHASE 3: Waiting for User Input"
+    format_message "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    format_message "🔄 Press Enter to cleanup all debug pods, or Ctrl+C to leave them running..."
+    echo ""
+    read
     echo
 
     # Cleanup debug pods FIRST
-    echo "🧹 PHASE 4: Cleaning up Debug Pods"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "🗑️  Deleting ${#DEBUG_POD_NAMES[@]} debug pods..."
+    format_message "🧹 PHASE 4: Cleaning up Debug Pods"
+    format_message "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    format_message "🗑️  Deleting ${#DEBUG_POD_NAMES[@]} debug pods..."
     cleanup_debug_pods
-    echo "   ✅ All debug pods cleaned up"
+    cleanup_kill_switch_monitor_pods
+    format_message "   ✅ All debug pods cleaned up"
     echo
 
     # Handle file downloads if requested (AFTER debug pods are cleaned up)
     if [[ -n "$OUTPUT_DIR" && (-n "$SELECT_TO_DOWNLOAD_COMMAND" || -n "$NODE_SELECT_TO_DOWNLOAD_COMMAND") ]]; then
-      echo "📥 PHASE 5: File Discovery & Download"
-      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      format_message "📥 PHASE 5: File Discovery & Download"
+      format_message "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-      echo "🚀 Creating discovery pods for file download..."
+      format_message "🚀 Creating discovery pods for file download..."
       if ! create_file_discovery_pods; then
-        echo "❌ Discovery pod creation failed"
+        format_message "❌ Discovery pod creation failed"
         exit 1
       fi
 
@@ -1625,21 +2159,21 @@ main() {
     fi
 
     echo ""
-    echo "🎉 All operations completed!"
+    format_message "🎉 All operations completed!"
   else
-    echo "⚠️  PHASE 3: No-Cleanup Mode"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "🔧 Skipping cleanup (--no-cleanup specified)"
+    format_message "⚠️  PHASE 3: No-Cleanup Mode"
+    format_message "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    format_message "🔧 Skipping cleanup (--no-cleanup specified)"
     echo
 
     # Handle file downloads even with --no-cleanup (but don't cleanup debug pods)
     if [[ -n "$OUTPUT_DIR" && (-n "$SELECT_TO_DOWNLOAD_COMMAND" || -n "$NODE_SELECT_TO_DOWNLOAD_COMMAND") ]]; then
-      echo "📥 PHASE 4: File Discovery & Download"
-      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      format_message "📥 PHASE 4: File Discovery & Download"
+      format_message "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-      echo "🚀 Creating discovery pods for file download..."
+      format_message "🚀 Creating discovery pods for file download..."
       if ! create_file_discovery_pods; then
-        echo "❌ Discovery pod creation failed"
+        format_message "❌ Discovery pod creation failed"
         return 1
       fi
 
@@ -1648,9 +2182,19 @@ main() {
     fi
 
     echo ""
-    echo "🔧 Debug pods are still running. Use kubectl logs to check their output."
+    format_message "🔧 Debug pods are still running. Use kubectl logs to check their output."
+    if [[ ${#KILL_SWITCH_MONITOR_PODS[@]} -gt 0 ]]; then
+      format_message "🛡️  Kill switch monitor pods are also running and will auto-terminate debug pods if thresholds are exceeded."
+    fi
     echo ""
-    echo "🎉 Session completed!"
+    format_message "🎉 Session completed!"
+  fi
+  
+  # Close log file if it was created
+  if [[ -n "$KUBE_DUMP_LOG_FILE" ]]; then
+    echo "===============================================" >> "$KUBE_DUMP_LOG_FILE"
+    echo "=== Kube-dump session ended at $(date) ===" >> "$KUBE_DUMP_LOG_FILE"
+    format_message "📋 Session log saved to: $KUBE_DUMP_LOG_FILE"
   fi
 }
 
