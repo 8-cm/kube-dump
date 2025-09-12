@@ -147,7 +147,7 @@ jobs:
         fi
     
     - name: Sanitize image name for artifact
-      id: sanitize
+      id: sanitize-image
       run: |
         IMAGE="${{ matrix.image }}"
         SAFE_IMAGE=$(echo "$IMAGE" | sed 's/[^a-zA-Z0-9]/-/g')
@@ -156,7 +156,7 @@ jobs:
     - name: Upload scan artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: image-scan-${{ steps.sanitize.outputs.safe_image }}
+        name: image-scan-${{ steps.sanitize-image.outputs.safe_image }}
         path: |
           results-*.env
           details-*.md
@@ -225,7 +225,7 @@ jobs:
         fi
     
     - name: Sanitize image name for artifact
-      id: sanitize
+      id: sanitize-sbom
       run: |
         IMAGE="${{ matrix.image }}"
         SAFE_IMAGE=$(echo "$IMAGE" | sed 's/[^a-zA-Z0-9]/-/g')
@@ -234,7 +234,7 @@ jobs:
     - name: Upload SBOM artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: sbom-scan-${{ steps.sanitize.outputs.safe_image }}
+        name: sbom-scan-${{ steps.sanitize-sbom.outputs.safe_image }}
         path: |
           sbom-*.json
           trivy-sbom-*.json
