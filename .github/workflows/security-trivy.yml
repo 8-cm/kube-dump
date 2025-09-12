@@ -332,6 +332,15 @@ jobs:
           echo "| Image | Scan Error | - | - | - | - | - | Trivy scan failed for this image |" > details-$SAFE_IMAGE.md
         fi
     
+    # ---------------------------------------------------------------------------
+    # Step: Sanitize Image Name for Artifact Upload
+    # ---------------------------------------------------------------------------
+    # Description:
+    #   Creates a duplicate sanitization step specifically for artifact upload
+    #   operations. This ensures consistent image name sanitization across
+    #   different steps in the workflow, converting container image names to
+    #   filesystem-safe formats for GitHub Actions artifact storage.
+    # ---------------------------------------------------------------------------
     - name: Sanitize image name for artifact
       id: sanitize-image
       run: |
@@ -339,6 +348,25 @@ jobs:
         SAFE_IMAGE=$(echo "$IMAGE" | sed 's/[^a-zA-Z0-9]/-/g')
         echo "safe_image=$SAFE_IMAGE" >> $GITHUB_OUTPUT
     
+    # ---------------------------------------------------------------------------
+    # Step: Upload Vulnerability Scan Artifacts
+    # ---------------------------------------------------------------------------
+    # Description:
+    #   Preserves all vulnerability scan results as GitHub Actions artifacts
+    #   for downstream processing, debugging, and compliance documentation.
+    #   Uploads structured environment files, detailed markdown reports,
+    #   and raw JSON scan data for comprehensive result preservation.
+    #
+    # Artifact Contents:
+    #   - results-*.env: Structured vulnerability counts by severity
+    #   - details-*.md: Human-readable vulnerability tables
+    #   - trivy-image-*.json: Raw Trivy scan results for further analysis
+    #
+    # Usage:
+    #   - Report generation job consumes these artifacts
+    #   - Debugging and troubleshooting scan issues
+    #   - Compliance and audit trail documentation
+    # ---------------------------------------------------------------------------
     - name: Upload scan artifacts
       uses: actions/upload-artifact@v4
       with:
@@ -394,9 +422,38 @@ jobs:
       fail-fast: false
     
     steps:
+    # ---------------------------------------------------------------------------
+    # Step: Checkout Repository
+    # ---------------------------------------------------------------------------
+    # Description:
+    #   Retrieves repository source code to provide workspace context for
+    #   SBOM generation and vulnerability scanning operations.
+    # ---------------------------------------------------------------------------
     - name: Checkout code
       uses: actions/checkout@v4
     
+    # ---------------------------------------------------------------------------
+    # Step: Generate SBOM and Perform Vulnerability Analysis
+    # ---------------------------------------------------------------------------
+    # Description:
+    #   Creates Software Bill of Materials (SBOM) for container images and
+    #   performs vulnerability analysis on the generated SBOM data. This
+    #   comprehensive process provides supply chain security analysis by
+    #   documenting all software components and their vulnerabilities.
+    #
+    # SBOM Generation Process:
+    #   1. Pulls container image to ensure local availability
+    #   2. Generates SBOM in SPDX-JSON format using Trivy
+    #   3. Validates SBOM file creation and reports file statistics
+    #   4. Executes vulnerability scan against generated SBOM
+    #   5. Processes scan results with severity classification and counting
+    #
+    # Error Handling:
+    #   - Image pull failures result in graceful error reporting
+    #   - SBOM generation failures create structured error environment files
+    #   - Missing SBOM files trigger appropriate error handling
+    #   - Vulnerability scan failures generate structured error reports
+    # ---------------------------------------------------------------------------
     - name: Generate and scan SBOM
       run: |
         IMAGE="${{ matrix.image }}"
@@ -459,6 +516,14 @@ jobs:
           echo "TOTAL=$TOTAL" >> sbom-results-$SAFE_IMAGE.env
         fi
     
+    # ---------------------------------------------------------------------------
+    # Step: Sanitize Image Name for SBOM Artifacts
+    # ---------------------------------------------------------------------------
+    # Description:
+    #   Converts container image names to filesystem-safe format for SBOM
+    #   artifact storage. This step ensures GitHub Actions artifact naming
+    #   compatibility by replacing special characters with safe alternatives.
+    # ---------------------------------------------------------------------------
     - name: Sanitize image name for artifact
       id: sanitize-sbom
       run: |
@@ -466,6 +531,25 @@ jobs:
         SAFE_IMAGE=$(echo "$IMAGE" | sed 's/[^a-zA-Z0-9]/-/g')
         echo "safe_image=$SAFE_IMAGE" >> $GITHUB_OUTPUT
     
+    # ---------------------------------------------------------------------------
+    # Step: Upload SBOM Analysis Artifacts
+    # ---------------------------------------------------------------------------
+    # Description:
+    #   Preserves all SBOM generation and vulnerability analysis results as
+    #   GitHub Actions artifacts for compliance, auditing, and further analysis.
+    #   Stores both the generated SBOM files and vulnerability scan results.
+    #
+    # Artifact Contents:
+    #   - sbom-*.json: Generated SBOM files in SPDX-JSON format
+    #   - trivy-sbom-*.json: Vulnerability scan results from SBOM analysis
+    #   - sbom-results-*.env: Structured vulnerability counts and statistics
+    #
+    # Usage:
+    #   - Compliance and regulatory requirements for SBOM documentation
+    #   - Supply chain security audit trails
+    #   - Integration with security tools and vulnerability databases
+    #   - Report generation and aggregation processes
+    # ---------------------------------------------------------------------------
     - name: Upload SBOM artifacts
       uses: actions/upload-artifact@v4
       with:
@@ -516,9 +600,45 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
+    # ---------------------------------------------------------------------------
+    # Step: Checkout Repository
+    # ---------------------------------------------------------------------------
+    # Description:
+    #   Retrieves complete repository source code for comprehensive filesystem
+    #   and configuration security analysis. Provides access to all project
+    #   files for security scanning and misconfiguration detection.
+    # ---------------------------------------------------------------------------
     - name: Checkout code
       uses: actions/checkout@v4
     
+    # ---------------------------------------------------------------------------
+    # Step: Execute Trivy Filesystem and Configuration Security Scan
+    # ---------------------------------------------------------------------------
+    # Description:
+    #   Performs dual-mode security scanning of the repository filesystem and
+    #   configuration files using Trivy. Identifies security misconfigurations,
+    #   Infrastructure as Code issues, and local file vulnerabilities.
+    #
+    # Scanning Operations:
+    #   1. Configuration Scan: Analyzes configuration files for security issues
+    #   2. Filesystem Scan: Scans local files for known vulnerabilities
+    #   3. Results Processing: Counts and categorizes issues by severity
+    #   4. Report Generation: Creates detailed markdown tables for findings
+    #
+    # Scan Coverage:
+    #   - GitHub Actions workflow security configurations
+    #   - Shell script security best practices and potential issues
+    #   - Infrastructure as Code misconfigurations
+    #   - File permission and security setting issues
+    #   - Embedded secrets or credential exposure
+    #
+    # Output Files:
+    #   - trivy-config.json: Configuration security scan results
+    #   - trivy-fs.json: Filesystem vulnerability scan results  
+    #   - fs-results.env: Structured issue counts and statistics
+    #   - config-details.md: Detailed configuration issue table
+    #   - fs-details.md: Detailed filesystem vulnerability table
+    # ---------------------------------------------------------------------------
     - name: Run Trivy filesystem scan
       run: |
         echo "Running Trivy filesystem security scan..."
@@ -601,6 +721,24 @@ jobs:
           ' trivy-fs.json > fs-details.md 2>/dev/null || echo "| FS | No vulnerabilities found | - | - | - | - | - | - |" > fs-details.md
         fi
     
+    # ---------------------------------------------------------------------------
+    # Step: Upload Filesystem Security Scan Artifacts
+    # ---------------------------------------------------------------------------
+    # Description:
+    #   Preserves all filesystem and configuration security scan results as
+    #   GitHub Actions artifacts for downstream processing and compliance
+    #   documentation. Stores scan results, detailed reports, and statistics.
+    #
+    # Artifact Contents:
+    #   - trivy-*.json: Raw scan results in JSON format
+    #   - fs-results.env: Structured issue counts and statistics
+    #   - *-details.md: Detailed markdown reports for configuration and filesystem issues
+    #
+    # Usage:
+    #   - Report generation job consumes these artifacts for comprehensive reporting
+    #   - Security audit trails and compliance documentation
+    #   - Debugging and analysis of repository security posture
+    # ---------------------------------------------------------------------------
     - name: Upload filesystem scan results
       uses: actions/upload-artifact@v4
       with:
@@ -661,14 +799,62 @@ jobs:
     if: always() && needs.extract-images.outputs.image-count > 0
     
     steps:
+    # ---------------------------------------------------------------------------
+    # Step: Checkout Repository
+    # ---------------------------------------------------------------------------
+    # Description:
+    #   Retrieves repository source code to provide access to README.md for
+    #   documentation updates and Git operations for committing report results.
+    # ---------------------------------------------------------------------------
     - name: Checkout code
       uses: actions/checkout@v4
     
+    # ---------------------------------------------------------------------------
+    # Step: Download All Security Scan Artifacts
+    # ---------------------------------------------------------------------------  
+    # Description:
+    #   Retrieves all security scan artifacts generated by previous jobs for
+    #   comprehensive report aggregation. Downloads results from image scans,
+    #   SBOM analysis, and filesystem security scans into organized structure.
+    #
+    # Downloaded Artifacts:
+    #   - image-scan-*: Container image vulnerability scan results
+    #   - sbom-scan-*: SBOM generation and vulnerability analysis results
+    #   - filesystem-scan: Repository filesystem and configuration scan results
+    #
+    # Organization:
+    #   - All artifacts downloaded to scan-results/ directory
+    #   - Maintains original artifact structure for easy processing
+    #   - Enables cross-scan correlation and comprehensive reporting
+    # ---------------------------------------------------------------------------
     - name: Download all scan results
       uses: actions/download-artifact@v4
       with:
         path: scan-results
     
+    # ---------------------------------------------------------------------------
+    # Step: Generate Comprehensive Security Report
+    # ---------------------------------------------------------------------------
+    # Description:
+    #   Aggregates and processes all security scan results into comprehensive
+    #   reports and documentation. Creates summary tables, detailed vulnerability
+    #   listings, and overall security status assessments for integration into
+    #   repository documentation.
+    #
+    # Report Generation Process:
+    #   1. Processes image vulnerability scan results with severity counting
+    #   2. Aggregates SBOM analysis findings and supply chain security status  
+    #   3. Incorporates filesystem and configuration security scan results
+    #   4. Creates comprehensive vulnerability tables sorted by CVSS score
+    #   5. Determines overall security status based on severity distribution
+    #   6. Sets GitHub Actions environment variables for downstream steps
+    #
+    # Output Products:
+    #   - image-summary.md: Container image vulnerability summary table
+    #   - sbom-summary.md: SBOM analysis results summary table
+    #   - detailed-vulns.md: Comprehensive vulnerability table with all findings
+    #   - GitHub Actions environment variables with aggregated statistics
+    # ---------------------------------------------------------------------------
     - name: Generate comprehensive security report
       run: |
         echo "Generating comprehensive security report..."
@@ -781,6 +967,34 @@ jobs:
         echo "TOTAL_FS_VULNS=$TOTAL_FS_VULNS" >> $GITHUB_ENV
         echo "TIMESTAMP=$TIMESTAMP" >> $GITHUB_ENV
     
+    # ---------------------------------------------------------------------------
+    # Step: Update Repository Documentation with Security Results
+    # ---------------------------------------------------------------------------
+    # Description:
+    #   Updates README.md with comprehensive security analysis results, maintaining
+    #   a dedicated section for security status reporting. Preserves existing
+    #   documentation while replacing the security results section with current
+    #   findings from all security scans.
+    #
+    # Documentation Integration Process:
+    #   1. Creates backup of existing README.md for safety and rollback
+    #   2. Preserves all content before the security results section  
+    #   3. Replaces Trivy security section with current comprehensive analysis
+    #   4. Preserves all content after the security results section
+    #   5. Includes overall security status with visual indicators
+    #   6. Integrates summary tables for each scan type (image, SBOM, filesystem)
+    #   7. Adds detailed vulnerability tables sorted by CVSS score when issues exist
+    #   8. Provides remediation guidance and next steps for security improvements
+    #
+    # Section Content Structure:
+    #   - Overall security status with clear visual indicators and metrics
+    #   - Container image vulnerability breakdown by severity and count
+    #   - SBOM analysis results with supply chain security status
+    #   - Filesystem security findings and configuration issue summary
+    #   - Detailed vulnerability tables with CVSS score prioritization
+    #   - Remediation steps and security improvement recommendations
+    #   - Scanning coverage information and compliance documentation
+    # ---------------------------------------------------------------------------
     - name: Update README with security results
       run: |
         echo "Updating README.md with Trivy security results..."
@@ -870,6 +1084,30 @@ jobs:
         
         echo "Security section updated in README.md"
     
+    # ---------------------------------------------------------------------------
+    # Step: Commit and Push Security Documentation Updates
+    # ---------------------------------------------------------------------------
+    # Description:
+    #   Commits updated README.md with comprehensive security analysis results
+    #   to the repository. Creates structured commit messages documenting the
+    #   security scan results and only commits when changes are detected to
+    #   prevent unnecessary commit history pollution.
+    #
+    # Commit Process:
+    #   1. Configures Git with GitHub Actions service user credentials
+    #   2. Checks for actual changes in README.md to prevent empty commits
+    #   3. Stages README.md file for commit when meaningful changes exist
+    #   4. Creates comprehensive commit message with security analysis summary
+    #   5. Pushes changes to current branch using GitHub Actions context
+    #
+    # Commit Message Structure:
+    #   - Primary message: "ci: Update Trivy security analysis results"
+    #   - Overall security status and severity distribution
+    #   - Critical, high, medium, and low severity counts
+    #   - Configuration issues and filesystem vulnerability counts  
+    #   - Analysis timestamp for tracking and audit trails
+    #   - Commit SHA reference for cross-referencing and traceability
+    # ---------------------------------------------------------------------------
     - name: Commit and push changes
       run: |
         git config --local user.email "action@github.com"
@@ -894,6 +1132,38 @@ jobs:
           echo "✅ README.md updated with security scan results"
         fi
     
+    # ---------------------------------------------------------------------------
+    # Step: Create Pull Request Security Analysis Comment  
+    # ---------------------------------------------------------------------------
+    # Description:
+    #   Generates comprehensive pull request comments with security analysis
+    #   results for code review integration. This step only executes during
+    #   pull request events, providing developers and reviewers with immediate
+    #   feedback on security implications of code changes.
+    #
+    # Comment Generation Process:
+    #   1. Retrieves comprehensive security analysis results from environment variables
+    #   2. Constructs structured comment with overall security status and metrics
+    #   3. Includes severity distribution and vulnerability counts by scan type
+    #   4. Provides success messaging for clean security analysis results
+    #   5. Adds detailed remediation guidance and next steps for security issues
+    #   6. Posts formatted comment to pull request using GitHub REST API
+    #
+    # Comment Content Structure:
+    #   - Header with comprehensive Trivy security analysis results title
+    #   - Overall security status with clear visual indicators
+    #   - Detailed breakdown: Critical, High, Medium, Low severity counts
+    #   - Commit reference for precise traceability within pull request context
+    #   - Success celebration messaging for clean security analysis
+    #   - Detailed remediation guidance with actionable next steps when issues exist
+    #   - Links to security documentation and analysis tools
+    #
+    # Integration Features:
+    #   - Conditional execution limited to pull request events only
+    #   - Automated comment creation using GitHub Actions script action
+    #   - Professional formatting optimized for pull request interface readability
+    #   - Actionable guidance for developers to address security findings
+    # ---------------------------------------------------------------------------
     - name: Create PR comment (if applicable)
       if: github.event_name == 'pull_request'
       uses: actions/github-script@v7
