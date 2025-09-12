@@ -12,8 +12,8 @@ on:
       - 'kube-dump.sh'
       - '.github/workflows/security-trivy.yml'
   schedule:
-    # Run daily at 2 AM UTC to catch new vulnerabilities
-    - cron: '0 2 * * *'
+    # Run every 14 days at 2 AM UTC to catch new vulnerabilities
+    - cron: '0 2 */14 * *'
   workflow_dispatch:
 
 permissions:
