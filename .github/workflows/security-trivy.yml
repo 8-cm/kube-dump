@@ -81,10 +81,19 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
     
+    - name: Sanitize image name for artifact
+      id: sanitize
+      run: |
+        IMAGE="${{ matrix.image }}"
+        # Replace all non-alphanumeric characters with dashes
+        SAFE_IMAGE=$(echo "$IMAGE" | sed 's/[^a-zA-Z0-9]/-/g')
+        echo "Sanitized image name: $SAFE_IMAGE"
+        echo "safe_image=$SAFE_IMAGE" >> $GITHUB_OUTPUT
+    
     - name: Run Trivy scan for image
       run: |
         IMAGE="${{ matrix.image }}"
-        SAFE_IMAGE=$(echo "$IMAGE" | sed 's/[^a-zA-Z0-9]/-/g')
+        SAFE_IMAGE="${{ steps.sanitize.outputs.safe_image }}"
         echo "Scanning image: $IMAGE"
         echo "Safe filename: trivy-image-$SAFE_IMAGE.json"
         
@@ -101,7 +110,7 @@ jobs:
     - name: Parse Trivy results for image
       run: |
         IMAGE="${{ matrix.image }}"
-        SAFE_IMAGE=$(echo "$IMAGE" | sed 's/[^a-zA-Z0-9]/-/g')
+        SAFE_IMAGE="${{ steps.sanitize.outputs.safe_image }}"
         
         echo "Processing results for image: $IMAGE"
         
@@ -137,10 +146,10 @@ jobs:
           echo "| Scan Error | - | - | - | - | Trivy scan failed for this image |" > details-$SAFE_IMAGE.md
         fi
     
-    - name: Upload scan results
+    - name: Upload scan artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: image-scan-${{ matrix.image }}
+        name: image-scan-${{ steps.sanitize.outputs.safe_image }}
         path: |
           results-*.env
           details-*.md
@@ -160,10 +169,19 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
     
+    - name: Sanitize image name for artifact
+      id: sanitize
+      run: |
+        IMAGE="${{ matrix.image }}"
+        # Replace all non-alphanumeric characters with dashes
+        SAFE_IMAGE=$(echo "$IMAGE" | sed 's/[^a-zA-Z0-9]/-/g')
+        echo "Sanitized image name: $SAFE_IMAGE"
+        echo "safe_image=$SAFE_IMAGE" >> $GITHUB_OUTPUT
+    
     - name: Generate and scan SBOM
       run: |
         IMAGE="${{ matrix.image }}"
-        SAFE_IMAGE=$(echo "$IMAGE" | sed 's/[^a-zA-Z0-9]/-/g')
+        SAFE_IMAGE="${{ steps.sanitize.outputs.safe_image }}"
         
         echo "Generating SBOM for image: $IMAGE"
         
@@ -199,10 +217,10 @@ jobs:
           echo "TOTAL=$TOTAL" >> sbom-results-$SAFE_IMAGE.env
         fi
     
-    - name: Upload SBOM results
+    - name: Upload SBOM artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: sbom-scan-${{ matrix.image }}
+        name: sbom-scan-${{ steps.sanitize.outputs.safe_image }}
         path: |
           sbom-*.json
           trivy-sbom-*.json
