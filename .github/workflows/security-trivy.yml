@@ -182,9 +182,19 @@ jobs:
         SAFE_IMAGE=$(echo "$IMAGE" | sed 's/[^a-zA-Z0-9]/-/g')
         
         echo "Generating SBOM for image: $IMAGE"
+        echo "Safe image name: $SAFE_IMAGE"
         
-        # Generate SBOM
+        # Pull image first to ensure it's available
+        docker pull "$IMAGE" || {
+          echo "Failed to pull image $IMAGE"
+          echo "IMAGE=$IMAGE" > sbom-results-$SAFE_IMAGE.env
+          echo "ERROR=Failed to pull image" >> sbom-results-$SAFE_IMAGE.env
+          exit 0
+        }
+        
+        # Generate SBOM in SPDX format
         docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+          -v $(pwd):/workspace -w /workspace \
           aquasec/trivy image --format spdx-json --output sbom-$SAFE_IMAGE.json $IMAGE || {
           echo "SBOM generation failed for $IMAGE"
           echo "IMAGE=$IMAGE" > sbom-results-$SAFE_IMAGE.env
@@ -192,12 +202,23 @@ jobs:
           exit 0
         }
         
-        # Scan SBOM for vulnerabilities
-        docker run --rm -v $(pwd):/workspace \
-          aquasec/trivy sbom --format json --output trivy-sbom-$SAFE_IMAGE.json /workspace/sbom-$SAFE_IMAGE.json || {
-          echo "SBOM scan failed for $IMAGE"
+        # Verify SBOM file was created
+        if [[ ! -f "sbom-$SAFE_IMAGE.json" ]]; then
+          echo "SBOM file not created: sbom-$SAFE_IMAGE.json"
           echo "IMAGE=$IMAGE" > sbom-results-$SAFE_IMAGE.env
-          echo "ERROR=SBOM scan failed" >> sbom-results-$SAFE_IMAGE.env
+          echo "ERROR=SBOM file not created" >> sbom-results-$SAFE_IMAGE.env
+          exit 0
+        fi
+        
+        echo "SBOM file created successfully: sbom-$SAFE_IMAGE.json"
+        echo "SBOM file size: $(wc -c < sbom-$SAFE_IMAGE.json) bytes"
+        
+        # Scan SBOM for vulnerabilities
+        docker run --rm -v $(pwd):/workspace -w /workspace \
+          aquasec/trivy sbom --format json --output trivy-sbom-$SAFE_IMAGE.json sbom-$SAFE_IMAGE.json || {
+          echo "SBOM vulnerability scan failed for $IMAGE"
+          echo "IMAGE=$IMAGE" > sbom-results-$SAFE_IMAGE.env
+          echo "ERROR=SBOM vulnerability scan failed" >> sbom-results-$SAFE_IMAGE.env
           exit 0
         }
         
