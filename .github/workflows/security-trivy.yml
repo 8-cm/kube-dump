@@ -88,9 +88,32 @@ jobs:
       image-count: ${{ steps.extract.outputs.count }}
     
     steps:
+    # ---------------------------------------------------------------------------
+    # Step: Checkout Repository
+    # ---------------------------------------------------------------------------
+    # Description: 
+    #   Retrieves the complete repository source code including kube-dump.sh
+    #   script for analysis. This step provides access to all project files
+    #   needed for container image discovery and security scanning.
+    # ---------------------------------------------------------------------------
     - name: Checkout code
       uses: actions/checkout@v4
     
+    # ---------------------------------------------------------------------------
+    # Step: Extract Container Images from Script
+    # ---------------------------------------------------------------------------
+    # Description:
+    #   Analyzes kube-dump.sh to discover all container images used throughout
+    #   the script. Extracts both the primary DEBUG_IMAGE and any additional
+    #   hardcoded image references, creating a unique list for security scanning.
+    #
+    # Processing Logic:
+    #   1. Extracts DEBUG_IMAGE default value using grep and string manipulation
+    #   2. Searches for additional hardcoded images using regex patterns
+    #   3. Combines and deduplicates all discovered images
+    #   4. Validates image format and converts to JSON array for matrix usage
+    #   5. Sets GitHub Actions outputs for downstream job consumption
+    # ---------------------------------------------------------------------------
     - name: Extract container images from script
       id: extract
       run: |
@@ -119,6 +142,19 @@ jobs:
         # Save for later use
         cp unique-images.txt /tmp/container-images.txt
 
+    # ---------------------------------------------------------------------------
+    # Step: Upload Container Image List Artifact
+    # ---------------------------------------------------------------------------
+    # Description:
+    #   Preserves the discovered container image list as a GitHub Actions artifact
+    #   for debugging, auditing, and potential manual review. This artifact
+    #   provides visibility into which images were discovered and will be scanned.
+    #
+    # Artifact Details:
+    #   - Name: container-images
+    #   - Content: Text file with one container image per line
+    #   - Usage: Debugging, compliance documentation, manual verification
+    # ---------------------------------------------------------------------------
     - name: Upload image list artifact
       uses: actions/upload-artifact@v4
       with:
@@ -169,9 +205,29 @@ jobs:
       fail-fast: false
     
     steps:
+    # ---------------------------------------------------------------------------
+    # Step: Checkout Repository 
+    # ---------------------------------------------------------------------------
+    # Description:
+    #   Retrieves repository source code to provide workspace context for
+    #   vulnerability scanning operations and result processing.
+    # ---------------------------------------------------------------------------
     - name: Checkout code
       uses: actions/checkout@v4
     
+    # ---------------------------------------------------------------------------
+    # Step: Sanitize Image Name for Artifact Storage
+    # ---------------------------------------------------------------------------
+    # Description:
+    #   Converts container image names to filesystem-safe format for artifact
+    #   storage. Replaces special characters (/, :, etc.) with dashes to ensure
+    #   compatibility with GitHub Actions artifact naming requirements.
+    #
+    # Processing Logic:
+    #   - Input: nicolaka/netshoot:latest
+    #   - Output: nicolaka-netshoot-latest
+    #   - Sets safe_image output for use in subsequent steps
+    # ---------------------------------------------------------------------------
     - name: Sanitize image name for artifact
       id: sanitize
       run: |
@@ -181,6 +237,20 @@ jobs:
         echo "Sanitized image name: $SAFE_IMAGE"
         echo "safe_image=$SAFE_IMAGE" >> $GITHUB_OUTPUT
     
+    # ---------------------------------------------------------------------------
+    # Step: Execute Trivy Vulnerability Scan
+    # ---------------------------------------------------------------------------
+    # Description:
+    #   Performs comprehensive vulnerability scanning on the container image using
+    #   Aqua Security Trivy scanner. Produces JSON-formatted results containing
+    #   detailed vulnerability information with CVSS scoring and severity classification.
+    #
+    # Scan Parameters:
+    #   - Format: JSON for programmatic processing
+    #   - Output: Sanitized filename for artifact compatibility
+    #   - Coverage: All vulnerability databases and security advisories
+    #   - Error Handling: Graceful failure with structured error reporting
+    # ---------------------------------------------------------------------------
     - name: Run Trivy scan for image
       run: |
         IMAGE="${{ matrix.image }}"
@@ -198,6 +268,25 @@ jobs:
           exit 0
         }
     
+    # ---------------------------------------------------------------------------
+    # Step: Parse and Process Vulnerability Results
+    # ---------------------------------------------------------------------------
+    # Description:
+    #   Processes the Trivy scan JSON results to extract vulnerability statistics
+    #   and generate human-readable reports. Creates structured environment files
+    #   for report aggregation and detailed markdown tables sorted by CVSS score.
+    #
+    # Processing Operations:
+    #   1. Counts vulnerabilities by severity level using jq queries
+    #   2. Generates structured environment file with vulnerability metrics
+    #   3. Creates detailed vulnerability table with CVSS score sorting
+    #   4. Handles missing CVSS data gracefully with fallback values
+    #   5. Truncates long descriptions for table readability
+    #
+    # Output Files:
+    #   - results-{safe_image}.env: Structured vulnerability counts
+    #   - details-{safe_image}.md: Detailed vulnerability table in markdown
+    # ---------------------------------------------------------------------------
     - name: Parse Trivy results for image
       run: |
         IMAGE="${{ matrix.image }}"

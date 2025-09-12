@@ -1,3 +1,37 @@
+# ===============================================================================
+# GitHub Actions Workflow: Shellcheck Analysis 
+# ===============================================================================
+# Description:
+#   Automated shell script quality analysis workflow using ShellCheck static
+#   analysis tool. This workflow ensures adherence to shell scripting best
+#   practices, identifies potential bugs, and maintains code quality standards
+#   for the kube-dump.sh script. Results are automatically integrated into
+#   repository documentation with detailed findings and remediation guidance.
+#
+# Workflow Components:
+#   - Static analysis of kube-dump.sh using ShellCheck tool
+#   - Issue categorization by severity (error, warning, info, note, style)
+#   - Automated README.md updates with current code quality status
+#   - Pull request comments with analysis summaries for code review
+#   - Historical tracking of code quality improvements over time
+#
+# Triggered Events:
+#   - Push to master/main branches (when shell script or workflow changes)
+#   - Pull requests to master/main branches (when shell script or workflow changes)
+#   - Scheduled execution every 14 days at 1 AM UTC for regular quality checks
+#   - Manual workflow dispatch for on-demand code quality analysis
+#
+# Required Permissions:
+#   - contents: write (for README.md updates and repository access)
+#   - pull-requests: write (for PR comment creation and code review integration)
+#
+# Output Deliverables:
+#   - Updated README.md with current shellcheck status and issue details
+#   - Pull request comments summarizing code quality findings
+#   - Git commits documenting code quality analysis results
+#   - Structured markdown tables with detailed issue breakdowns
+# ===============================================================================
+
 name: Shellcheck Analysis
 
 on:
@@ -21,21 +55,99 @@ permissions:
   pull-requests: write
 
 jobs:
+  # ===============================================================================
+  # Job: shellcheck
+  # ===============================================================================
+  # Description:
+  #   Performs comprehensive static analysis of the kube-dump.sh shell script
+  #   using ShellCheck tool. This job identifies coding issues, potential bugs,
+  #   and deviations from shell scripting best practices. Results are processed
+  #   into structured reports and automatically integrated into repository
+  #   documentation for continuous code quality monitoring.
+  #
+  # Analysis Coverage:
+  #   - Syntax errors and potential runtime issues
+  #   - Variable usage and quoting problems  
+  #   - Command substitution and pipeline issues
+  #   - Portability concerns across different shells
+  #   - Security best practices and potential vulnerabilities
+  #
+  # Processing Pipeline:
+  #   1. Install ShellCheck static analysis tool
+  #   2. Execute analysis on kube-dump.sh script
+  #   3. Process results into structured markdown tables
+  #   4. Update README.md with current quality status
+  #   5. Commit changes and create PR comments when applicable
+  #
+  # Output Integration:
+  #   - README.md section with quality status and detailed findings
+  #   - Pull request comments with code review guidance
+  #   - Git commits tracking quality analysis over time
+  # ===============================================================================
   shellcheck:
     name: Shellcheck Analysis
     runs-on: ubuntu-latest
     
     steps:
+    # ---------------------------------------------------------------------------
+    # Step: Checkout Repository with Token Access
+    # ---------------------------------------------------------------------------
+    # Description:
+    #   Retrieves the complete repository source code with GitHub token access
+    #   for subsequent README.md updates and commit operations. The token
+    #   enables the workflow to write back analysis results to the repository.
+    # ---------------------------------------------------------------------------
     - name: Checkout code
       uses: actions/checkout@v4
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
     
+    # ---------------------------------------------------------------------------
+    # Step: Install ShellCheck Static Analysis Tool
+    # ---------------------------------------------------------------------------
+    # Description:
+    #   Installs ShellCheck, a comprehensive static analysis tool for shell
+    #   scripts. Updates package manager and installs the latest version
+    #   available in Ubuntu repositories for consistent analysis capabilities.
+    #
+    # Installation Process:
+    #   - Updates apt package index for latest package information
+    #   - Installs shellcheck package with automatic dependency resolution
+    #   - Provides access to shellcheck command for script analysis
+    # ---------------------------------------------------------------------------
     - name: Install shellcheck
       run: |
         sudo apt-get update
         sudo apt-get install -y shellcheck
     
+    # ---------------------------------------------------------------------------
+    # Step: Execute ShellCheck Analysis and Process Results
+    # ---------------------------------------------------------------------------
+    # Description:
+    #   Runs ShellCheck analysis on kube-dump.sh script and processes the results
+    #   into structured formats for documentation integration. Handles both
+    #   successful analysis (no issues) and failure cases (issues found) with
+    #   appropriate result formatting and GitHub Actions environment variable setup.
+    #
+    # Processing Logic:
+    #   1. Creates results directory for output file organization
+    #   2. Executes shellcheck with GCC-style output format for parsing
+    #   3. Processes success case: sets PASSED status and empty issue count
+    #   4. Processes failure case: counts issues and creates markdown table
+    #   5. Parses shellcheck output to extract file, line, column, severity, code, and message
+    #   6. Converts severity levels to emoji-enhanced descriptions
+    #   7. Generates structured markdown table with all issue details
+    #   8. Sets GitHub Actions environment variables for downstream steps
+    #
+    # Output Files:
+    #   - results/shellcheck-raw.txt: Raw shellcheck output in GCC format
+    #   - results/shellcheck-table.md: Processed markdown table of issues
+    #
+    # Environment Variables:
+    #   - SHELLCHECK_STATUS: Overall analysis status (PASSED or ISSUES FOUND)
+    #   - ISSUE_COUNT: Number of issues discovered during analysis
+    #   - TIMESTAMP: Analysis execution timestamp in UTC format
+    # ---------------------------------------------------------------------------
     - name: Run shellcheck and generate results
       run: |
         echo "Running shellcheck analysis..."
@@ -99,6 +211,31 @@ jobs:
         # Get timestamp
         echo "TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_ENV
     
+    # ---------------------------------------------------------------------------
+    # Step: Update Repository Documentation with Analysis Results
+    # ---------------------------------------------------------------------------
+    # Description:
+    #   Updates the README.md file with current ShellCheck analysis results,
+    #   maintaining a dedicated section for code quality status. This step
+    #   preserves existing documentation while replacing the shellcheck results
+    #   section with current findings, ensuring up-to-date quality reporting.
+    #
+    # Documentation Integration Process:
+    #   1. Creates backup of existing README.md for safety
+    #   2. Preserves content before shellcheck results section
+    #   3. Replaces shellcheck section with current analysis results
+    #   4. Preserves content after shellcheck results section
+    #   5. Includes status, issue count, timestamp, and commit information
+    #   6. Adds detailed issue table when problems are found
+    #   7. Provides remediation guidance and next steps for developers
+    #
+    # Section Content:
+    #   - Analysis status with visual indicators (✅ PASSED or ⚠️ ISSUES FOUND)
+    #   - Issue count and timestamp for tracking
+    #   - Commit reference for traceability
+    #   - Detailed issue table with file, line, column, severity, code, and message
+    #   - Remediation guidance with links to ShellCheck wiki documentation
+    # ---------------------------------------------------------------------------
     - name: Update README with shellcheck results
       run: |
         echo "Updating README.md with shellcheck results..."
@@ -153,6 +290,28 @@ jobs:
         echo "Changes made:"
         git diff README.md.bak README.md || echo "No git diff available"
     
+    # ---------------------------------------------------------------------------
+    # Step: Commit and Push Documentation Updates
+    # ---------------------------------------------------------------------------  
+    # Description:
+    #   Commits the updated README.md file to the repository with structured
+    #   commit messages documenting the shellcheck analysis results. This step
+    #   only commits when changes are detected, preventing unnecessary commits
+    #   when analysis results remain unchanged.
+    #
+    # Commit Process:
+    #   1. Configures Git with GitHub Actions user credentials
+    #   2. Checks for changes in README.md to prevent empty commits
+    #   3. Stages README.md file for commit when changes exist
+    #   4. Creates structured commit message with analysis summary
+    #   5. Pushes changes to the current branch using GitHub Actions context
+    #
+    # Commit Message Structure:
+    #   - Primary message: "ci: Update shellcheck analysis results"
+    #   - Analysis status and issue count
+    #   - Timestamp for tracking analysis execution
+    #   - Commit SHA for traceability and cross-referencing
+    # ---------------------------------------------------------------------------
     - name: Commit and push changes
       run: |
         git config --local user.email "action@github.com"
@@ -174,6 +333,35 @@ jobs:
           echo "✅ README.md updated with shellcheck results"
         fi
     
+    # ---------------------------------------------------------------------------
+    # Step: Create Pull Request Code Review Comment
+    # ---------------------------------------------------------------------------
+    # Description:
+    #   Generates automated pull request comments with shellcheck analysis results
+    #   for code review integration. This step only executes during pull request
+    #   events, providing developers with immediate feedback on code quality
+    #   changes within the PR context.
+    #
+    # Comment Generation Process:
+    #   1. Retrieves analysis results from GitHub Actions environment variables
+    #   2. Constructs structured comment with analysis summary and status
+    #   3. Includes detailed issue table when problems are found
+    #   4. Provides remediation guidance with links to ShellCheck documentation
+    #   5. Posts comment to the pull request using GitHub REST API
+    #
+    # Comment Content Structure:
+    #   - Header with shellcheck analysis results title
+    #   - Status summary with visual indicators and issue count
+    #   - Commit reference for traceability within the PR
+    #   - Success message for clean analysis results
+    #   - Detailed issue table and remediation steps for problematic results
+    #   - Error handling for file system operations during comment generation
+    #
+    # Integration Features:
+    #   - Conditional execution only for pull request events
+    #   - Automatic comment posting using GitHub Actions script action
+    #   - Structured formatting for optimal readability in PR interface
+    # ---------------------------------------------------------------------------
     - name: Create PR comment (if applicable)
       if: github.event_name == 'pull_request'
       uses: actions/github-script@v7
