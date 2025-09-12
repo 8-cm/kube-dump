@@ -224,8 +224,7 @@ detect_kube_cli() {
   if command -v oc >/dev/null 2>&1; then
     KUBE_CLI="oc"
     echo "Using OpenShift CLI (oc)" >&2
-  elif command -v $KUBE_CLI >/dev/null 2>&1; then
-    KUBE_CLI="$KUBE_CLI"
+  elif command -v "$KUBE_CLI" >/dev/null 2>&1; then
     echo "Using Kubernetes CLI ($KUBE_CLI)" >&2
   else
     echo "Error: Neither 'oc' nor '$KUBE_CLI' found in PATH" >&2
@@ -1165,10 +1164,14 @@ prepare_target_pods() {
   format_message "🔧 Preparing target pods for debugging..."
 
   for pod_info in "${POD_NAMES[@]}"; do
-    local pod_name=$(echo "$pod_info" | cut -d':' -f1)
-    local containers=$(echo "$pod_info" | cut -d':' -f2)
-    local node_name=$(echo "$pod_info" | cut -d':' -f3)
-    local pod_namespace=$(echo "$pod_info" | cut -d':' -f4)
+    local pod_name
+    local containers
+    local node_name
+    local pod_namespace
+    pod_name=$(echo "$pod_info" | cut -d':' -f1)
+    containers=$(echo "$pod_info" | cut -d':' -f2)
+    node_name=$(echo "$pod_info" | cut -d':' -f3)
+    pod_namespace=$(echo "$pod_info" | cut -d':' -f4)
 
     # Check if pod is running
     local pod_phase
@@ -1184,7 +1187,8 @@ prepare_target_pods() {
 
     # Handle container selection for PID discovery
     # All containers share the same network namespace, so we just need any running container
-    local target_container=$(echo "$containers" | awk '{print $1}')
+    local target_container
+    target_container=$(echo "$containers" | awk '{print $1}')
     # Add to target pods array
     TARGET_PODS+=("${pod_name}:${target_container}:${node_name}:${pod_namespace}")
     format_message "   ✅ ${pod_name} (${pod_namespace}) -> ${target_container} on ${node_name}"
@@ -1282,12 +1286,14 @@ select_target_nodes() {
     # Get nodes from selected pods
     local pod_nodes=()
     for target_pod in "${TARGET_PODS[@]}"; do
-      local node_name=$(echo "$target_pod" | cut -d':' -f3)
+      local node_name
+      node_name=$(echo "$target_pod" | cut -d':' -f3)
       pod_nodes+=("$node_name")
     done
 
     # Remove duplicates and find nodes not already selected by -L
-    local unique_pod_nodes=($(printf '%s\n' "${pod_nodes[@]}" | sort -u))
+    local unique_pod_nodes=()
+    mapfile -t unique_pod_nodes < <(printf '%s\n' "${pod_nodes[@]}" | sort -u)
     local additional_nodes=()
 
     for pod_node in "${unique_pod_nodes[@]}"; do
@@ -1375,8 +1381,10 @@ find_pods_by_label() {
 
   format_message "✅ Found ${#POD_NAMES[@]} pods:"
   for pod_info in "${POD_NAMES[@]}"; do
-    local pod_name=$(echo "$pod_info" | cut -d':' -f1)
-    local pod_namespace=$(echo "$pod_info" | cut -d':' -f4)
+    local pod_name
+    local pod_namespace
+    pod_name=$(echo "$pod_info" | cut -d':' -f1)
+    pod_namespace=$(echo "$pod_info" | cut -d':' -f4)
     format_message "   📦 $pod_name (namespace: $pod_namespace)"
   done
   echo ""
@@ -1501,13 +1509,17 @@ create_debug_pods_for_targets() {
   fi
 
   local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE}}"
-  local epoch_time=$(date +"%s")
+  local epoch_time
+  epoch_time=$(date +"%s")
 
 
   for target_pod in "${TARGET_PODS[@]}"; do
-    local pod_name=$(echo "$target_pod" | cut -d':' -f1)
-    local container_name=$(echo "$target_pod" | cut -d':' -f2)
-    local node_name=$(echo "$target_pod" | cut -d':' -f3)
+    local pod_name
+    local container_name
+    local node_name
+    pod_name=$(echo "$target_pod" | cut -d':' -f1)
+    container_name=$(echo "$target_pod" | cut -d':' -f2)
+    node_name=$(echo "$target_pod" | cut -d':' -f3)
 
     # Generate unique debug pod name with hash for shorter names
     local pod_hash
@@ -1530,8 +1542,7 @@ create_debug_pods_for_targets() {
 
     format_message "   📦 Creating debug pod for ${pod_name}:${container_name} on ${node_name}"
 
-    create_single_debug_pod "$pod_name" "$container_name" "$node_name" "$debug_pod_name" "$debug_ns"
-    if [[ $? -eq 0 ]]; then
+    if create_single_debug_pod "$pod_name" "$container_name" "$node_name" "$debug_pod_name" "$debug_ns"; then
       DEBUG_POD_NAMES+=("$debug_pod_name")
       # Store debug pod hostname for file download phase
       POD_DEBUG_HOSTNAMES+=("$debug_pod_name")
@@ -1601,7 +1612,8 @@ create_node_debug_pods() {
       # Fallback to simple hash
       node_hash=$(echo "$node_name" | cksum | cut -d' ' -f1 | cut -c1-6)
     fi
-    local debug_pod_name="node-${node_hash}-$(date +%s)"
+    local debug_pod_name
+    debug_pod_name="node-${node_hash}-$(date +%s)"
     local counter=1
 
     # Check if pod name exists and increment until unique
@@ -2123,7 +2135,7 @@ generate_exec_command() {
   if [[ -n "$CUSTOM_COMMAND" ]]; then
     echo "DECODED_CMD=\$(echo '${CAPTURE_COMMAND}' | base64 -d)"
     echo "FINAL_CMD=\$(echo \"\$DECODED_CMD\" | sed 's/${PLACEHOLDER_CHAR}/${debug_pod_hostname}/g')"
-    echo 'exec nsenter -n -t $PID /bin/bash -c "$FINAL_CMD ; tail -f /dev/null"'
+    echo "exec nsenter -n -t \$PID /bin/bash -c \"\$FINAL_CMD ; tail -f /dev/null\""
   else
     local final_capture_cmd="${CAPTURE_COMMAND//${PLACEHOLDER_CHAR}/$debug_pod_hostname}"
     echo "exec nsenter -n -t \$PID ${final_capture_cmd}"
@@ -2182,7 +2194,7 @@ wait_for_debug_pods_ready() {
   local wait_time=0
 
   # Show initial status
-  printf "$(format_message "🔄 Checking %d debug pods\n")" "${#DEBUG_POD_NAMES[@]}"
+  printf "%s\n" "$(format_message "🔄 Checking ${#DEBUG_POD_NAMES[@]} debug pods")"
 
   while [ $wait_time -lt $max_wait ] && [ ${#ready_pods[@]} -lt ${#DEBUG_POD_NAMES[@]} ]; do
     for debug_pod in "${DEBUG_POD_NAMES[@]}"; do
@@ -2286,7 +2298,8 @@ wait_for_debug_pods_ready() {
 # -------------------------------------------------------------------------------
 create_file_discovery_pods() {
   local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE}}"
-  local epoch_time=$(date +"%s")
+  local epoch_time
+  epoch_time=$(date +"%s")
   echo ""
 
   # Create discovery pods for pod targets (if -s is specified)
@@ -2295,10 +2308,14 @@ create_file_discovery_pods() {
 
     local pod_index=0
     for target_pod in "${TARGET_PODS[@]}"; do
-      local pod_name=$(echo "$target_pod" | cut -d':' -f1)
-      local container_name=$(echo "$target_pod" | cut -d':' -f2)
-      local node_name=$(echo "$target_pod" | cut -d':' -f3)
-      local original_debug_hostname="${POD_DEBUG_HOSTNAMES[$pod_index]}"
+      local pod_name
+      local container_name
+      local node_name
+      local original_debug_hostname
+      pod_name=$(echo "$target_pod" | cut -d':' -f1)
+      container_name=$(echo "$target_pod" | cut -d':' -f2)
+      node_name=$(echo "$target_pod" | cut -d':' -f3)
+      original_debug_hostname="${POD_DEBUG_HOSTNAMES[$pod_index]}"
 
       # Generate unique discovery pod name (shortened to avoid k8s length limits)
       local pod_hash
@@ -2408,11 +2425,15 @@ handle_file_downloads() {
   fi
 
   for pod_info in "${DISCOVERY_POD_INFO[@]}"; do
-    local discovery_pod_name=$(echo "$pod_info" | cut -d':' -f1)
-    local node_name=$(echo "$pod_info" | cut -d':' -f2)
-    local pod_type=$(echo "$pod_info" | cut -d':' -f3)
-    local original_debug_pod_name=$(echo "$pod_info" | cut -d':' -f4)
+    local discovery_pod_name
+    local node_name
+    local pod_type
+    local original_debug_pod_name
     local pod_had_failure=false
+    discovery_pod_name=$(echo "$pod_info" | cut -d':' -f1)
+    node_name=$(echo "$pod_info" | cut -d':' -f2)
+    pod_type=$(echo "$pod_info" | cut -d':' -f3)
+    original_debug_pod_name=$(echo "$pod_info" | cut -d':' -f4)
 
     # Determine which select command to use based on pod type
     local select_command=""
@@ -2453,7 +2474,8 @@ handle_file_downloads() {
     local downloaded_files=()
     while IFS= read -r file_path; do
       if [[ -n "$file_path" ]]; then
-        local output_file="$OUTPUT_DIR/${original_debug_pod_name}_$(basename "$file_path")"
+        local output_file
+        output_file="$OUTPUT_DIR/${original_debug_pod_name}_$(basename "$file_path")"
 
         # Try download with up to 3 attempts (handles transient network/pod issues)
         local download_success=false
@@ -2757,7 +2779,8 @@ create_kill_switch_monitor_pods() {
   fi
 
   local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE}}"
-  local epoch_time=$(date +"%s")
+  local epoch_time
+  epoch_time=$(date +"%s")
 
   format_message "🛡️  Creating kill switch monitor pods..."
 
@@ -2995,6 +3018,61 @@ while true; do
     available_bytes=\$(echo "\$stats_line" | awk '{print \$4}')
     total_bytes=\$(echo "\$stats_line" | awk '{print \$2}')
 
+    # Convert bytes to human-readable format for logging
+    if [[ -n "\$total_bytes" && "\$total_bytes" -gt 0 ]]; then
+      # Helper function to format bc output with leading zero
+      format_bc_result() {
+        local result=\$1
+        local unit=\$2
+        if [[ "\$result" =~ ^\\. ]]; then
+          echo "0\${result}\${unit}"
+        else
+          echo "\${result}\${unit}"
+        fi
+      }
+      
+      if [[ "\$total_bytes" -ge 1099511627776 ]]; then  # >= 1TB
+        total_raw=\$(echo "scale=2; \$total_bytes / 1099511627776" | bc 2>/dev/null || echo "0")
+        used_raw=\$(echo "scale=2; \$used_bytes / 1099511627776" | bc 2>/dev/null || echo "0")
+        avail_raw=\$(echo "scale=2; \$available_bytes / 1099511627776" | bc 2>/dev/null || echo "0")
+        total_human=\$(format_bc_result "\$total_raw" "TB")
+        used_human=\$(format_bc_result "\$used_raw" "TB")
+        avail_human=\$(format_bc_result "\$avail_raw" "TB")
+      elif [[ "\$total_bytes" -ge 1073741824 ]]; then  # >= 1GB
+        total_raw=\$(echo "scale=2; \$total_bytes / 1073741824" | bc 2>/dev/null || echo "0")
+        used_raw=\$(echo "scale=2; \$used_bytes / 1073741824" | bc 2>/dev/null || echo "0")
+        avail_raw=\$(echo "scale=2; \$available_bytes / 1073741824" | bc 2>/dev/null || echo "0")
+        total_human=\$(format_bc_result "\$total_raw" "GB")
+        used_human=\$(format_bc_result "\$used_raw" "GB")
+        avail_human=\$(format_bc_result "\$avail_raw" "GB")
+      elif [[ "\$total_bytes" -ge 1048576 ]]; then  # >= 1MB
+        total_raw=\$(echo "scale=2; \$total_bytes / 1048576" | bc 2>/dev/null || echo "0")
+        used_raw=\$(echo "scale=2; \$used_bytes / 1048576" | bc 2>/dev/null || echo "0")
+        avail_raw=\$(echo "scale=2; \$available_bytes / 1048576" | bc 2>/dev/null || echo "0")
+        total_human=\$(format_bc_result "\$total_raw" "MB")
+        used_human=\$(format_bc_result "\$used_raw" "MB")
+        avail_human=\$(format_bc_result "\$avail_raw" "MB")
+      else
+        total_human="\${total_bytes}B"
+        used_human="\${used_bytes}B"
+        avail_human="\${available_bytes}B"
+      fi
+      
+      # Calculate usage percentage
+      if command -v bc >/dev/null 2>&1; then
+        usage_percent_raw=\$(echo "scale=1; (\$used_bytes * 100) / \$total_bytes" | bc 2>/dev/null || echo "0.0")
+        if [[ "\$usage_percent_raw" =~ ^\\. ]]; then
+          usage_percent="0\${usage_percent_raw}"
+        else
+          usage_percent="\$usage_percent_raw"
+        fi
+      else
+        usage_percent="0.0"
+      fi
+      
+      echo "\$(date '+%Y-%m-%d %H:%M:%S') - Volume \$VOLUME_PATH: \${used_human} used of \${total_human} (\${usage_percent}% used, \${avail_human} available)" >&2
+    fi
+
     # Check absolute threshold (available space falls below threshold)
     if [[ -n "\$KILL_SWITCH_ABS" && -n "\$available_bytes" ]]; then
       threshold_bytes=\$(parse_size_to_bytes "\$KILL_SWITCH_ABS")
@@ -3174,8 +3252,10 @@ main() {
 
   # Setup log file if -o (OUTPUT_DIR) is specified
   if [[ -n "$OUTPUT_DIR" ]]; then
-    local current_date=$(date '+%Y-%m-%d')
-    local epoch_time=$(date '+%s')
+    local current_date
+    local epoch_time
+    current_date=$(date '+%Y-%m-%d')
+    epoch_time=$(date '+%s')
     KUBE_DUMP_LOG_FILE="${OUTPUT_DIR}/kube-dump-${current_date}_${epoch_time}.log"
 
     # Create output directory if it doesn't exist
@@ -3293,7 +3373,7 @@ main() {
     format_message "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     format_message "🔄 Press Enter to cleanup all debug pods, or Ctrl+C to leave them running..."
     echo ""
-    read
+    read -r
     echo
 
     # Stop background monitoring if running
