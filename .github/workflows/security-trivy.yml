@@ -1,3 +1,39 @@
+# ===============================================================================
+# GitHub Actions Workflow: Security Scanning with Trivy
+# ===============================================================================
+# Description:
+#   Comprehensive security vulnerability scanning workflow using Aqua Security Trivy.
+#   This workflow performs multi-dimensional security analysis including container image
+#   vulnerability scanning, Software Bill of Materials (SBOM) analysis, filesystem
+#   security scanning, and configuration misconfiguration detection. Results are
+#   automatically integrated into README.md documentation with detailed reports.
+#
+# Workflow Components:
+#   - Container image vulnerability scanning with CVSS score prioritization
+#   - SBOM generation and supply chain security analysis  
+#   - Filesystem security scanning for local vulnerabilities
+#   - Configuration security scanning for misconfigurations
+#   - Automated README.md updates with comprehensive security status
+#   - Pull request comments with security findings summary
+#
+# Triggered Events:
+#   - Push to master/main branches (when security-related files change)
+#   - Pull requests to master/main branches (when security-related files change)  
+#   - Scheduled execution every 14 days at 2 AM UTC
+#   - Manual workflow dispatch for on-demand security analysis
+#
+# Required Permissions:
+#   - contents: write (for README.md updates and repository access)
+#   - security-events: write (for security event reporting)
+#   - pull-requests: write (for PR comment creation)
+#
+# Output Artifacts:
+#   - Vulnerability scan results in JSON format
+#   - SBOM files in SPDX-JSON format
+#   - Security analysis summaries and detailed reports
+#   - Updated README.md with current security status
+# ===============================================================================
+
 name: Security Scanning with Trivy
 
 on:
@@ -22,6 +58,28 @@ permissions:
   pull-requests: write
 
 jobs:
+  # ===============================================================================
+  # Job: extract-images
+  # ===============================================================================
+  # Description:
+  #   Analyzes kube-dump.sh script to discover all container images referenced
+  #   within the codebase. This job serves as the foundation for subsequent
+  #   security scanning by identifying all images that need vulnerability analysis.
+  #   It extracts both explicitly defined images and any hardcoded image references.
+  #
+  # Outputs:
+  #   - images: JSON array of unique container images found in the script
+  #   - image-count: Total number of unique images discovered
+  #
+  # Artifacts:
+  #   - container-images: Text file listing all discovered container images
+  #
+  # Processing Logic:
+  #   1. Extracts DEBUG_IMAGE default value (primary image used throughout script)
+  #   2. Searches for additional hardcoded image references using regex patterns
+  #   3. Deduplicates and validates image references
+  #   4. Converts to JSON array format for matrix strategy consumption
+  # ===============================================================================
   extract-images:
     name: Extract Container Images
     runs-on: ubuntu-latest
@@ -67,6 +125,39 @@ jobs:
         name: container-images
         path: unique-images.txt
 
+  # ===============================================================================
+  # Job: image-vulnerability-scan 
+  # ===============================================================================
+  # Description:
+  #   Performs comprehensive vulnerability scanning on each discovered container image
+  #   using Trivy security scanner. This job runs in parallel for all images using
+  #   GitHub Actions matrix strategy, providing detailed vulnerability analysis with
+  #   CVSS scoring and severity classification.
+  #
+  # Dependencies:
+  #   - extract-images: Requires discovered images from image extraction job
+  #   - Conditional execution: Only runs if images were found (image-count > 0)
+  #
+  # Matrix Strategy:
+  #   - Parallel execution: One job instance per discovered container image
+  #   - fail-fast: false (continues scanning other images if one fails)
+  #   - Image sanitization: Converts image names to filesystem-safe artifacts
+  #
+  # Scan Coverage:
+  #   - Operating system vulnerabilities in base images
+  #   - Application vulnerabilities in installed packages  
+  #   - Library vulnerabilities with version-specific analysis
+  #   - CVSS v3/v2 scoring for risk prioritization
+  #
+  # Output Processing:
+  #   - Vulnerability counts by severity (CRITICAL, HIGH, MEDIUM, LOW, UNKNOWN)
+  #   - Detailed vulnerability tables sorted by CVSS score
+  #   - Structured environment files for report generation
+  #   - JSON scan results for further analysis
+  #
+  # Artifacts:
+  #   - image-scan-{sanitized-name}: Contains results, details, and raw JSON data
+  # ===============================================================================
   image-vulnerability-scan:
     name: Image Vulnerability Scanning
     runs-on: ubuntu-latest
@@ -168,6 +259,41 @@ jobs:
           details-*.md
           trivy-image-*.json
 
+  # ===============================================================================
+  # Job: sbom-vulnerability-scan
+  # ===============================================================================  
+  # Description:
+  #   Generates Software Bill of Materials (SBOM) for each container image and performs
+  #   vulnerability analysis on the SBOM data. This provides supply chain security
+  #   analysis by documenting all software components and their known vulnerabilities.
+  #   SBOM analysis helps identify vulnerabilities in dependencies and components
+  #   that might not be detected through standard image scanning.
+  #
+  # Dependencies:
+  #   - extract-images: Requires discovered images from image extraction job
+  #   - Conditional execution: Only runs if images were found (image-count > 0)
+  #
+  # SBOM Generation Process:
+  #   1. Pulls container image to ensure availability
+  #   2. Generates SBOM in SPDX-JSON format using Trivy
+  #   3. Validates SBOM file creation and reports file size
+  #   4. Performs vulnerability scan against generated SBOM
+  #   5. Processes scan results with severity classification
+  #
+  # Supply Chain Analysis:
+  #   - Documents all software components and their versions
+  #   - Identifies vulnerabilities in transitive dependencies
+  #   - Provides component-level vulnerability mapping
+  #   - Enables compliance with supply chain security requirements
+  #
+  # Output Format:
+  #   - SPDX-JSON SBOM files for compliance and auditing
+  #   - Vulnerability scan results specific to SBOM components
+  #   - Structured data for integration with security tools
+  #
+  # Artifacts:
+  #   - sbom-scan-{sanitized-name}: Contains SBOM files and vulnerability results
+  # ===============================================================================
   sbom-vulnerability-scan:
     name: SBOM Vulnerability Analysis
     runs-on: ubuntu-latest
@@ -260,6 +386,42 @@ jobs:
           trivy-sbom-*.json
           sbom-results-*.env
 
+  # ===============================================================================
+  # Job: filesystem-security-scan
+  # ===============================================================================
+  # Description:
+  #   Performs comprehensive security scanning of the local repository filesystem
+  #   and configuration files. This job identifies security misconfigurations,
+  #   secrets exposure, and local vulnerabilities in project files. It complements
+  #   container image scanning by analyzing the repository's own security posture.
+  #
+  # Scan Types:
+  #   - Configuration security: Identifies misconfigurations in various file types
+  #   - Filesystem vulnerabilities: Scans for known vulnerabilities in local files  
+  #   - Secret detection: Identifies accidentally committed secrets or keys
+  #   - Infrastructure as Code: Analyzes Kubernetes manifests, Dockerfiles, etc.
+  #
+  # Coverage Areas:
+  #   - GitHub Actions workflow security configurations
+  #   - Shell script security best practices  
+  #   - Configuration file permissions and settings
+  #   - Embedded credentials or sensitive data
+  #   - Infrastructure configuration security
+  #
+  # Analysis Categories:
+  #   - Security misconfigurations by severity (CRITICAL, HIGH, MEDIUM, LOW)
+  #   - Filesystem vulnerabilities with CVSS scoring when available
+  #   - Configuration compliance against security benchmarks
+  #   - Best practice violations and recommendations
+  #
+  # Output Processing:  
+  #   - Detailed reports for critical and high-severity issues
+  #   - Remediation guidance for identified misconfigurations
+  #   - Structured data for integration with security dashboards
+  #
+  # Artifacts:
+  #   - filesystem-scan: Contains configuration and filesystem scan results
+  # ===============================================================================
   filesystem-security-scan:
     name: Filesystem Security Scan
     runs-on: ubuntu-latest
@@ -359,6 +521,50 @@ jobs:
           fs-results.env
           *-details.md
 
+  # ===============================================================================
+  # Job: generate-security-report
+  # ===============================================================================
+  # Description:
+  #   Aggregates and consolidates security scan results from all previous jobs into
+  #   a comprehensive security report. This job serves as the central reporting hub,
+  #   combining vulnerability data from container images, SBOM analysis, and filesystem
+  #   scans into unified documentation. It automatically updates the repository's
+  #   README.md with current security status and detailed findings.
+  #
+  # Dependencies:
+  #   - extract-images: Requires image discovery results
+  #   - image-vulnerability-scan: Consumes container vulnerability scan results
+  #   - sbom-vulnerability-scan: Integrates SBOM analysis findings
+  #   - filesystem-security-scan: Incorporates filesystem security results
+  #   - Conditional execution: Runs on job completion (always()) with image validation
+  #
+  # Report Generation Process:
+  #   1. Downloads and aggregates all scan artifacts from previous jobs
+  #   2. Processes vulnerability data with CVSS score-based prioritization
+  #   3. Generates comprehensive summary tables by scan type and severity
+  #   4. Creates detailed vulnerability tables sorted by risk score
+  #   5. Updates README.md with current security status and findings
+  #   6. Commits changes to repository with automated security updates
+  #
+  # Report Components:
+  #   - Executive summary with overall security status and key metrics
+  #   - Container image vulnerability breakdown by severity and CVSS score
+  #   - SBOM analysis results showing supply chain security status
+  #   - Filesystem security findings and configuration issue summary
+  #   - Detailed vulnerability tables with remediation information
+  #   - Historical tracking through automated README.md updates
+  #
+  # Integration Features:
+  #   - Automated README.md updates with security status badges
+  #   - Pull request commenting with security analysis summaries  
+  #   - Git commit integration with structured security status messages
+  #   - Artifact preservation for compliance and audit requirements
+  #
+  # Output Deliverables:
+  #   - Updated README.md with comprehensive security documentation
+  #   - Git commits documenting security scan results and timestamp
+  #   - Pull request comments summarizing security findings for code review
+  # ===============================================================================
   generate-security-report:
     name: Generate Security Report
     runs-on: ubuntu-latest
