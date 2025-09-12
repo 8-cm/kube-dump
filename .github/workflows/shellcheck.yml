@@ -11,6 +11,9 @@ on:
     paths:
       - 'kube-dump.sh'
       - '.github/workflows/shellcheck.yml'
+  schedule:
+    # Run every 14 days at 1 AM UTC for code quality checks
+    - cron: '0 1 */14 * *'
   workflow_dispatch:
 
 permissions:
