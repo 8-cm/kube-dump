@@ -138,12 +138,12 @@ jobs:
             [.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL" or .Severity == "HIGH")] |
             sort_by(.Severity) | reverse |
             .[] |
-            "| `" + (.VulnerabilityID // "N/A") + "` | " + (.Severity // "UNKNOWN") + " | `" + (.PkgName // "N/A") + "` | `" + (.InstalledVersion // "N/A") + "` | `" + (.FixedVersion // "Not Available") + "` | " + ((.Description // .Title // "No description available") | gsub("\n"; " ") | .[0:200]) + (if ((.Description // .Title // "") | length) > 200 then "..." else "" end) + " |"
-          ' "trivy-image-$SAFE_IMAGE.json" > details-$SAFE_IMAGE.md 2>/dev/null || echo "| No critical/high vulnerabilities | - | - | - | - | - |" > details-$SAFE_IMAGE.md
+            "| Image | `" + (.VulnerabilityID // "N/A") + "` | " + (.Severity // "UNKNOWN") + " | `" + (.PkgName // "N/A") + "` | `" + (.InstalledVersion // "N/A") + "` | `" + (.FixedVersion // "Not Available") + "` | " + ((.Description // .Title // "No description available") | gsub("\n"; " ") | .[0:200]) + (if ((.Description // .Title // "") | length) > 200 then "..." else "" end) + " |"
+          ' "trivy-image-$SAFE_IMAGE.json" > details-$SAFE_IMAGE.md 2>/dev/null || echo "| Image | No critical/high vulnerabilities | - | - | - | - | - |" > details-$SAFE_IMAGE.md
         else
           echo "IMAGE=$IMAGE" >> results-$SAFE_IMAGE.env
           echo "ERROR=Scan failed" >> results-$SAFE_IMAGE.env
-          echo "| Scan Error | - | - | - | - | Trivy scan failed for this image |" > details-$SAFE_IMAGE.md
+          echo "| Image | Scan Error | - | - | - | - | Trivy scan failed for this image |" > details-$SAFE_IMAGE.md
         fi
     
     - name: Sanitize image name for artifact
@@ -316,8 +316,8 @@ jobs:
             [.Results[]?.Misconfigurations[]? | select(.Severity == "CRITICAL" or .Severity == "HIGH")] |
             sort_by(.Severity) | reverse |
             .[] |
-            "| Config | `" + (.ID // "N/A") + "` | " + (.Severity // "UNKNOWN") + " | " + (.Title // "N/A") + " | `" + (.Resolution // "N/A") + "` | " + ((.Description // "No description available") | gsub("\n"; " ") | .[0:200]) + (if (.Description // "" | length) > 200 then "..." else "" end) + " |"
-          ' trivy-config.json > config-details.md 2>/dev/null || echo "| No critical/high config issues found | - | - | - | - | - |" > config-details.md
+            "| Config | `" + (.ID // "N/A") + "` | " + (.Severity // "UNKNOWN") + " | " + (.Title // "N/A") + " | - | `" + (.Resolution // "N/A") + "` | " + ((.Description // "No description available") | gsub("\n"; " ") | .[0:200]) + (if (.Description // "" | length) > 200 then "..." else "" end) + " |"
+          ' trivy-config.json > config-details.md 2>/dev/null || echo "| Config | No critical/high issues | - | - | - | - | - |" > config-details.md
         fi
         
         if [[ -f "trivy-fs.json" ]]; then
@@ -325,8 +325,8 @@ jobs:
             [.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL" or .Severity == "HIGH")] |
             sort_by(.Severity) | reverse |
             .[] |
-            "| FS | `" + (.VulnerabilityID // "N/A") + "` | " + (.Severity // "UNKNOWN") + " | `" + (.PkgName // "N/A") + "` | `" + (.InstalledVersion // "N/A") + "` | " + ((.Description // .Title // "No description available") | gsub("\n"; " ") | .[0:200]) + (if ((.Description // .Title // "") | length) > 200 then "..." else "" end) + " |"
-          ' trivy-fs.json > fs-details.md 2>/dev/null || echo "| No critical/high filesystem vulnerabilities found | - | - | - | - | - |" > fs-details.md
+            "| FS | `" + (.VulnerabilityID // "N/A") + "` | " + (.Severity // "UNKNOWN") + " | `" + (.PkgName // "N/A") + "` | `" + (.InstalledVersion // "N/A") + "` | `" + (.FixedVersion // "Not Available") + "` | " + ((.Description // .Title // "No description available") | gsub("\n"; " ") | .[0:200]) + (if ((.Description // .Title // "") | length) > 200 then "..." else "" end) + " |"
+          ' trivy-fs.json > fs-details.md 2>/dev/null || echo "| FS | No critical/high vulnerabilities | - | - | - | - | - |" > fs-details.md
         fi
     
     - name: Upload filesystem scan results
@@ -421,15 +421,15 @@ jobs:
         fi
         
         # Generate detailed vulnerability table
-        echo "| Type | ID | Severity | Package/Rule | Version/Title | Description |" > detailed-vulns.md
-        echo "|------|----|-----------|-----------|---------|-----------------------|" >> detailed-vulns.md
+        echo "| Type | ID | Severity | Package | Installed | Fixed In | Description |" > detailed-vulns.md
+        echo "|------|----|-----------|---------|-----------|-----------|-----------------------|" >> detailed-vulns.md
         
         # Add image vulnerabilities
         for result_dir in scan-results/image-scan-*; do
           if [[ -d "$result_dir" ]]; then
             for detail_file in "$result_dir"/details-*.md; do
               if [[ -f "$detail_file" && -s "$detail_file" ]]; then
-                sed 's/^|/| Image |/' "$detail_file" >> detailed-vulns.md
+                cat "$detail_file" >> detailed-vulns.md
               fi
             done
           fi
