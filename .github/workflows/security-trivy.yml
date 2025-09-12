@@ -176,19 +176,10 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
     
-    - name: Sanitize image name for artifact
-      id: sanitize
-      run: |
-        IMAGE="${{ matrix.image }}"
-        # Replace all non-alphanumeric characters with dashes
-        SAFE_IMAGE=$(echo "$IMAGE" | sed 's/[^a-zA-Z0-9]/-/g')
-        echo "Sanitized image name: $SAFE_IMAGE"
-        echo "safe_image=$SAFE_IMAGE" >> $GITHUB_OUTPUT
-    
     - name: Generate and scan SBOM
       run: |
         IMAGE="${{ matrix.image }}"
-        SAFE_IMAGE="${{ steps.sanitize.outputs.safe_image }}"
+        SAFE_IMAGE=$(echo "$IMAGE" | sed 's/[^a-zA-Z0-9]/-/g')
         
         echo "Generating SBOM for image: $IMAGE"
         
@@ -196,7 +187,8 @@ jobs:
         docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
           aquasec/trivy image --format spdx-json --output sbom-$SAFE_IMAGE.json $IMAGE || {
           echo "SBOM generation failed for $IMAGE"
-          echo "ERROR=SBOM generation failed" > sbom-results-$SAFE_IMAGE.env
+          echo "IMAGE=$IMAGE" > sbom-results-$SAFE_IMAGE.env
+          echo "ERROR=SBOM generation failed" >> sbom-results-$SAFE_IMAGE.env
           exit 0
         }
         
@@ -204,6 +196,7 @@ jobs:
         docker run --rm -v $(pwd):/workspace \
           aquasec/trivy sbom --format json --output trivy-sbom-$SAFE_IMAGE.json /workspace/sbom-$SAFE_IMAGE.json || {
           echo "SBOM scan failed for $IMAGE"
+          echo "IMAGE=$IMAGE" > sbom-results-$SAFE_IMAGE.env
           echo "ERROR=SBOM scan failed" >> sbom-results-$SAFE_IMAGE.env
           exit 0
         }
