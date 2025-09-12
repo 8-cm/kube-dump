@@ -2850,7 +2850,7 @@ spec:
     kubernetes.io/hostname: ${node_name}
   containers:
   - name: monitor
-    image: ubuntu:22.04
+    image: ${DEBUG_IMAGE}
     command: ["/bin/bash", "-c"]
     args:
     - |
