@@ -1201,6 +1201,52 @@ prepare_target_pods() {
 # -------------------------------------------------------------------------------
 # Function: select_target_nodes
 # -------------------------------------------------------------------------------
+# Description:
+#   Selects target nodes for debug pod creation based on node label selectors and
+#   optional inclusion of nodes hosting selected pods. This function queries the
+#   Kubernetes cluster for nodes matching the specified criteria and populates
+#   both NODE_NAMES and TARGET_NODES arrays for subsequent processing.
+#
+# Parameters:
+#   Uses global variables:
+#     $NODE_LABEL    - Label selector string for finding nodes (e.g., "worker=true")
+#     $INCLUDE_NODES - Boolean flag to include nodes hosting selected pods
+#     $TARGET_PODS[] - Array of selected pods (used when INCLUDE_NODES is true)
+#     $KUBE_CLI      - Kubernetes CLI command (kubectl/oc)
+#   Modifies global arrays:
+#     NODE_NAMES[]   - Names of nodes selected by label selector
+#     TARGET_NODES[] - All target nodes (label-selected + pod-hosting nodes)
+#
+# Example Usage:
+#   NODE_LABEL="node-role.kubernetes.io/worker=true"
+#   select_target_nodes
+#   # Finds all worker nodes and adds them to TARGET_NODES
+#   
+#   NODE_LABEL="zone=us-west"
+#   INCLUDE_NODES="true" 
+#   select_target_nodes
+#   # Finds nodes with zone=us-west label AND nodes hosting selected pods
+#
+# Expected Output:
+#   - Progress messages showing node discovery process
+#   - List of found nodes with visual indicators
+#   - Success confirmation with node count
+#   - Additional nodes notification when --include-nodes is used
+#   - Returns 0 on success, 1 on error
+#
+# Detailed Behavior:
+#   1. Queries Kubernetes API for nodes matching NODE_LABEL selector
+#   2. Validates that at least one node was found, exits with error if none
+#   3. Populates NODE_NAMES array with matching node names
+#   4. Copies all found nodes to TARGET_NODES array
+#   5. When INCLUDE_NODES=true and TARGET_PODS exists:
+#      - Extracts node names from TARGET_PODS entries (format: namespace:pod:node:container)
+#      - Deduplicates and finds nodes not already selected by label
+#      - Adds additional nodes to TARGET_NODES array
+#      - Reports count of additional nodes added
+#   6. Provides visual feedback throughout the process using format_message
+#   7. Handles errors gracefully with descriptive error messages
+# -------------------------------------------------------------------------------
 select_target_nodes() {
   format_message "🔍 Finding nodes with label selector: $NODE_LABEL"
   echo ""
@@ -1387,6 +1433,57 @@ validate_all_requirements() {
 # -------------------------------------------------------------------------------
 # Function: create_debug_pods_for_targets
 # -------------------------------------------------------------------------------
+# Description:
+#   Creates debug pods for all target pods selected by the label selector. This function
+#   iterates through the TARGET_PODS array and creates individual debug pods that will
+#   execute commands within the network namespace of each target pod. It handles command
+#   encoding, unique naming, and maintains arrays of created debug pods for later management.
+#
+# Parameters:
+#   Uses global variables:
+#     $TARGET_PODS[]               - Array of pod info strings (format: pod:container:node:namespace)
+#     $CUSTOM_COMMAND              - Optional custom command to execute in debug pods
+#     $SELECT_TO_DOWNLOAD_COMMAND  - Command to select files for download
+#     $NODE_SELECT_TO_DOWNLOAD_COMMAND - Command to select node files for download
+#     $DEBUG_NAMESPACE             - Target namespace for debug pod creation
+#     $NAMESPACE                   - Fallback namespace if DEBUG_NAMESPACE not set
+#     $KUBE_CLI                    - Kubernetes CLI command (kubectl/oc)
+#   Modifies global arrays:
+#     DEBUG_POD_NAMES[]            - Names of successfully created debug pods
+#     POD_DEBUG_HOSTNAMES[]        - Hostnames for file download operations
+#   Sets global variables:
+#     $CAPTURE_COMMAND             - Base64 encoded custom command
+#     $ENCODED_SELECT_COMMAND      - Base64 encoded select-to-download command
+#     $ENCODED_NODE_SELECT_COMMAND - Base64 encoded node select command
+#
+# Example Usage:
+#   TARGET_PODS=("nginx-pod:nginx:worker1:default" "app-pod:app:worker2:prod")
+#   CUSTOM_COMMAND="tcpdump -i any -w capture.pcap"
+#   create_debug_pods_for_targets
+#   # Creates debug pods for nginx-pod and app-pod with custom tcpdump command
+#
+# Expected Output:
+#   - Progress messages for each debug pod creation
+#   - Success/failure notifications for individual pods
+#   - Updates to DEBUG_POD_NAMES array with created pod names
+#   - Base64 encoded commands stored in global variables
+#   - Returns 0 on completion (individual failures logged but don't stop process)
+#
+# Detailed Behavior:
+#   1. Encodes CUSTOM_COMMAND to base64 for secure pod specification passing
+#   2. Encodes SELECT_TO_DOWNLOAD_COMMAND and NODE_SELECT_TO_DOWNLOAD_COMMAND to base64
+#   3. Determines target namespace (DEBUG_NAMESPACE or fallback to NAMESPACE)
+#   4. Generates epoch timestamp for unique pod naming
+#   5. For each target pod in TARGET_PODS array:
+#      - Extracts pod name, container name, and node name from target string
+#      - Generates unique debug pod name using node name, pod hash, and timestamp
+#      - Ensures uniqueness by checking existing pods and incrementing counter if needed
+#      - Calls create_single_debug_pod() to create the actual debug pod
+#      - Adds successful pod names to DEBUG_POD_NAMES and POD_DEBUG_HOSTNAMES arrays
+#      - Reports creation status with visual indicators
+#   6. Continues processing all pods even if individual creations fail
+#   7. Uses MD5 hashing for shorter, predictable pod names (with fallbacks)
+# -------------------------------------------------------------------------------
 create_debug_pods_for_targets() {
   # Set capture command before creating pods
   if [[ -n "$CUSTOM_COMMAND" ]]; then
@@ -1449,6 +1546,48 @@ create_debug_pods_for_targets() {
 # -------------------------------------------------------------------------------
 # Function: create_node_debug_pods
 # -------------------------------------------------------------------------------
+# Description:
+#   Creates debug pods on selected nodes for executing node-level commands with host
+#   networking and privileged access. This function iterates through the TARGET_NODES
+#   array and creates individual debug pods that run on each node with access to the
+#   host network namespace and filesystem for system-level diagnostics and operations.
+#
+# Parameters:
+#   Uses global variables:
+#     $TARGET_NODES[]      - Array of node names where debug pods should be created
+#     $DEBUG_NAMESPACE     - Target namespace for debug pod creation
+#     $NAMESPACE           - Fallback namespace if DEBUG_NAMESPACE not set
+#     $KUBE_CLI            - Kubernetes CLI command (kubectl/oc)
+#   Modifies global arrays:
+#     DEBUG_POD_NAMES[]    - Names of successfully created debug pods
+#     NODE_DEBUG_HOSTNAMES[] - Hostnames for node-based file download operations
+#
+# Example Usage:
+#   TARGET_NODES=("worker1" "worker2" "master1")
+#   DEBUG_NAMESPACE="monitoring"
+#   create_node_debug_pods
+#   # Creates debug pods on worker1, worker2, and master1 in monitoring namespace
+#
+# Expected Output:
+#   - Progress messages for each node debug pod creation
+#   - Success/failure notifications for individual nodes
+#   - Updates to DEBUG_POD_NAMES and NODE_DEBUG_HOSTNAMES arrays
+#   - Returns 0 on completion (individual failures logged but don't stop process)
+#
+# Detailed Behavior:
+#   1. Determines target namespace (DEBUG_NAMESPACE or fallback to NAMESPACE or default)
+#   2. For each node in TARGET_NODES array:
+#      - Generates a hash of the node name for unique but predictable pod naming
+#      - Creates unique debug pod name using format: node-{hash}-{timestamp}
+#      - Ensures uniqueness by checking existing pods and incrementing counter if needed
+#      - Calls create_single_node_debug_pod() to create debug pod with host networking
+#      - Adds successful pod names to DEBUG_POD_NAMES and NODE_DEBUG_HOSTNAMES arrays
+#      - Reports creation status with visual node indicators
+#   3. Continues processing all nodes even if individual creations fail
+#   4. Uses MD5 hashing for consistent pod names (with platform-specific fallbacks)
+#   5. Node debug pods run with privileged access and hostNetwork for system diagnostics
+#   6. Generated pod names are shorter than regular debug pods due to node-specific usage
+# -------------------------------------------------------------------------------
 create_node_debug_pods() {
   local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE:-default}}"
 
@@ -1487,6 +1626,48 @@ create_node_debug_pods() {
 
 # -------------------------------------------------------------------------------
 # Function: create_single_node_debug_pod
+# -------------------------------------------------------------------------------
+# Description:
+#   Creates a single debug pod on a specific node for executing node-level commands.
+#   This debug pod runs with full host access (networking, PID, IPC) and privileged
+#   security context to perform system-level operations, diagnostics, and troubleshooting
+#   directly on the Kubernetes node infrastructure.
+#
+# Parameters:
+#   $1 - node_name: Name of the target node where debug pod should be created
+#   $2 - debug_pod_name: Unique name for the debug pod to be created  
+#   $3 - debug_ns: Namespace where the debug pod should be created
+#   Uses global variables:
+#     $DEBUG_IMAGE - Container image for debug pod (default: nicolaka/netshoot)
+#     $KUBE_CLI    - Kubernetes CLI command (kubectl/oc)
+#
+# Example Usage:
+#   create_single_node_debug_pod "worker1" "node-abc123-1234567890" "monitoring"
+#   # Creates debug pod named node-abc123-1234567890 on worker1 in monitoring namespace
+#   # Debug pod will have full access to worker1's host system
+#
+# Expected Output:
+#   - Creates Kubernetes pod resource via kubectl/oc apply
+#   - Debug pod runs with privileged security context and host access
+#   - Returns kubectl/oc apply exit status (0 for success)
+#   - No direct stdout output (creation handled by Kubernetes API)
+#
+# Detailed Behavior:
+#   1. Accepts three required parameters for node-specific pod creation
+#   2. Generates complete Kubernetes pod specification with:
+#      - Metadata: name, namespace, and node-specific labels
+#      - Host access: hostPID, hostNetwork, and hostIPC all enabled
+#      - Container: uses DEBUG_IMAGE with embedded node debug script
+#      - Security: privileged context running as root (UID 0)
+#      - Node affinity: uses nodeSelector to ensure scheduling on target node
+#      - Host filesystem: mounted at /host for complete file system access
+#   3. Embeds node debug script using build_node_debug_script() function
+#   4. Script is indented properly for YAML format using sed
+#   5. Pod runs as one-shot job with no restart policy specified (defaults to Always)
+#   6. Uses nodeSelector instead of nodeName for more flexible scheduling
+#   7. Applies pod specification directly to Kubernetes cluster
+#   8. Includes debug and node labels for easy identification and filtering
+#   9. Designed for system administration tasks like network diagnostics, file operations
 # -------------------------------------------------------------------------------
 create_single_node_debug_pod() {
   local node_name="$1"
@@ -1534,6 +1715,47 @@ EOF
 # -------------------------------------------------------------------------------
 # Function: build_node_debug_script
 # -------------------------------------------------------------------------------
+# Description:
+#   Generates a complete bash script for execution within node-level debug pods.
+#   This function creates a self-contained script that executes node-level commands
+#   directly on the host system with full access to node resources. The script handles
+#   optional dependency installation and placeholder substitution for node-specific operations.
+#
+# Parameters:
+#   $1 - node_name: Name of the target node (used for logging and identification)
+#   $2 - debug_pod_name: Name of the debug pod (used for placeholder substitution)
+#   Uses global variables:
+#     $NODE_COMMAND     - The command to execute on the node
+#     $PLACEHOLDER_CHAR - Character for hostname substitution in commands (default: %)
+#     $INSTALL_DEPS     - Boolean flag for automatic dependency installation
+#
+# Example Usage:
+#   NODE_COMMAND="tcpdump -i any -w %.pcap"
+#   SCRIPT_CONTENT=$(build_node_debug_script "worker1" "node-debug-123")
+#   # Returns bash script that executes tcpdump on worker1, saving to node-debug-123.pcap
+#
+# Expected Output:
+#   - Complete bash script suitable for execution in node debug pod
+#   - Script includes optional dependency installation and command execution
+#   - Returns script content to stdout for embedding in pod specifications
+#   - Generated script runs with host-level privileges and keeps pod alive with tail
+#
+# Detailed Behavior:
+#   1. Accepts node and debug pod names as parameters for context and substitution
+#   2. Performs placeholder substitution in NODE_COMMAND using debug pod name
+#   3. Generates script header with error handling and node identification logging
+#   4. Implements optional CRI dependency installation when INSTALL_DEPS=true:
+#      - Downloads and installs crictl v1.28.0 from GitHub releases
+#      - Supports both curl and wget download methods with fallbacks
+#      - Installs to /usr/local/bin with proper permissions
+#      - Provides warning messages for installation failures
+#   5. Executes the final node command directly on host system
+#   6. Appends "tail -f /dev/null" to keep debug pod running after command completion
+#   7. Uses heredoc (<<SCRIPT...SCRIPT) for clean multi-line script generation
+#   8. Generated script runs with full node privileges via hostNetwork/hostPID/privileged
+#   9. Includes comprehensive logging for troubleshooting and monitoring
+#   10. Simpler than build_debug_script() as it doesn't require namespace operations
+# -------------------------------------------------------------------------------
 build_node_debug_script() {
   local node_name="$1"
   local debug_pod_name="$2"
@@ -1571,6 +1793,50 @@ SCRIPT
 
 # -------------------------------------------------------------------------------
 # Function: create_single_debug_pod
+# -------------------------------------------------------------------------------
+# Description:
+#   Creates a single debug pod that attaches to a target pod's network namespace to
+#   execute commands within that pod's network context. The debug pod runs with
+#   privileged access, host networking, and access to host filesystem for deep
+#   system inspection and troubleshooting capabilities.
+#
+# Parameters:
+#   $1 - pod_name: Name of the target pod to debug
+#   $2 - container_name: Name of the target container within the pod
+#   $3 - node_name: Name of the node where both pods reside
+#   $4 - debug_pod_name: Unique name for the debug pod to be created
+#   $5 - debug_ns: Namespace where the debug pod should be created
+#   Uses global variables:
+#     $DEBUG_IMAGE - Container image for debug pod (default: nicolaka/netshoot)
+#     $KUBE_CLI    - Kubernetes CLI command (kubectl/oc)
+#
+# Example Usage:
+#   create_single_debug_pod "nginx-app" "nginx" "worker1" "worker1-debug-abc123-1234567890" "monitoring"
+#   # Creates debug pod named worker1-debug-abc123-1234567890 in monitoring namespace
+#   # Debug pod will attach to nginx-app pod's network namespace on worker1
+#
+# Expected Output:
+#   - Creates Kubernetes pod resource via kubectl/oc apply
+#   - Debug pod runs with privileged security context
+#   - Returns kubectl/oc apply exit status (0 for success)
+#   - No direct stdout output (creation handled by Kubernetes API)
+#
+# Detailed Behavior:
+#   1. Accepts five required parameters for pod creation context
+#   2. Generates complete Kubernetes pod specification with:
+#      - Metadata: name and namespace from parameters
+#      - Container: uses DEBUG_IMAGE with embedded debug script
+#      - Security: privileged context running as root (UID 0)
+#      - Networking: hostNetwork=true for network namespace access
+#      - Access: hostPID=true and hostIPC=true for system visibility
+#      - Node affinity: scheduled on specific node via nodeName
+#      - Host filesystem: mounted at /host for file system access
+#   3. Embeds debug script using build_debug_script() function
+#   4. Script is indented properly for YAML format using sed
+#   5. Pod runs as one-shot job with restartPolicy=Never
+#   6. Uses privileged security context for container runtime access
+#   7. Applies pod specification directly to Kubernetes cluster
+#   8. Returns success/failure status from kubectl/oc command
 # -------------------------------------------------------------------------------
 create_single_debug_pod() {
   local pod_name="$1"
@@ -1616,6 +1882,53 @@ EOF
 
 # -------------------------------------------------------------------------------
 # Function: build_debug_script
+# -------------------------------------------------------------------------------
+# Description:
+#   Generates a complete bash script that will be executed inside debug pods to attach
+#   to target pod network namespaces and execute debugging commands. This function creates
+#   a self-contained script that handles CRI runtime detection, container process discovery,
+#   and network namespace execution for pod-level debugging operations.
+#
+# Parameters:
+#   $1 - pod_name: Name of the target pod to debug
+#   $2 - container_name: Name of the target container within the pod
+#   $3 - node_name: Name of the node where the pod resides (informational)
+#   $4 - debug_pod_name: Name of the debug pod (used for placeholder substitution)
+#   Uses global variables:
+#     $CRI_SOCKET      - Custom CRI socket path if specified
+#     $CRI_RUNTIME     - Container runtime type (containerd/crio/docker)
+#     $INSTALL_DEPS    - Boolean flag for automatic dependency installation
+#     $NAMESPACE       - Kubernetes namespace containing the target pod
+#     $CUSTOM_COMMAND  - Custom command to execute (if specified)
+#     $CAPTURE_COMMAND - Encoded command or default tcpdump command
+#     $PLACEHOLDER_CHAR - Character for hostname substitution in commands
+#
+# Example Usage:
+#   SCRIPT_CONTENT=$(build_debug_script "nginx-app" "nginx" "worker1" "debug-pod-123")
+#   # Returns complete bash script for debugging nginx-app pod
+#
+# Expected Output:
+#   - Complete bash script suitable for execution in debug pod
+#   - Script includes CRI socket configuration, container discovery, and command execution
+#   - Returns script content to stdout for embedding in pod specifications
+#   - Generated script handles all error cases and provides detailed logging
+#
+# Detailed Behavior:
+#   1. Generates script header with error handling and container identification logging
+#   2. Includes configure_crictl_socket() function for CRI runtime configuration
+#   3. Sets up CRI socket path based on runtime type or custom socket specification
+#   4. Handles crictl installation/discovery with multiple fallback options
+#   5. Implements optional dependency installation when INSTALL_DEPS=true
+#   6. Creates pod and container discovery logic using crictl:
+#      - Finds pod by name and namespace using crictl pods
+#      - Locates specific container by name using crictl ps
+#      - Extracts container PID using crictl inspect with JSON parsing
+#   7. Implements network namespace execution using nsenter
+#   8. Calls generate_exec_command() to build final command with placeholder substitution
+#   9. Includes comprehensive error handling for missing pods, containers, or PIDs
+#   10. Provides detailed logging at each step for troubleshooting
+#   11. Generated script runs autonomously within debug pod environment
+#   12. Uses heredoc (<<SCRIPT...SCRIPT) for clean multi-line script generation
 # -------------------------------------------------------------------------------
 build_debug_script() {
   local pod_name="$1"
@@ -1729,6 +2042,50 @@ SCRIPT
 # -------------------------------------------------------------------------------
 # Function: generate_exec_command
 # -------------------------------------------------------------------------------
+# Description:
+#   Generates the final execution command for running inside debug pods within
+#   target container network namespaces. This function handles both custom commands
+#   and default commands, performs placeholder substitution, and constructs the
+#   proper nsenter command for network namespace execution.
+#
+# Parameters:
+#   $1 - debug_pod_hostname: Hostname of the debug pod for placeholder substitution
+#   Uses global variables:
+#     $CUSTOM_COMMAND    - Boolean/flag indicating custom command usage
+#     $CAPTURE_COMMAND   - Base64 encoded command or default tcpdump command
+#     $PLACEHOLDER_CHAR  - Character used for hostname substitution (default: %)
+#
+# Example Usage:
+#   CUSTOM_COMMAND="true"
+#   CAPTURE_COMMAND="dGNwZHVtcCAtaSBhbnkgLXcgJS5wY2Fw"  # base64: "tcpdump -i any -w %.pcap"
+#   PLACEHOLDER_CHAR="%"
+#   generate_exec_command "debug-pod-123"
+#   # Returns: DECODED_CMD=$(echo 'dGNw...' | base64 -d)
+#   #          FINAL_CMD=$(echo "$DECODED_CMD" | sed 's/%/debug-pod-123/g')
+#   #          exec nsenter -n -t $PID /bin/bash -c "$FINAL_CMD ; tail -f /dev/null"
+#
+# Expected Output:
+#   - Bash command lines for execution within debug pod script
+#   - Commands include base64 decoding for custom commands
+#   - Placeholder substitution with actual debug pod hostname
+#   - Returns properly formatted nsenter command to stdout
+#
+# Detailed Behavior:
+#   1. Accepts debug pod hostname for placeholder substitution
+#   2. Branches based on CUSTOM_COMMAND flag:
+#      a. Custom command path:
+#         - Generates base64 decode command for CAPTURE_COMMAND
+#         - Creates sed command for placeholder substitution
+#         - Wraps in nsenter with network namespace and adds tail to keep pod alive
+#      b. Default command path:
+#         - Directly substitutes placeholder in CAPTURE_COMMAND
+#         - Creates simple nsenter command without bash wrapping
+#   3. Uses nsenter -n -t $PID to enter target container's network namespace
+#   4. For custom commands, appends "tail -f /dev/null" to prevent pod exit
+#   5. Output is embedded directly into generated debug pod scripts
+#   6. Handles complex commands with pipes, redirects, and special characters
+#   7. Ensures proper escaping for shell execution within nsenter context
+# -------------------------------------------------------------------------------
 generate_exec_command() {
   local debug_pod_hostname="$1"
 
@@ -1744,6 +2101,46 @@ generate_exec_command() {
 
 # -------------------------------------------------------------------------------
 # Function: wait_for_debug_pods_ready
+# -------------------------------------------------------------------------------
+# Description:
+#   Waits for all debug pods in the DEBUG_POD_NAMES array to reach Running status
+#   before proceeding with debug operations. This function monitors pod startup
+#   status, handles failures gracefully, and provides visual progress feedback
+#   to ensure all debug infrastructure is ready for command execution.
+#
+# Parameters:
+#   Uses global variables:
+#     $DEBUG_POD_NAMES[] - Array of debug pod names to monitor
+#     $DEBUG_NAMESPACE   - Namespace where debug pods are created
+#     $NAMESPACE         - Fallback namespace if DEBUG_NAMESPACE not set
+#     $KUBE_CLI          - Kubernetes CLI command (kubectl/oc)
+#
+# Example Usage:
+#   DEBUG_POD_NAMES=("debug-pod-1" "debug-pod-2" "debug-pod-3")
+#   wait_for_debug_pods_ready
+#   # Waits up to 60 seconds for all three pods to reach Running status
+#
+# Expected Output:
+#   - Progress indicators showing pod readiness checking
+#   - Status summary of ready, failed, and total pods
+#   - Success confirmation when all pods are ready
+#   - Error messages for failed pods with details
+#   - Returns 0 if at least one pod becomes ready, 1 if none ready
+#
+# Detailed Behavior:
+#   1. Sets maximum wait time to 60 seconds for pod startup
+#   2. Maintains separate arrays for ready_pods and failed_pods tracking
+#   3. Shows initial status message with total pod count
+#   4. Implements polling loop that checks every 2 seconds:
+#      - Skips already processed pods (ready or failed)
+#      - Uses kubectl/oc to get pod phase status
+#      - Categorizes pods as Running (ready) or Failed
+#      - Tracks wait time and exits loop when timeout or all pods processed
+#   5. Provides visual progress feedback with dots during waiting
+#   6. Reports final status with counts of ready/failed/total pods
+#   7. Lists specific failed pod names for troubleshooting
+#   8. Returns success if at least one pod becomes ready
+#   9. Designed for fault tolerance - doesn't fail if some pods fail to start
 # -------------------------------------------------------------------------------
 wait_for_debug_pods_ready() {
   local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE}}"
@@ -1803,6 +2200,58 @@ wait_for_debug_pods_ready() {
 
 # -------------------------------------------------------------------------------
 # Function: create_file_discovery_pods
+# -------------------------------------------------------------------------------
+# Description:
+#   Creates discovery pods for both pod-level and node-level targets to identify and
+#   prepare files for download operations. This function handles file discovery for
+#   pods with -s option and nodes with -S option, creating specialized pods that
+#   execute file listing commands and prepare files for subsequent download.
+#
+# Parameters:
+#   Uses global variables:
+#     $SELECT_TO_DOWNLOAD_COMMAND      - Command to list files from pod targets
+#     $NODE_SELECT_TO_DOWNLOAD_COMMAND - Command to list files from node targets  
+#     $POD_DEBUG_HOSTNAMES[]           - Array of pod debug hostnames
+#     $NODE_DEBUG_HOSTNAMES[]          - Array of node debug hostnames
+#     $TARGET_PODS[]                   - Array of target pod information
+#     $TARGET_NODES[]                  - Array of target node names
+#     $DEBUG_NAMESPACE                 - Namespace for discovery pod creation
+#     $NAMESPACE                       - Fallback namespace
+#     $DEBUG_IMAGE                     - Container image for discovery pods
+#   Modifies global arrays:
+#     DISCOVERY_POD_NAMES[]            - Names of created discovery pods
+#
+# Example Usage:
+#   SELECT_TO_DOWNLOAD_COMMAND="ls *.pcap"
+#   NODE_SELECT_TO_DOWNLOAD_COMMAND="ls /tmp/*.log"
+#   create_file_discovery_pods
+#   # Creates discovery pods to list .pcap files from pods and .log files from nodes
+#
+# Expected Output:
+#   - Progress messages for discovery pod creation
+#   - Visual indicators showing pod and node file discovery operations
+#   - Updates to DISCOVERY_POD_NAMES array with created pod names
+#   - Returns 0 on completion (individual failures logged but don't stop process)
+#
+# Detailed Behavior:
+#   1. Determines target namespace for discovery pod creation
+#   2. Generates epoch timestamp for unique pod naming
+#   3. Pod target discovery (if SELECT_TO_DOWNLOAD_COMMAND specified):
+#      - Iterates through TARGET_PODS array and POD_DEBUG_HOSTNAMES
+#      - Extracts pod name, container name, and node name from target strings
+#      - Generates unique discovery pod names using node+pod hash+timestamp
+#      - Ensures name uniqueness by checking existing pods and incrementing counters
+#      - Creates pod-level discovery pods using create_discovery_pod()
+#      - Maintains mapping between original debug hostnames and discovery pods
+#   4. Node target discovery (if NODE_SELECT_TO_DOWNLOAD_COMMAND specified):
+#      - Iterates through TARGET_NODES array and NODE_DEBUG_HOSTNAMES  
+#      - Generates unique node discovery pod names using node hash+timestamp
+#      - Ensures name uniqueness for node discovery pods
+#      - Creates node-level discovery pods using create_node_discovery_pod()
+#      - Maintains mapping between debug hostnames and discovery pods
+#   5. Uses MD5 hashing for consistent, shorter pod names (with platform fallbacks)
+#   6. Handles both pod-level and node-level file discovery in single function
+#   7. Provides comprehensive logging for troubleshooting discovery operations
 # -------------------------------------------------------------------------------
 create_file_discovery_pods() {
   local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE}}"
@@ -2040,6 +2489,36 @@ handle_file_downloads() {
 # -------------------------------------------------------------------------------
 # Function: cleanup_debug_pods
 # -------------------------------------------------------------------------------
+# Description:
+#   Cleans up debug pods created by the script by deleting them from the Kubernetes
+#   cluster. This function removes all pods listed in the DEBUG_POD_NAMES array to
+#   prevent resource accumulation and maintain cluster cleanliness after debug operations.
+#
+# Parameters:
+#   Uses global variables:
+#     $DEBUG_POD_NAMES[] - Array of debug pod names to delete
+#     $DEBUG_NAMESPACE   - Namespace where debug pods were created
+#     $NAMESPACE         - Fallback namespace if DEBUG_NAMESPACE not set
+#     $KUBE_CLI          - Kubernetes CLI command (kubectl/oc)
+#
+# Example Usage:
+#   DEBUG_POD_NAMES=("debug-pod-1" "debug-pod-2" "debug-pod-3")
+#   cleanup_debug_pods
+#   # Deletes all three debug pods from the target namespace
+#
+# Expected Output:
+#   - Silent operation (output redirected to /dev/null)
+#   - Pods are removed from Kubernetes cluster
+#   - No return value (always succeeds due to --ignore-not-found)
+#
+# Detailed Behavior:
+#   1. Determines target namespace (DEBUG_NAMESPACE or fallback to NAMESPACE)
+#   2. Checks if DEBUG_POD_NAMES array contains any pods
+#   3. Uses kubectl/oc delete with --ignore-not-found flag for safe deletion
+#   4. Deletes all pods in batch operation for efficiency
+#   5. Suppresses all output (both stdout and stderr) for clean operation
+#   6. Gracefully handles missing pods without errors
+# -------------------------------------------------------------------------------
 cleanup_debug_pods() {
   local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE}}"
 
@@ -2051,6 +2530,36 @@ cleanup_debug_pods() {
 # -------------------------------------------------------------------------------
 # Function: cleanup_discovery_pods
 # -------------------------------------------------------------------------------
+# Description:
+#   Cleans up file discovery pods created for file download operations by deleting
+#   them from the Kubernetes cluster. This function removes all pods listed in the
+#   DISCOVERY_POD_NAMES array to prevent resource accumulation after file operations.
+#
+# Parameters:
+#   Uses global variables:
+#     $DISCOVERY_POD_NAMES[] - Array of discovery pod names to delete
+#     $DEBUG_NAMESPACE       - Namespace where discovery pods were created
+#     $NAMESPACE             - Fallback namespace if DEBUG_NAMESPACE not set
+#     $KUBE_CLI              - Kubernetes CLI command (kubectl/oc)
+#
+# Example Usage:
+#   DISCOVERY_POD_NAMES=("discovery-pod-1" "discovery-pod-2")
+#   cleanup_discovery_pods
+#   # Deletes all discovery pods used for file download operations
+#
+# Expected Output:
+#   - Silent operation (output redirected to /dev/null)
+#   - Discovery pods are removed from Kubernetes cluster
+#   - No return value (always succeeds due to --ignore-not-found)
+#
+# Detailed Behavior:
+#   1. Determines target namespace (DEBUG_NAMESPACE or fallback to NAMESPACE)
+#   2. Checks if DISCOVERY_POD_NAMES array contains any pods
+#   3. Uses kubectl/oc delete with --ignore-not-found flag for safe deletion
+#   4. Deletes all discovery pods in batch operation for efficiency
+#   5. Suppresses all output (both stdout and stderr) for clean operation
+#   6. Gracefully handles missing pods without errors
+# -------------------------------------------------------------------------------
 cleanup_discovery_pods() {
   local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE}}"
 
@@ -2061,6 +2570,35 @@ cleanup_discovery_pods() {
 
 # -------------------------------------------------------------------------------
 # Function: create_discovery_pod
+# -------------------------------------------------------------------------------
+# Description:
+#   Creates a single file discovery pod for pod-level file operations. This debug pod
+#   attaches to a target pod's network namespace to execute file discovery commands,
+#   list files for download, and prepare them for subsequent download operations.
+#
+# Parameters:
+#   $1 - pod_name: Name of the target pod containing files
+#   $2 - container_name: Name of the target container within the pod
+#   $3 - node_name: Name of the node where the pod resides
+#   $4 - discovery_pod_name: Unique name for the discovery pod
+#   $5 - debug_ns: Namespace where discovery pod should be created
+#   Uses global variables:
+#     $DEBUG_IMAGE - Container image for discovery pods
+#     $KUBE_CLI    - Kubernetes CLI command (kubectl/oc)
+#
+# Example Usage:
+#   create_discovery_pod "nginx-app" "nginx" "worker1" "disc-worker1-abc123" "monitoring"
+#   # Creates discovery pod to find files in nginx-app pod on worker1
+#
+# Expected Output:
+#   - Creates Kubernetes pod resource for file discovery
+#   - Pod runs with privileged access and network namespace attachment
+#   - Returns kubectl/oc apply exit status
+#
+# Detailed Behavior:
+#   - Similar to create_single_debug_pod but specialized for file discovery
+#   - Uses build_debug_script for network namespace attachment
+#   - Executes file listing commands instead of debug commands
 # -------------------------------------------------------------------------------
 create_discovery_pod() {
   local pod_name="$1"
@@ -2280,6 +2818,51 @@ EOF
 # -------------------------------------------------------------------------------
 # Function: build_kill_switch_monitor_script
 # -------------------------------------------------------------------------------
+# Description:
+#   Generates a complete bash script for execution within kill switch monitor pods.
+#   This function creates a self-contained monitoring script that continuously checks
+#   filesystem usage against configured thresholds and triggers pod termination when
+#   limits are exceeded to prevent disk pressure issues on Kubernetes nodes.
+#
+# Parameters:
+#   $1 - target_debug_pod: Name of the debug pod being monitored
+#   $2 - volume_path: Filesystem path to monitor for disk usage (e.g., /tmp, /var)
+#   Uses global variables:
+#     $KILL_SWITCH_ABS - Absolute disk usage threshold (e.g., "1GB", "500MB")
+#     $KILL_SWITCH_REL - Relative disk usage threshold (e.g., "10%", "5%")
+#
+# Example Usage:
+#   KILL_SWITCH_ABS="1GB"
+#   SCRIPT_CONTENT=$(build_kill_switch_monitor_script "debug-pod-123" "/tmp")
+#   # Returns script that monitors /tmp and kills debug-pod-123 if usage exceeds 1GB
+#
+# Expected Output:
+#   - Complete bash script suitable for execution in kill switch monitor pod
+#   - Script includes size parsing, threshold monitoring, and termination logic
+#   - Returns script content to stdout for embedding in pod specifications
+#   - Generated script runs continuously until threshold is triggered or interrupted
+#
+# Detailed Behavior:
+#   1. Accepts target debug pod name and volume path for monitoring context
+#   2. Embeds parse_size_to_bytes() function for unit conversion (B, KB, MB, GB, TB)
+#   3. Installs bc package for floating-point calculations in relative threshold checks
+#   4. Configures monitoring parameters from global variables:
+#      - KILL_SWITCH_ABS for absolute threshold monitoring
+#      - KILL_SWITCH_REL for relative threshold monitoring
+#      - CHECK_INTERVAL hardcoded to 10 seconds for filesystem checks
+#   5. Implements continuous monitoring loop that:
+#      - Uses df command to get filesystem statistics for specified volume path
+#      - Extracts used_bytes, available_bytes, and total_bytes from df output
+#      - Checks absolute threshold: triggers when available space falls below limit
+#      - Checks relative threshold: calculates percentage and triggers when below limit
+#   6. Uses bc calculator for precise floating-point percentage calculations
+#   7. Exits with status 0 when threshold is exceeded (signals successful kill trigger)
+#   8. Provides detailed logging for monitoring status and threshold violations
+#   9. Supports both traditional (1000-based) and binary (1024-based) units
+#   10. Handles various unit formats: B, K/Ki, M/Mi/MB, G/Gi/GB, T/Ti/TB
+#   11. Runs indefinitely until threshold breach or external termination
+#   12. Uses heredoc (<<SCRIPT...SCRIPT) for clean multi-line script generation
+# -------------------------------------------------------------------------------
 build_kill_switch_monitor_script() {
   local target_debug_pod="$1"
   local volume_path="$2"
@@ -2433,6 +3016,37 @@ monitor_kill_switches() {
 
 # -------------------------------------------------------------------------------
 # Function: cleanup_kill_switch_monitor_pods
+# -------------------------------------------------------------------------------
+# Description:
+#   Cleans up kill switch monitor pods created for disk usage monitoring by deleting
+#   them from the Kubernetes cluster. This function provides user feedback and removes
+#   all pods listed in the KILL_SWITCH_MONITOR_PODS array to maintain cluster cleanliness.
+#
+# Parameters:
+#   Uses global variables:
+#     $KILL_SWITCH_MONITOR_PODS[] - Array of kill switch monitor pod names to delete
+#     $DEBUG_NAMESPACE            - Namespace where monitor pods were created
+#     $NAMESPACE                  - Fallback namespace if DEBUG_NAMESPACE not set
+#     $KUBE_CLI                   - Kubernetes CLI command (kubectl/oc)
+#
+# Example Usage:
+#   KILL_SWITCH_MONITOR_PODS=("killswitch-monitor-1" "killswitch-monitor-2")
+#   cleanup_kill_switch_monitor_pods
+#   # Shows cleanup message and deletes all kill switch monitor pods
+#
+# Expected Output:
+#   - User-visible cleanup message with cleaning emoji
+#   - Kill switch monitor pods are removed from Kubernetes cluster
+#   - No return value (always succeeds due to --ignore-not-found)
+#
+# Detailed Behavior:
+#   1. Checks if KILL_SWITCH_MONITOR_PODS array contains any pods
+#   2. Displays user-friendly cleanup message using format_message
+#   3. Determines target namespace (DEBUG_NAMESPACE or fallback to NAMESPACE)
+#   4. Uses kubectl/oc delete with --ignore-not-found flag for safe deletion
+#   5. Deletes all monitor pods in batch operation for efficiency
+#   6. Suppresses kubectl output but shows user progress message
+#   7. Gracefully handles missing pods without errors
 # -------------------------------------------------------------------------------
 cleanup_kill_switch_monitor_pods() {
   local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE}}"
