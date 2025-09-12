@@ -392,6 +392,45 @@ For questions, issues, or feature requests:
 - Check existing documentation and examples
 - Review troubleshooting section above
 
+<!-- SHELLCHECK-RESULTS-START -->
+## 🔍 Code Quality - Shellcheck Analysis
+
+**Status:** ✅ PASSED  
+**Issues Found:** 0  
+**Last Updated:** 2025-09-12 18:00:00 UTC  
+**Commit:** [`34d5771`](https://github.com/8-cm/kube-dump/commit/34d5771)  
+
+🎉 **Excellent!** No shellcheck issues found. The script follows shell scripting best practices.
+
+---
+*This section is automatically updated by the [Shellcheck Analysis workflow](.github/workflows/shellcheck.yml)*
+<!-- SHELLCHECK-RESULTS-END -->
+
+<!-- TRIVY-SECURITY-START -->
+## 🛡️ Security Analysis - Trivy Scanning
+
+**Overall Status:** ✅ NO CRITICAL ISSUES  
+**Critical Issues:** 0  
+**High Severity:** 0  
+**Medium Severity:** 0  
+**Low Severity:** 0  
+**Config Issues:** 0  
+**Filesystem Vulns:** 0  
+**Last Updated:** 2025-09-12 18:30:00 UTC  
+**Commit:** [`34d5771`](https://github.com/8-cm/kube-dump/commit/34d5771)  
+
+🎉 **Great!** No critical or high severity vulnerabilities found in container images and filesystem.
+
+### Scanning Coverage
+- **🖼️ Container Images**: All images used in kube-dump.sh
+- **📋 SBOM Analysis**: Software Bill of Materials vulnerability checking
+- **📁 Filesystem**: Local files and configurations  
+- **⚙️ Configuration**: Security misconfigurations
+
+---
+*This section is automatically updated by the [Security Scanning workflow](.github/workflows/security-trivy.yml)*
+<!-- TRIVY-SECURITY-END -->
+
 ---
 
 **Note**: This tool creates privileged pods with extensive permissions. Always review and understand the security implications before use in production environments.

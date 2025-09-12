@@ -1,0 +1,559 @@
+name: Security Scanning with Trivy
+
+on:
+  push:
+    branches: [ master, main ]
+    paths:
+      - 'kube-dump.sh'
+      - '.github/workflows/security-trivy.yml'
+  pull_request:
+    branches: [ master, main ]
+    paths:
+      - 'kube-dump.sh'
+      - '.github/workflows/security-trivy.yml'
+  schedule:
+    # Run daily at 2 AM UTC to catch new vulnerabilities
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  security-events: write
+  pull-requests: write
+
+jobs:
+  extract-images:
+    name: Extract Container Images
+    runs-on: ubuntu-latest
+    outputs:
+      images: ${{ steps.extract.outputs.images }}
+      image-count: ${{ steps.extract.outputs.count }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Extract container images from script
+      id: extract
+      run: |
+        echo "Extracting container images from kube-dump.sh..."
+        
+        # Extract all image references and create unique list
+        {
+          # Extract DEBUG_IMAGE default value (this is the main image used everywhere)
+          grep 'DEBUG_IMAGE=' kube-dump.sh | grep -o '"[^"]*"' | tr -d '"' | head -1
+          
+          # Extract any hardcoded image references (fallback)
+          grep -oE '[a-zA-Z0-9.-]+/[a-zA-Z0-9._-]+:[a-zA-Z0-9._-]+' kube-dump.sh || true
+          
+        } | sort -u | grep -E '^[a-zA-Z0-9.-]+(/[a-zA-Z0-9._-]+)?:[a-zA-Z0-9._-]+$' > unique-images.txt
+        
+        # Convert to JSON array for matrix
+        IMAGES=$(cat unique-images.txt | jq -R -s -c 'split("\n")[:-1]')
+        COUNT=$(cat unique-images.txt | wc -l)
+        
+        echo "Found container images:"
+        cat unique-images.txt | sed 's/^/  - /'
+        
+        echo "images=$IMAGES" >> $GITHUB_OUTPUT
+        echo "count=$COUNT" >> $GITHUB_OUTPUT
+        
+        # Save for later use
+        cp unique-images.txt /tmp/container-images.txt
+
+    - name: Upload image list artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: container-images
+        path: unique-images.txt
+
+  image-vulnerability-scan:
+    name: Image Vulnerability Scanning
+    runs-on: ubuntu-latest
+    needs: extract-images
+    if: needs.extract-images.outputs.image-count > 0
+    strategy:
+      matrix:
+        image: ${{ fromJSON(needs.extract-images.outputs.images) }}
+      fail-fast: false
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Trivy
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'image'
+        image-ref: ${{ matrix.image }}
+        format: 'json'
+        output: 'trivy-image-${{ matrix.image }}.json'
+    
+    - name: Parse Trivy results for image
+      run: |
+        IMAGE="${{ matrix.image }}"
+        SAFE_IMAGE=$(echo "$IMAGE" | sed 's/[^a-zA-Z0-9]/-/g')
+        
+        echo "Processing results for image: $IMAGE"
+        
+        # Process JSON results
+        if [[ -f "trivy-image-$IMAGE.json" ]]; then
+          # Count vulnerabilities by severity
+          CRITICAL=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' "trivy-image-$IMAGE.json" 2>/dev/null || echo "0")
+          HIGH=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' "trivy-image-$IMAGE.json" 2>/dev/null || echo "0")
+          MEDIUM=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "MEDIUM")] | length' "trivy-image-$IMAGE.json" 2>/dev/null || echo "0")
+          LOW=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "LOW")] | length' "trivy-image-$IMAGE.json" 2>/dev/null || echo "0")
+          UNKNOWN=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "UNKNOWN")] | length' "trivy-image-$IMAGE.json" 2>/dev/null || echo "0")
+          TOTAL=$((CRITICAL + HIGH + MEDIUM + LOW + UNKNOWN))
+          
+          # Create summary
+          echo "IMAGE=$IMAGE" >> results-$SAFE_IMAGE.env
+          echo "CRITICAL=$CRITICAL" >> results-$SAFE_IMAGE.env
+          echo "HIGH=$HIGH" >> results-$SAFE_IMAGE.env
+          echo "MEDIUM=$MEDIUM" >> results-$SAFE_IMAGE.env
+          echo "LOW=$LOW" >> results-$SAFE_IMAGE.env
+          echo "UNKNOWN=$UNKNOWN" >> results-$SAFE_IMAGE.env
+          echo "TOTAL=$TOTAL" >> results-$SAFE_IMAGE.env
+          
+          # Generate detailed table for critical/high issues
+          jq -r '
+            [.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL" or .Severity == "HIGH")] |
+            sort_by(.Severity) | reverse |
+            .[] |
+            "| `" + (.VulnerabilityID // "N/A") + "` | " + (.Severity // "UNKNOWN") + " | `" + (.PkgName // "N/A") + "` | `" + (.InstalledVersion // "N/A") + "` | `" + (.FixedVersion // "Not Available") + "` | " + (.Title // .Description // "No description available") + " |"
+          ' "trivy-image-$IMAGE.json" > details-$SAFE_IMAGE.md 2>/dev/null || echo "| No critical/high vulnerabilities | - | - | - | - | - |" > details-$SAFE_IMAGE.md
+        else
+          echo "IMAGE=$IMAGE" >> results-$SAFE_IMAGE.env
+          echo "ERROR=Scan failed" >> results-$SAFE_IMAGE.env
+          echo "| Scan Error | - | - | - | - | Trivy scan failed for this image |" > details-$SAFE_IMAGE.md
+        fi
+    
+    - name: Upload scan results
+      uses: actions/upload-artifact@v4
+      with:
+        name: image-scan-${{ matrix.image }}
+        path: |
+          results-*.env
+          details-*.md
+          trivy-image-*.json
+
+  sbom-vulnerability-scan:
+    name: SBOM Vulnerability Analysis
+    runs-on: ubuntu-latest
+    needs: extract-images
+    if: needs.extract-images.outputs.image-count > 0
+    strategy:
+      matrix:
+        image: ${{ fromJSON(needs.extract-images.outputs.images) }}
+      fail-fast: false
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Generate and scan SBOM
+      run: |
+        IMAGE="${{ matrix.image }}"
+        SAFE_IMAGE=$(echo "$IMAGE" | sed 's/[^a-zA-Z0-9]/-/g')
+        
+        echo "Generating SBOM for image: $IMAGE"
+        
+        # Generate SBOM
+        docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+          aquasec/trivy image --format spdx-json --output sbom-$SAFE_IMAGE.json $IMAGE || {
+          echo "SBOM generation failed for $IMAGE"
+          echo "ERROR=SBOM generation failed" > sbom-results-$SAFE_IMAGE.env
+          exit 0
+        }
+        
+        # Scan SBOM for vulnerabilities
+        docker run --rm -v $(pwd):/workspace \
+          aquasec/trivy sbom --format json --output trivy-sbom-$SAFE_IMAGE.json /workspace/sbom-$SAFE_IMAGE.json || {
+          echo "SBOM scan failed for $IMAGE"
+          echo "ERROR=SBOM scan failed" >> sbom-results-$SAFE_IMAGE.env
+          exit 0
+        }
+        
+        # Process SBOM scan results
+        if [[ -f "trivy-sbom-$SAFE_IMAGE.json" ]]; then
+          CRITICAL=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' "trivy-sbom-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
+          HIGH=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' "trivy-sbom-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
+          MEDIUM=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "MEDIUM")] | length' "trivy-sbom-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
+          LOW=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "LOW")] | length' "trivy-sbom-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
+          TOTAL=$((CRITICAL + HIGH + MEDIUM + LOW))
+          
+          echo "IMAGE=$IMAGE" >> sbom-results-$SAFE_IMAGE.env
+          echo "CRITICAL=$CRITICAL" >> sbom-results-$SAFE_IMAGE.env
+          echo "HIGH=$HIGH" >> sbom-results-$SAFE_IMAGE.env
+          echo "MEDIUM=$MEDIUM" >> sbom-results-$SAFE_IMAGE.env
+          echo "LOW=$LOW" >> sbom-results-$SAFE_IMAGE.env
+          echo "TOTAL=$TOTAL" >> sbom-results-$SAFE_IMAGE.env
+        fi
+    
+    - name: Upload SBOM results
+      uses: actions/upload-artifact@v4
+      with:
+        name: sbom-scan-${{ matrix.image }}
+        path: |
+          sbom-*.json
+          trivy-sbom-*.json
+          sbom-results-*.env
+
+  filesystem-security-scan:
+    name: Filesystem Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Run Trivy filesystem scan
+      run: |
+        echo "Running Trivy filesystem security scan..."
+        
+        # Scan for misconfigurations
+        docker run --rm -v $(pwd):/workspace \
+          aquasec/trivy config --format json --output trivy-config.json /workspace || true
+        
+        # Scan filesystem for vulnerabilities
+        docker run --rm -v $(pwd):/workspace \
+          aquasec/trivy fs --format json --output trivy-fs.json /workspace || true
+        
+        # Process configuration scan results
+        if [[ -f "trivy-config.json" ]]; then
+          CONFIG_ISSUES=$(jq -r '[.Results[]?.Misconfigurations[]?] | length' trivy-config.json 2>/dev/null || echo "0")
+          CRITICAL_CONFIG=$(jq -r '[.Results[]?.Misconfigurations[]? | select(.Severity == "CRITICAL")] | length' trivy-config.json 2>/dev/null || echo "0")
+          HIGH_CONFIG=$(jq -r '[.Results[]?.Misconfigurations[]? | select(.Severity == "HIGH")] | length' trivy-config.json 2>/dev/null || echo "0")
+          MEDIUM_CONFIG=$(jq -r '[.Results[]?.Misconfigurations[]? | select(.Severity == "MEDIUM")] | length' trivy-config.json 2>/dev/null || echo "0")
+          LOW_CONFIG=$(jq -r '[.Results[]?.Misconfigurations[]? | select(.Severity == "LOW")] | length' trivy-config.json 2>/dev/null || echo "0")
+        else
+          CONFIG_ISSUES=0
+          CRITICAL_CONFIG=0
+          HIGH_CONFIG=0
+          MEDIUM_CONFIG=0
+          LOW_CONFIG=0
+        fi
+        
+        # Process filesystem scan results
+        if [[ -f "trivy-fs.json" ]]; then
+          FS_VULNS=$(jq -r '[.Results[]?.Vulnerabilities[]?] | length' trivy-fs.json 2>/dev/null || echo "0")
+          CRITICAL_FS=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' trivy-fs.json 2>/dev/null || echo "0")
+          HIGH_FS=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' trivy-fs.json 2>/dev/null || echo "0")
+        else
+          FS_VULNS=0
+          CRITICAL_FS=0
+          HIGH_FS=0
+        fi
+        
+        # Save results
+        echo "CONFIG_ISSUES=$CONFIG_ISSUES" >> fs-results.env
+        echo "CRITICAL_CONFIG=$CRITICAL_CONFIG" >> fs-results.env
+        echo "HIGH_CONFIG=$HIGH_CONFIG" >> fs-results.env
+        echo "MEDIUM_CONFIG=$MEDIUM_CONFIG" >> fs-results.env
+        echo "LOW_CONFIG=$LOW_CONFIG" >> fs-results.env
+        echo "FS_VULNS=$FS_VULNS" >> fs-results.env
+        echo "CRITICAL_FS=$CRITICAL_FS" >> fs-results.env
+        echo "HIGH_FS=$HIGH_FS" >> fs-results.env
+        
+        # Generate detailed reports for critical/high issues
+        if [[ -f "trivy-config.json" ]]; then
+          jq -r '
+            [.Results[]?.Misconfigurations[]? | select(.Severity == "CRITICAL" or .Severity == "HIGH")] |
+            sort_by(.Severity) | reverse |
+            .[] |
+            "| Config | `" + (.ID // "N/A") + "` | " + (.Severity // "UNKNOWN") + " | " + (.Title // "N/A") + " | " + (.Description // "No description") + " |"
+          ' trivy-config.json > config-details.md 2>/dev/null || echo "| No critical/high config issues found | - | - | - | - |" > config-details.md
+        fi
+        
+        if [[ -f "trivy-fs.json" ]]; then
+          jq -r '
+            [.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL" or .Severity == "HIGH")] |
+            sort_by(.Severity) | reverse |
+            .[] |
+            "| FS | `" + (.VulnerabilityID // "N/A") + "` | " + (.Severity // "UNKNOWN") + " | `" + (.PkgName // "N/A") + "` | " + (.Title // .Description // "No description") + " |"
+          ' trivy-fs.json > fs-details.md 2>/dev/null || echo "| No critical/high filesystem vulnerabilities found | - | - | - | - |" > fs-details.md
+        fi
+    
+    - name: Upload filesystem scan results
+      uses: actions/upload-artifact@v4
+      with:
+        name: filesystem-scan
+        path: |
+          trivy-*.json
+          fs-results.env
+          *-details.md
+
+  generate-security-report:
+    name: Generate Security Report
+    runs-on: ubuntu-latest
+    needs: [extract-images, image-vulnerability-scan, sbom-vulnerability-scan, filesystem-security-scan]
+    if: always() && needs.extract-images.outputs.image-count > 0
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Download all scan results
+      uses: actions/download-artifact@v4
+      with:
+        path: scan-results
+    
+    - name: Generate comprehensive security report
+      run: |
+        echo "Generating comprehensive security report..."
+        
+        # Get timestamp and commit info
+        TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+        
+        # Initialize counters
+        TOTAL_CRITICAL=0
+        TOTAL_HIGH=0
+        TOTAL_MEDIUM=0
+        TOTAL_LOW=0
+        TOTAL_CONFIG_ISSUES=0
+        TOTAL_FS_VULNS=0
+        
+        # Process image scan results
+        echo "| Image | Critical | High | Medium | Low | Total |" > image-summary.md
+        echo "|-------|----------|------|--------|-----|-------|" >> image-summary.md
+        
+        for result_dir in scan-results/image-scan-*; do
+          if [[ -d "$result_dir" ]]; then
+            for env_file in "$result_dir"/results-*.env; do
+              if [[ -f "$env_file" ]]; then
+                source "$env_file"
+                if [[ -n "$ERROR" ]]; then
+                  echo "| \`$IMAGE\` | ❌ Error | - | - | - | Scan Failed |" >> image-summary.md
+                else
+                  TOTAL_CRITICAL=$((TOTAL_CRITICAL + CRITICAL))
+                  TOTAL_HIGH=$((TOTAL_HIGH + HIGH))
+                  TOTAL_MEDIUM=$((TOTAL_MEDIUM + MEDIUM))
+                  TOTAL_LOW=$((TOTAL_LOW + LOW))
+                  echo "| \`$IMAGE\` | 🔴 $CRITICAL | 🟠 $HIGH | 🟡 $MEDIUM | 🔵 $LOW | $TOTAL |" >> image-summary.md
+                fi
+                # Reset variables
+                unset IMAGE CRITICAL HIGH MEDIUM LOW TOTAL ERROR
+              fi
+            done
+          fi
+        done
+        
+        # Process SBOM results
+        echo "| Image | Critical | High | Medium | Low | Total |" > sbom-summary.md
+        echo "|-------|----------|------|--------|-----|-------|" >> sbom-summary.md
+        
+        for result_dir in scan-results/sbom-scan-*; do
+          if [[ -d "$result_dir" ]]; then
+            for env_file in "$result_dir"/sbom-results-*.env; do
+              if [[ -f "$env_file" ]]; then
+                source "$env_file"
+                if [[ -n "$ERROR" ]]; then
+                  echo "| \`$IMAGE\` | ❌ Error | - | - | - | SBOM Failed |" >> sbom-summary.md
+                else
+                  echo "| \`$IMAGE\` | 🔴 $CRITICAL | 🟠 $HIGH | 🟡 $MEDIUM | 🔵 $LOW | $TOTAL |" >> sbom-summary.md
+                fi
+                unset IMAGE CRITICAL HIGH MEDIUM LOW TOTAL ERROR
+              fi
+            done
+          fi
+        done
+        
+        # Process filesystem results
+        if [[ -f "scan-results/filesystem-scan/fs-results.env" ]]; then
+          source scan-results/filesystem-scan/fs-results.env
+          TOTAL_CONFIG_ISSUES=$CONFIG_ISSUES
+          TOTAL_FS_VULNS=$FS_VULNS
+        fi
+        
+        # Generate detailed vulnerability table
+        echo "| Type | ID | Severity | Package/Rule | Version/Title | Description |" > detailed-vulns.md
+        echo "|------|----|-----------|-----------|---------|-----------------------|" >> detailed-vulns.md
+        
+        # Add image vulnerabilities
+        for result_dir in scan-results/image-scan-*; do
+          if [[ -d "$result_dir" ]]; then
+            for detail_file in "$result_dir"/details-*.md; do
+              if [[ -f "$detail_file" && -s "$detail_file" ]]; then
+                sed 's/^|/| Image |/' "$detail_file" >> detailed-vulns.md
+              fi
+            done
+          fi
+        done
+        
+        # Add filesystem issues
+        if [[ -f "scan-results/filesystem-scan/config-details.md" && -s "scan-results/filesystem-scan/config-details.md" ]]; then
+          cat scan-results/filesystem-scan/config-details.md >> detailed-vulns.md
+        fi
+        
+        if [[ -f "scan-results/filesystem-scan/fs-details.md" && -s "scan-results/filesystem-scan/fs-details.md" ]]; then
+          cat scan-results/filesystem-scan/fs-details.md >> detailed-vulns.md
+        fi
+        
+        # Determine overall security status
+        if [[ $TOTAL_CRITICAL -gt 0 ]]; then
+          SECURITY_STATUS="🔴 CRITICAL ISSUES FOUND"
+        elif [[ $TOTAL_HIGH -gt 0 ]]; then
+          SECURITY_STATUS="🟠 HIGH SEVERITY ISSUES"
+        elif [[ $((TOTAL_MEDIUM + TOTAL_LOW)) -gt 0 ]]; then
+          SECURITY_STATUS="🟡 MEDIUM/LOW ISSUES"
+        else
+          SECURITY_STATUS="✅ NO CRITICAL ISSUES"
+        fi
+        
+        # Export results
+        echo "SECURITY_STATUS=$SECURITY_STATUS" >> $GITHUB_ENV
+        echo "TOTAL_CRITICAL=$TOTAL_CRITICAL" >> $GITHUB_ENV
+        echo "TOTAL_HIGH=$TOTAL_HIGH" >> $GITHUB_ENV
+        echo "TOTAL_MEDIUM=$TOTAL_MEDIUM" >> $GITHUB_ENV
+        echo "TOTAL_LOW=$TOTAL_LOW" >> $GITHUB_ENV
+        echo "TOTAL_CONFIG_ISSUES=$TOTAL_CONFIG_ISSUES" >> $GITHUB_ENV
+        echo "TOTAL_FS_VULNS=$TOTAL_FS_VULNS" >> $GITHUB_ENV
+        echo "TIMESTAMP=$TIMESTAMP" >> $GITHUB_ENV
+    
+    - name: Update README with security results
+      run: |
+        echo "Updating README.md with Trivy security results..."
+        
+        # Create backup
+        cp README.md README.md.bak
+        
+        # Create new README content
+        {
+          # Keep everything before the security section
+          sed '/<!-- TRIVY-SECURITY-START -->/q' README.md | sed '$d' 2>/dev/null || cat README.md
+          
+          # Add security results section
+          echo "<!-- TRIVY-SECURITY-START -->"
+          echo "## 🛡️ Security Analysis - Trivy Scanning"
+          echo ""
+          echo "**Overall Status:** $SECURITY_STATUS  "
+          echo "**Critical Issues:** $TOTAL_CRITICAL  "
+          echo "**High Severity:** $TOTAL_HIGH  "
+          echo "**Medium Severity:** $TOTAL_MEDIUM  "
+          echo "**Low Severity:** $TOTAL_LOW  "
+          echo "**Config Issues:** $TOTAL_CONFIG_ISSUES  "
+          echo "**Filesystem Vulns:** $TOTAL_FS_VULNS  "
+          echo "**Last Updated:** $TIMESTAMP  "
+          echo "**Commit:** [\`${GITHUB_SHA:0:7}\`](https://github.com/${{ github.repository }}/commit/${GITHUB_SHA})  "
+          echo ""
+          
+          if [[ $TOTAL_CRITICAL -eq 0 && $TOTAL_HIGH -eq 0 ]]; then
+            echo "🎉 **Great!** No critical or high severity vulnerabilities found in container images and filesystem."
+          else
+            echo "### Container Image Vulnerabilities"
+            echo ""
+            if [[ -f "image-summary.md" ]]; then
+              cat image-summary.md
+            fi
+            echo ""
+            
+            echo "### SBOM Analysis Results"
+            echo ""
+            if [[ -f "sbom-summary.md" ]]; then
+              cat sbom-summary.md
+            fi
+            echo ""
+            
+            echo "### Filesystem Security Issues"
+            echo ""
+            echo "| Type | Config Issues | FS Vulnerabilities |"
+            echo "|------|---------------|-------------------|"
+            echo "| Count | $TOTAL_CONFIG_ISSUES | $TOTAL_FS_VULNS |"
+            echo ""
+            
+            echo "### Critical & High Severity Details"
+            echo ""
+            if [[ -f "detailed-vulns.md" && -s "detailed-vulns.md" ]]; then
+              cat detailed-vulns.md
+            else
+              echo "No critical or high severity issues found."
+            fi
+            echo ""
+            
+            echo "### Remediation Steps"
+            echo "1. **Update Images**: Use latest versions of container images with security patches"
+            echo "2. **Review Dependencies**: Check for vulnerable packages in container images"
+            echo "3. **Fix Configurations**: Address configuration issues identified by Trivy"
+            echo "4. **Monitor Regularly**: Set up automated scanning for new vulnerabilities"
+            echo "5. **SBOM Review**: Analyze Software Bill of Materials for supply chain security"
+          fi
+          
+          echo ""
+          echo "### Scanning Coverage"
+          echo "- **🖼️ Container Images**: All images used in kube-dump.sh"
+          echo "- **📋 SBOM Analysis**: Software Bill of Materials vulnerability checking" 
+          echo "- **📁 Filesystem**: Local files and configurations"
+          echo "- **⚙️ Configuration**: Security misconfigurations"
+          echo ""
+          echo "---"
+          echo "*This section is automatically updated by the [Security Scanning workflow](.github/workflows/security-trivy.yml)*"
+          echo "<!-- TRIVY-SECURITY-END -->"
+          echo ""
+          
+          # Keep everything after the security section  
+          sed -n '/<!-- TRIVY-SECURITY-END -->/,$p' README.md.bak | tail -n +2 2>/dev/null || echo ""
+        } > README.md.new
+        
+        # Replace old README with new one
+        mv README.md.new README.md
+        
+        echo "Security section updated in README.md"
+    
+    - name: Commit and push changes
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        
+        # Check if there are changes to commit
+        if git diff --quiet README.md; then
+          echo "No changes to README.md - skipping commit"
+        else
+          git add README.md
+          git commit -m "ci: Update Trivy security analysis results
+          
+          - Status: $SECURITY_STATUS
+          - Critical: $TOTAL_CRITICAL, High: $TOTAL_HIGH
+          - Medium: $TOTAL_MEDIUM, Low: $TOTAL_LOW  
+          - Config Issues: $TOTAL_CONFIG_ISSUES
+          - FS Vulnerabilities: $TOTAL_FS_VULNS
+          - Updated: $TIMESTAMP
+          - Commit: ${GITHUB_SHA:0:7}"
+          
+          git push origin HEAD:${{ github.ref_name }}
+          echo "✅ README.md updated with security scan results"
+        fi
+    
+    - name: Create PR comment (if applicable)
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const status = process.env.SECURITY_STATUS;
+          const critical = process.env.TOTAL_CRITICAL;
+          const high = process.env.TOTAL_HIGH;
+          const medium = process.env.TOTAL_MEDIUM;
+          const low = process.env.TOTAL_LOW;
+          
+          let comment = `## 🛡️ Trivy Security Analysis Results\n\n`;
+          comment += `**Status:** ${status}  \n`;
+          comment += `**Critical:** ${critical} | **High:** ${high} | **Medium:** ${medium} | **Low:** ${low}  \n`;
+          comment += `**Commit:** \`${process.env.GITHUB_SHA.substring(0, 7)}\`\n\n`;
+          
+          if (critical === '0' && high === '0') {
+            comment += `🎉 **Excellent!** No critical or high severity vulnerabilities found.`;
+          } else {
+            comment += `⚠️ **Security Issues Detected**\n\n`;
+            comment += `Please review the security scan results and address critical/high severity issues.\n\n`;
+            comment += `### Next Steps\n`;
+            comment += `1. Update container images to latest secure versions\n`;
+            comment += `2. Review and fix configuration issues\n`;
+            comment += `3. Check SBOM analysis for supply chain vulnerabilities\n`;
+            comment += `4. Run security scan locally: \`trivy image <image-name>\`\n`;
+          }
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });

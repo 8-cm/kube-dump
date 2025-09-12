@@ -1,0 +1,209 @@
+name: Shellcheck Analysis
+
+on:
+  push:
+    branches: [ master, main ]
+    paths: 
+      - 'kube-dump.sh'
+      - '.github/workflows/shellcheck.yml'
+  pull_request:
+    branches: [ master, main ]
+    paths:
+      - 'kube-dump.sh'
+      - '.github/workflows/shellcheck.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  shellcheck:
+    name: Shellcheck Analysis
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Install shellcheck
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y shellcheck
+    
+    - name: Run shellcheck and generate results
+      run: |
+        echo "Running shellcheck analysis..."
+        
+        # Create results directory
+        mkdir -p results
+        
+        # Run shellcheck and capture results
+        if shellcheck -f gcc kube-dump.sh > results/shellcheck-raw.txt 2>&1; then
+          echo "✅ No shellcheck issues found"
+          echo "SHELLCHECK_STATUS=✅ PASSED" >> $GITHUB_ENV
+          echo "ISSUE_COUNT=0" >> $GITHUB_ENV
+          echo "" > results/shellcheck-table.md
+        else
+          echo "⚠️ Shellcheck issues found"
+          echo "SHELLCHECK_STATUS=⚠️ ISSUES FOUND" >> $GITHUB_ENV
+          
+          # Count issues
+          ISSUE_COUNT=$(wc -l < results/shellcheck-raw.txt || echo "0")
+          echo "ISSUE_COUNT=$ISSUE_COUNT" >> $GITHUB_ENV
+          
+          # Convert to markdown table
+          echo "| File | Line | Column | Level | Code | Message |" > results/shellcheck-table.md
+          echo "|------|------|--------|-------|------|---------|" >> results/shellcheck-table.md
+          
+          # Parse shellcheck output and create table rows
+          while IFS= read -r line; do
+            if [[ -n "$line" ]]; then
+              # Extract components using awk and sed
+              file=$(echo "$line" | cut -d':' -f1 | sed 's|.*/||')
+              line_num=$(echo "$line" | cut -d':' -f2)
+              col_num=$(echo "$line" | cut -d':' -f3)
+              level=$(echo "$line" | cut -d':' -f4 | sed 's/^ *//')
+              
+              # Extract code and message
+              rest=$(echo "$line" | cut -d':' -f5- | sed 's/^ *//')
+              if [[ "$rest" =~ \[SC[0-9]+\] ]]; then
+                code=$(echo "$rest" | grep -o '\[SC[0-9]*\]' | head -1)
+                message=$(echo "$rest" | sed 's/.*\[SC[0-9]*\] *//')
+              else
+                code=""
+                message="$rest"
+              fi
+              
+              # Clean up level
+              case "$level" in
+                *error*) level="🔴 error" ;;
+                *warning*) level="⚠️ warning" ;;
+                *info*) level="ℹ️ info" ;;
+                *note*) level="📝 note" ;;
+                *style*) level="🎨 style" ;;
+                *) level="❓ $level" ;;
+              esac
+              
+              # Add table row
+              echo "| \`$file\` | $line_num | $col_num | $level | \`$code\` | $message |" >> results/shellcheck-table.md
+            fi
+          done < results/shellcheck-raw.txt
+        fi
+        
+        # Get timestamp
+        echo "TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_ENV
+    
+    - name: Update README with shellcheck results
+      run: |
+        echo "Updating README.md with shellcheck results..."
+        
+        # Create backup
+        cp README.md README.md.bak
+        
+        # Create new README content
+        {
+          # Keep everything before the shellcheck section
+          sed '/<!-- SHELLCHECK-RESULTS-START -->/q' README.md | sed '$d' 2>/dev/null || echo ""
+          
+          # Add shellcheck results section
+          echo "<!-- SHELLCHECK-RESULTS-START -->"
+          echo "## 🔍 Code Quality - Shellcheck Analysis"
+          echo ""
+          echo "**Status:** $SHELLCHECK_STATUS  "
+          echo "**Issues Found:** $ISSUE_COUNT  "
+          echo "**Last Updated:** $TIMESTAMP  "
+          echo "**Commit:** [\`${GITHUB_SHA:0:7}\`](https://github.com/${{ github.repository }}/commit/${GITHUB_SHA})  "
+          echo ""
+          
+          if [[ "$ISSUE_COUNT" -eq 0 ]]; then
+            echo "🎉 **Excellent!** No shellcheck issues found. The script follows shell scripting best practices."
+          else
+            echo "### Issues Found"
+            echo ""
+            cat results/shellcheck-table.md
+            echo ""
+            echo "### How to Fix"
+            echo "1. Review the shellcheck findings above"
+            echo "2. Fix issues by following [ShellCheck wiki](https://www.shellcheck.net/wiki/) recommendations"
+            echo "3. Run \`shellcheck kube-dump.sh\` locally to verify fixes"
+            echo "4. Commit and push your changes to re-run this analysis"
+          fi
+          
+          echo ""
+          echo "---"
+          echo "*This section is automatically updated by the [Shellcheck Analysis workflow](.github/workflows/shellcheck.yml)*"
+          echo "<!-- SHELLCHECK-RESULTS-END -->"
+          echo ""
+          
+          # Keep everything after the shellcheck section
+          sed -n '/<!-- SHELLCHECK-RESULTS-END -->/,$p' README.md.bak | tail -n +2 2>/dev/null || echo ""
+        } > README.md.new
+        
+        # Replace old README with new one
+        mv README.md.new README.md
+        
+        # Show what changed
+        echo "README.md updated successfully!"
+        echo "Changes made:"
+        git diff README.md.bak README.md || echo "No git diff available"
+    
+    - name: Commit and push changes
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        
+        # Check if there are changes to commit
+        if git diff --quiet README.md; then
+          echo "No changes to README.md - skipping commit"
+        else
+          git add README.md
+          git commit -m "ci: Update shellcheck analysis results
+          
+          - Status: $SHELLCHECK_STATUS
+          - Issues: $ISSUE_COUNT
+          - Timestamp: $TIMESTAMP
+          - Commit: ${GITHUB_SHA:0:7}"
+          
+          git push origin HEAD:${{ github.ref_name }}
+          echo "✅ README.md updated with shellcheck results"
+        fi
+    
+    - name: Create PR comment (if applicable)
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const status = process.env.SHELLCHECK_STATUS;
+          const issueCount = process.env.ISSUE_COUNT;
+          
+          let comment = `## 🔍 Shellcheck Analysis Results\n\n`;
+          comment += `**Status:** ${status}  \n`;
+          comment += `**Issues Found:** ${issueCount}  \n`;
+          comment += `**Commit:** \`${process.env.GITHUB_SHA.substring(0, 7)}\`\n\n`;
+          
+          if (issueCount === '0') {
+            comment += `🎉 **Excellent!** No shellcheck issues found in this PR.`;
+          } else {
+            comment += `### Issues Found\n\n`;
+            try {
+              const table = fs.readFileSync('results/shellcheck-table.md', 'utf8');
+              comment += table;
+              comment += `\n\n### Next Steps\n`;
+              comment += `1. Review the shellcheck findings above\n`;
+              comment += `2. Fix issues following [ShellCheck wiki](https://www.shellcheck.net/wiki/) recommendations\n`;
+              comment += `3. Push fixes to update this analysis\n`;
+            } catch (e) {
+              comment += `Error reading shellcheck results: ${e.message}`;
+            }
+          }
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });
