@@ -137,10 +137,10 @@ jobs:
           jq -r '
             [.Results[]?.Vulnerabilities[]?] |
             # Sort by CVSS score (descending) - highest scores first
-            sort_by(-((.CVSS // {})[] | .V3Score // .V2Score // 0)) |
+            sort_by(-((.CVSS // {} | to_entries[] | .value.V3Score // .value.V2Score // 0))) |
             .[] |
             "| Image | `" + (.VulnerabilityID // "N/A") + "` | " + (.Severity // "UNKNOWN") + " | " + 
-            ((.CVSS // {})[] | (.V3Score // .V2Score // "N/A") | tostring) + " | `" + 
+            ((.CVSS // {} | to_entries[] | .value.V3Score // .value.V2Score // "N/A") | tostring) + " | `" + 
             (.PkgName // "N/A") + "` | `" + (.InstalledVersion // "N/A") + "` | `" + 
             (.FixedVersion // "Not Available") + "` | " + 
             ((.Description // .Title // "No description available") | gsub("\n"; " ") | .[0:150]) + 
@@ -339,10 +339,10 @@ jobs:
           jq -r '
             [.Results[]?.Vulnerabilities[]?] |
             # Sort by CVSS score (descending) - highest scores first
-            sort_by(-((.CVSS // {})[] | .V3Score // .V2Score // 0)) |
+            sort_by(-((.CVSS // {} | to_entries[] | .value.V3Score // .value.V2Score // 0))) |
             .[] |
             "| FS | `" + (.VulnerabilityID // "N/A") + "` | " + (.Severity // "UNKNOWN") + " | " + 
-            ((.CVSS // {})[] | (.V3Score // .V2Score // "N/A") | tostring) + " | `" + 
+            ((.CVSS // {} | to_entries[] | .value.V3Score // .value.V2Score // "N/A") | tostring) + " | `" + 
             (.PkgName // "N/A") + "` | `" + (.InstalledVersion // "N/A") + "` | `" + 
             (.FixedVersion // "Not Available") + "` | " + 
             ((.Description // .Title // "No description available") | gsub("\n"; " ") | .[0:150]) + 
