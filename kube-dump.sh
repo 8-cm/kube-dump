@@ -1940,7 +1940,38 @@ build_debug_script() {
 set -e
 echo "Starting network capture for ${pod_name}:${container_name}" >&2
 
-# Function to configure crictl socket
+# -------------------------------------------------------------------------------
+# Function: configure_crictl_socket
+# -------------------------------------------------------------------------------
+# Description:
+#   Configures the Container Runtime Interface (CRI) socket for crictl operations
+#   within debug pods. This embedded function sets up the appropriate runtime
+#   endpoint based on the detected or specified container runtime, enabling
+#   crictl commands to communicate with the host's container runtime.
+#
+# Parameters:
+#   None (uses global environment variables from parent script)
+#   - CRI_SOCKET: Custom CRI socket path (optional)
+#   - CRI_RUNTIME: Detected container runtime (containerd, crio, docker)
+#
+# Example Usage:
+#   configure_crictl_socket
+#   This function is called within debug pod scripts to set up crictl access.
+#
+# Expected Output:
+#   - Creates /etc/crictl.yaml with runtime endpoint configuration
+#   - Outputs configuration confirmation message to stderr
+#   - Enables crictl commands to function within the debug pod environment
+#
+# Detailed Behavior:
+#   1. Determines appropriate socket path based on custom or runtime-specific defaults:
+#      - Uses CRI_SOCKET if explicitly provided (prefixed with /host)
+#      - Falls back to runtime-specific defaults for containerd, crio, or docker
+#      - Defaults to containerd socket for unknown runtimes
+#   2. Creates /etc/crictl.yaml configuration file with runtime-endpoint setting
+#   3. Provides confirmation output showing the configured endpoint
+#   4. Enables subsequent crictl operations within the debug pod environment
+# -------------------------------------------------------------------------------
 configure_crictl_socket() {
   local socket_path
 
@@ -2871,7 +2902,40 @@ build_kill_switch_monitor_script() {
 set -e
 echo "=== Kill switch monitor for ${target_debug_pod} ===" >&2
 
-# Function to parse size to bytes (supports OpenShift/k8s standard units)
+# -------------------------------------------------------------------------------
+# Function: parse_size_to_bytes
+# -------------------------------------------------------------------------------
+# Description:
+#   Converts human-readable size strings with units to bytes for precise storage
+#   threshold calculations. This embedded function supports both decimal (SI)
+#   and binary (IEC) unit standards commonly used in Kubernetes and OpenShift
+#   environments, enabling accurate disk usage comparisons.
+#
+# Parameters:
+#   $1 - size_str: Size string with unit (e.g., "1GB", "500MB", "1.5Gi")
+#        Supports: B, K/Ki, M/Mi, G/Gi, T/Ti with various case combinations
+#
+# Example Usage:
+#   bytes=$(parse_size_to_bytes "1GB")     # Returns: 1073741824
+#   bytes=$(parse_size_to_bytes "500MB")   # Returns: 524288000
+#   bytes=$(parse_size_to_bytes "1.5Gi")   # Returns: 1610612736
+#
+# Expected Output:
+#   - Returns the equivalent number of bytes as a string to stdout
+#   - Returns empty string and exit code 1 for invalid input formats
+#   - Handles both decimal (1000-based) and binary (1024-based) units
+#
+# Detailed Behavior:
+#   1. Uses regex pattern matching to extract numeric value and unit suffix
+#   2. Handles decimal numbers with optional fractional parts
+#   3. Defaults to bytes (B) if no unit is specified
+#   4. Supports comprehensive unit conversion matrix:
+#      - Decimal units: K(1000), M(1000²), G(1000³), T(1000⁴)
+#      - Binary units: Ki(1024), Mi(1024²), Gi(1024³), Ti(1024⁴)
+#      - Case-insensitive unit recognition with multiple format variants
+#   5. Uses integer arithmetic for binary calculations to avoid floating-point errors
+#   6. Returns empty result for unrecognized units or malformed input
+# -------------------------------------------------------------------------------
 parse_size_to_bytes() {
   local size_str="\$1"
   local size_num=""
