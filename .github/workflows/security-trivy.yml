@@ -133,17 +133,29 @@ jobs:
           echo "UNKNOWN=$UNKNOWN" >> results-$SAFE_IMAGE.env
           echo "TOTAL=$TOTAL" >> results-$SAFE_IMAGE.env
           
-          # Generate detailed table for critical/high issues
+          # Generate detailed table for all vulnerabilities sorted by score
           jq -r '
-            [.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL" or .Severity == "HIGH")] |
-            sort_by(.Severity) | reverse |
+            # Define severity order for sorting when CVSS is unavailable
+            def severity_order: {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1, "UNKNOWN": 0};
+            
+            [.Results[]?.Vulnerabilities[]?] |
+            # Sort by CVSS score (descending), then by severity order as fallback
+            sort_by([
+              -((.CVSS // {})[] | .V3Score // .V2Score // 0),  # Primary: CVSS score (descending)
+              -severity_order[.Severity // "UNKNOWN"]          # Fallback: severity order (descending)
+            ]) |
             .[] |
-            "| Image | `" + (.VulnerabilityID // "N/A") + "` | " + (.Severity // "UNKNOWN") + " | `" + (.PkgName // "N/A") + "` | `" + (.InstalledVersion // "N/A") + "` | `" + (.FixedVersion // "Not Available") + "` | " + ((.Description // .Title // "No description available") | gsub("\n"; " ") | .[0:200]) + (if ((.Description // .Title // "") | length) > 200 then "..." else "" end) + " |"
-          ' "trivy-image-$SAFE_IMAGE.json" > details-$SAFE_IMAGE.md 2>/dev/null || echo "| Image | No critical/high vulnerabilities | - | - | - | - | - |" > details-$SAFE_IMAGE.md
+            "| Image | `" + (.VulnerabilityID // "N/A") + "` | " + (.Severity // "UNKNOWN") + " | " + 
+            ((.CVSS // {})[] | (.V3Score // .V2Score // "N/A") | tostring) + " | `" + 
+            (.PkgName // "N/A") + "` | `" + (.InstalledVersion // "N/A") + "` | `" + 
+            (.FixedVersion // "Not Available") + "` | " + 
+            ((.Description // .Title // "No description available") | gsub("\n"; " ") | .[0:150]) + 
+            (if ((.Description // .Title // "") | length) > 150 then "..." else "" end) + " |"
+          ' "trivy-image-$SAFE_IMAGE.json" > details-$SAFE_IMAGE.md 2>/dev/null || echo "| Image | No vulnerabilities found | - | - | - | - | - | - |" > details-$SAFE_IMAGE.md
         else
           echo "IMAGE=$IMAGE" >> results-$SAFE_IMAGE.env
           echo "ERROR=Scan failed" >> results-$SAFE_IMAGE.env
-          echo "| Image | Scan Error | - | - | - | - | Trivy scan failed for this image |" > details-$SAFE_IMAGE.md
+          echo "| Image | Scan Error | - | - | - | - | - | Trivy scan failed for this image |" > details-$SAFE_IMAGE.md
         fi
     
     - name: Sanitize image name for artifact
@@ -313,20 +325,41 @@ jobs:
         # Generate detailed reports for critical/high issues
         if [[ -f "trivy-config.json" ]]; then
           jq -r '
-            [.Results[]?.Misconfigurations[]? | select(.Severity == "CRITICAL" or .Severity == "HIGH")] |
-            sort_by(.Severity) | reverse |
+            # Define severity order and scoring for config issues
+            def severity_order: {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1, "UNKNOWN": 0};
+            def severity_score: {"CRITICAL": "10.0", "HIGH": "8.0", "MEDIUM": "5.0", "LOW": "2.0", "UNKNOWN": "0.0"};
+            
+            [.Results[]?.Misconfigurations[]?] |
+            # Sort by severity order (descending)
+            sort_by(-severity_order[.Severity // "UNKNOWN"]) |
             .[] |
-            "| Config | `" + (.ID // "N/A") + "` | " + (.Severity // "UNKNOWN") + " | " + (.Title // "N/A") + " | - | `" + (.Resolution // "N/A") + "` | " + ((.Description // "No description available") | gsub("\n"; " ") | .[0:200]) + (if (.Description // "" | length) > 200 then "..." else "" end) + " |"
-          ' trivy-config.json > config-details.md 2>/dev/null || echo "| Config | No critical/high issues | - | - | - | - | - |" > config-details.md
+            "| Config | `" + (.ID // "N/A") + "` | " + (.Severity // "UNKNOWN") + " | " + 
+            severity_score[.Severity // "UNKNOWN"] + " | " + (.Title // "N/A") + " | - | `" + 
+            (.Resolution // "N/A") + "` | " + 
+            ((.Description // "No description available") | gsub("\n"; " ") | .[0:150]) + 
+            (if (.Description // "" | length) > 150 then "..." else "" end) + " |"
+          ' trivy-config.json > config-details.md 2>/dev/null || echo "| Config | No issues found | - | - | - | - | - | - |" > config-details.md
         fi
         
         if [[ -f "trivy-fs.json" ]]; then
           jq -r '
-            [.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL" or .Severity == "HIGH")] |
-            sort_by(.Severity) | reverse |
+            # Define severity order for sorting when CVSS is unavailable
+            def severity_order: {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1, "UNKNOWN": 0};
+            
+            [.Results[]?.Vulnerabilities[]?] |
+            # Sort by CVSS score (descending), then by severity order as fallback
+            sort_by([
+              -((.CVSS // {})[] | .V3Score // .V2Score // 0),  # Primary: CVSS score (descending)
+              -severity_order[.Severity // "UNKNOWN"]          # Fallback: severity order (descending)
+            ]) |
             .[] |
-            "| FS | `" + (.VulnerabilityID // "N/A") + "` | " + (.Severity // "UNKNOWN") + " | `" + (.PkgName // "N/A") + "` | `" + (.InstalledVersion // "N/A") + "` | `" + (.FixedVersion // "Not Available") + "` | " + ((.Description // .Title // "No description available") | gsub("\n"; " ") | .[0:200]) + (if ((.Description // .Title // "") | length) > 200 then "..." else "" end) + " |"
-          ' trivy-fs.json > fs-details.md 2>/dev/null || echo "| FS | No critical/high vulnerabilities | - | - | - | - | - |" > fs-details.md
+            "| FS | `" + (.VulnerabilityID // "N/A") + "` | " + (.Severity // "UNKNOWN") + " | " + 
+            ((.CVSS // {})[] | (.V3Score // .V2Score // "N/A") | tostring) + " | `" + 
+            (.PkgName // "N/A") + "` | `" + (.InstalledVersion // "N/A") + "` | `" + 
+            (.FixedVersion // "Not Available") + "` | " + 
+            ((.Description // .Title // "No description available") | gsub("\n"; " ") | .[0:150]) + 
+            (if ((.Description // .Title // "") | length) > 150 then "..." else "" end) + " |"
+          ' trivy-fs.json > fs-details.md 2>/dev/null || echo "| FS | No vulnerabilities found | - | - | - | - | - | - |" > fs-details.md
         fi
     
     - name: Upload filesystem scan results
@@ -421,8 +454,8 @@ jobs:
         fi
         
         # Generate detailed vulnerability table
-        echo "| Type | ID | Severity | Package | Installed | Fixed In | Description |" > detailed-vulns.md
-        echo "|------|----|-----------|---------|-----------|-----------|-----------------------|" >> detailed-vulns.md
+        echo "| Type | ID | Severity | Score | Package | Installed | Fixed In | Description |" > detailed-vulns.md
+        echo "|------|----|-----------|---------|---------|-----------|-----------|-----------------------|" >> detailed-vulns.md
         
         # Add image vulnerabilities
         for result_dir in scan-results/image-scan-*; do
@@ -516,12 +549,12 @@ jobs:
             echo "| Count | $TOTAL_CONFIG_ISSUES | $TOTAL_FS_VULNS |"
             echo ""
             
-            echo "### Critical & High Severity Details"
+            echo "### Vulnerability Details (Sorted by CVSS Score)"
             echo ""
             if [[ -f "detailed-vulns.md" && -s "detailed-vulns.md" ]]; then
               cat detailed-vulns.md
             else
-              echo "No critical or high severity issues found."
+              echo "No vulnerabilities or security issues found."
             fi
             echo ""
             
