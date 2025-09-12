@@ -41,12 +41,12 @@ jobs:
         # Extract all image references and create unique list
         {
           # Extract DEBUG_IMAGE default value (this is the main image used everywhere)
-          grep 'DEBUG_IMAGE=' kube-dump.sh | grep -o '"[^"]*"' | tr -d '"' | head -1
+          grep '^  DEBUG_IMAGE="' kube-dump.sh | head -1 | grep -o '"[^"]*"' | tr -d '"'
           
-          # Extract any hardcoded image references (fallback)
+          # Extract any hardcoded image references (fallback)  
           grep -oE '[a-zA-Z0-9.-]+/[a-zA-Z0-9._-]+:[a-zA-Z0-9._-]+' kube-dump.sh || true
           
-        } | sort -u | grep -E '^[a-zA-Z0-9.-]+(/[a-zA-Z0-9._-]+)?:[a-zA-Z0-9._-]+$' > unique-images.txt
+        } | sort -u | grep -E '^[a-zA-Z0-9.-]+(/[a-zA-Z0-9._-]+)?(:[a-zA-Z0-9._-]+)?$' > unique-images.txt
         
         # Convert to JSON array for matrix
         IMAGES=$(cat unique-images.txt | jq -R -s -c 'split("\n")[:-1]')
