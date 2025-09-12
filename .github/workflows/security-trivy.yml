@@ -81,13 +81,22 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
     
-    - name: Setup Trivy
-      uses: aquasecurity/trivy-action@master
-      with:
-        scan-type: 'image'
-        image-ref: ${{ matrix.image }}
-        format: 'json'
-        output: 'trivy-image-${{ matrix.image }}.json'
+    - name: Run Trivy scan for image
+      run: |
+        IMAGE="${{ matrix.image }}"
+        SAFE_IMAGE=$(echo "$IMAGE" | sed 's/[^a-zA-Z0-9]/-/g')
+        echo "Scanning image: $IMAGE"
+        echo "Safe filename: trivy-image-$SAFE_IMAGE.json"
+        
+        # Run Trivy scan with safe filename
+        docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+          -v $(pwd):/workspace \
+          aquasec/trivy image --format json --output /workspace/trivy-image-$SAFE_IMAGE.json $IMAGE || {
+          echo "Trivy scan failed for $IMAGE"
+          echo "IMAGE=$IMAGE" >> results-$SAFE_IMAGE.env
+          echo "ERROR=Scan failed" >> results-$SAFE_IMAGE.env
+          exit 0
+        }
     
     - name: Parse Trivy results for image
       run: |
@@ -97,13 +106,13 @@ jobs:
         echo "Processing results for image: $IMAGE"
         
         # Process JSON results
-        if [[ -f "trivy-image-$IMAGE.json" ]]; then
+        if [[ -f "trivy-image-$SAFE_IMAGE.json" ]]; then
           # Count vulnerabilities by severity
-          CRITICAL=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' "trivy-image-$IMAGE.json" 2>/dev/null || echo "0")
-          HIGH=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' "trivy-image-$IMAGE.json" 2>/dev/null || echo "0")
-          MEDIUM=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "MEDIUM")] | length' "trivy-image-$IMAGE.json" 2>/dev/null || echo "0")
-          LOW=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "LOW")] | length' "trivy-image-$IMAGE.json" 2>/dev/null || echo "0")
-          UNKNOWN=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "UNKNOWN")] | length' "trivy-image-$IMAGE.json" 2>/dev/null || echo "0")
+          CRITICAL=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' "trivy-image-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
+          HIGH=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' "trivy-image-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
+          MEDIUM=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "MEDIUM")] | length' "trivy-image-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
+          LOW=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "LOW")] | length' "trivy-image-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
+          UNKNOWN=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "UNKNOWN")] | length' "trivy-image-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
           TOTAL=$((CRITICAL + HIGH + MEDIUM + LOW + UNKNOWN))
           
           # Create summary
@@ -121,7 +130,7 @@ jobs:
             sort_by(.Severity) | reverse |
             .[] |
             "| `" + (.VulnerabilityID // "N/A") + "` | " + (.Severity // "UNKNOWN") + " | `" + (.PkgName // "N/A") + "` | `" + (.InstalledVersion // "N/A") + "` | `" + (.FixedVersion // "Not Available") + "` | " + (.Title // .Description // "No description available") + " |"
-          ' "trivy-image-$IMAGE.json" > details-$SAFE_IMAGE.md 2>/dev/null || echo "| No critical/high vulnerabilities | - | - | - | - | - |" > details-$SAFE_IMAGE.md
+          ' "trivy-image-$SAFE_IMAGE.json" > details-$SAFE_IMAGE.md 2>/dev/null || echo "| No critical/high vulnerabilities | - | - | - | - | - |" > details-$SAFE_IMAGE.md
         else
           echo "IMAGE=$IMAGE" >> results-$SAFE_IMAGE.env
           echo "ERROR=Scan failed" >> results-$SAFE_IMAGE.env
