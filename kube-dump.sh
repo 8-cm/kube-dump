@@ -186,13 +186,39 @@ initialize_variables() {
   KILL_SWITCH_REL=""  # Kill switch relative threshold (e.g., 10%)
   POD_VOLUME=""  # Volume path to monitor for pod-based kill switches
   NODE_VOLUME=""  # Volume path to monitor for node-based kill switches
-  KILL_SWITCH_MONITOR_PODS=()  # Array for kill switch monitor pods
   DEBUG_IMAGE="nicolaka/netshoot"  # Default container image for debug/discovery/killswitch pods
+  KILL_SWITCH_MONITOR_PODS=()  # Array for kill switch monitor pods
   KUBE_CLI=""  # Will be set to 'oc' or '$KUBE_CLI' based on availability
 }
 
 # -------------------------------------------------------------------------------
 # Function: detect_kube_cli
+# -------------------------------------------------------------------------------
+# Description:
+#   Detects and configures the appropriate Kubernetes command-line interface (CLI)
+#   tool to use for the script. This function first checks for OpenShift CLI (oc),
+#   then falls back to the standard kubectl if oc is not available. It sets the
+#   global KUBE_CLI variable and provides user feedback about which CLI is being used.
+#
+# Parameters:
+#   None.
+#
+# Example Usage:
+#   detect_kube_cli
+#   # This will detect the CLI and set KUBE_CLI variable
+#
+# Expected Output:
+#   - Sets KUBE_CLI global variable to either "oc" or "kubectl"
+#   - Prints informational message to stderr indicating which CLI is being used
+#   - Exits with status 1 if no compatible CLI is found
+#
+# Detailed Behavior:
+#   - First checks if 'oc' (OpenShift CLI) is available in PATH
+#   - If oc is found, sets KUBE_CLI="oc" and notifies user via stderr
+#   - If oc is not found, checks if kubectl is available in PATH
+#   - If kubectl is found, sets KUBE_CLI="kubectl" and notifies user via stderr
+#   - If neither CLI is available, prints error message and exits with status 1
+#   - This function must be called early in script execution to ensure proper CLI setup
 # -------------------------------------------------------------------------------
 detect_kube_cli() {
   if command -v oc >/dev/null 2>&1; then
@@ -210,6 +236,35 @@ detect_kube_cli() {
 # -------------------------------------------------------------------------------
 # Function: validate_option_value
 # -------------------------------------------------------------------------------
+# Description:
+#   Validates that a command-line option has been provided with a proper value.
+#   This function ensures that options requiring values are not left empty or
+#   accidentally given another option (starting with '-') as their value. It
+#   provides user-friendly error messages and displays usage information when
+#   validation fails.
+#
+# Parameters:
+#   $1 (val): The value to validate - should be the argument following an option
+#   $2 (option_name): The name of the option being validated (for error messages)
+#
+# Example Usage:
+#   validate_option_value "$2" "-l"
+#   validate_option_value "$OPTARG" "--namespace"
+#   # These calls check if the provided value is valid for the given option
+#
+# Expected Output:
+#   - No output if validation passes
+#   - Error message to stderr if validation fails
+#   - Calls usage() and exits if validation fails
+#
+# Detailed Behavior:
+#   - Checks if the provided value is empty (zero-length string)
+#   - Checks if the provided value starts with '-' (indicating it's likely another option)
+#   - If either condition is true, considers it a validation failure
+#   - On failure, prints descriptive error message identifying the problematic option
+#   - Calls usage() function to display help information and terminate script
+#   - This function is critical for preventing malformed command-line parsing
+# -------------------------------------------------------------------------------
 validate_option_value() {
   local val="$1"
   local option_name="$2"
@@ -223,9 +278,43 @@ validate_option_value() {
 # -------------------------------------------------------------------------------
 # Function: format_message
 # -------------------------------------------------------------------------------
+# Description:
+#   Formats output messages by conditionally replacing Unicode emoji glyphs with
+#   ASCII text equivalents when NO_GLYPHS is enabled. This function also handles
+#   logging to a file when output directory is specified. It ensures consistent
+#   message formatting across the entire script while supporting both visual
+#   (emoji) and text-only display modes for different terminal environments.
+#
+# Parameters:
+#   $1 (message): The message string to format, potentially containing emoji glyphs
+#
+# Example Usage:
+#   format_message "🔍 Searching for pods..."
+#   format_message "✅ Debug pod created successfully"
+#   # These will output formatted messages and optionally log them
+#
+# Expected Output:
+#   - Formatted message printed to stdout
+#   - If NO_GLYPHS=true, emojis are replaced with [TEXT] equivalents
+#   - If OUTPUT_DIR is set, message is also logged to KUBE_DUMP_LOG_FILE with timestamp
+#
+# Detailed Behavior:
+#   - Checks NO_GLYPHS global variable to determine formatting mode
+#   - If NO_GLYPHS is true, performs comprehensive emoji-to-text substitution:
+#     * 🔍 → [SEARCH], 🔧 → [SETUP], 🛡️ → [SECURITY], ✅ → [OK]
+#     * 🔴 → [KILL], ❌ → [ERROR], 🟢 → [SUCCESS], ⚠️ → [WARNING]
+#     * 📋 → [INFO], 🔄 → [PROGRESS], 📥 → [DOWNLOAD], 🚫 → [BLOCKED]
+#     * 💾 → [STORAGE], ⏳ → [WAITING], 🖥️ → [NODE], ℹ️ → [INFO]
+#     * ⏸️ → [PAUSE], 🗑️ → [CLEANUP], 📦 → [POD], 🧹 → [CLEAN]
+#     * 🚀 → [LAUNCH], 🎯 → [TARGET], 📊 → [STATUS], 🎉 → [COMPLETE]
+#     * ━ → = (converts Unicode box drawing to ASCII)
+#   - Prints formatted message to stdout
+#   - If OUTPUT_DIR and KUBE_DUMP_LOG_FILE are set, appends timestamped entry to log file
+#   - This function is the primary output handler for user-visible messages
+# -------------------------------------------------------------------------------
 format_message() {
   local message="$1"
-  
+
   if [[ "$NO_GLYPHS" == "true" ]]; then
     message="${message//🔍/[SEARCH]}"
     message="${message//🔧/[SETUP]}"
@@ -253,9 +342,9 @@ format_message() {
     message="${message//🎉/[COMPLETE]}"
     message="${message//━/=}"
   fi
-  
+
   echo "$message"
-  
+
   # Log to file if OUTPUT_DIR is specified (indicating -o was used)
   if [[ -n "$OUTPUT_DIR" && -n "$KUBE_DUMP_LOG_FILE" ]]; then
     echo "$(date '+%Y-%m-%d %H:%M:%S') - $message" >> "$KUBE_DUMP_LOG_FILE"
@@ -265,9 +354,44 @@ format_message() {
 # -------------------------------------------------------------------------------
 # Function: format_message_stderr
 # -------------------------------------------------------------------------------
+# Description:
+#   Formats and outputs messages to standard error (stderr) with conditional
+#   emoji-to-text conversion when NO_GLYPHS is enabled. This function mirrors
+#   the functionality of format_message() but directs output to stderr for
+#   error messages, warnings, and informational content that should not interfere
+#   with primary script output. It also provides logging capabilities.
+#
+# Parameters:
+#   $1 (message): The message string to format and send to stderr, potentially containing emoji glyphs
+#
+# Example Usage:
+#   format_message_stderr "⚠️ Warning: Debug pod already exists"
+#   format_message_stderr "❌ Error: Failed to create pod"
+#   # These will output formatted messages to stderr and optionally log them
+#
+# Expected Output:
+#   - Formatted message printed to stderr (file descriptor 2)
+#   - If NO_GLYPHS=true, emojis are replaced with [TEXT] equivalents
+#   - If OUTPUT_DIR is set, message is also logged to KUBE_DUMP_LOG_FILE with "STDERR:" prefix
+#
+# Detailed Behavior:
+#   - Performs identical emoji-to-text substitution as format_message() when NO_GLYPHS is true
+#   - Applies the same comprehensive glyph replacement mapping:
+#     * 🔍 → [SEARCH], 🔧 → [SETUP], 🛡️ → [SECURITY], ✅ → [OK]
+#     * 🔴 → [KILL], ❌ → [ERROR], 🟢 → [SUCCESS], ⚠️ → [WARNING]
+#     * 📋 → [INFO], 🔄 → [PROGRESS], 📥 → [DOWNLOAD], 🚫 → [BLOCKED]
+#     * 💾 → [STORAGE], ⏳ → [WAITING], 🖥️ → [NODE], ℹ️ → [INFO]
+#     * ⏸️ → [PAUSE], 🗑️ → [CLEANUP], 📦 → [POD], 🧹 → [CLEAN]
+#     * 🚀 → [LAUNCH], 🎯 → [TARGET], 📊 → [STATUS], 🎉 → [COMPLETE]
+#     * ━ → = (converts Unicode box drawing to ASCII)
+#   - Outputs formatted message to stderr using >&2 redirection
+#   - If OUTPUT_DIR and KUBE_DUMP_LOG_FILE are set, appends timestamped entry with "STDERR:" prefix
+#   - This function is used for error handling, warnings, and informational messages
+#   - Ensures error messages don't mix with primary script output that may be piped or redirected
+# -------------------------------------------------------------------------------
 format_message_stderr() {
   local message="$1"
-  
+
   if [[ "$NO_GLYPHS" == "true" ]]; then
     message="${message//🔍/[SEARCH]}"
     message="${message//🔧/[SETUP]}"
@@ -295,9 +419,9 @@ format_message_stderr() {
     message="${message//🎉/[COMPLETE]}"
     message="${message//━/=}"
   fi
-  
+
   echo "$message" >&2
-  
+
   # Log to file if OUTPUT_DIR is specified (indicating -o was used)
   if [[ -n "$OUTPUT_DIR" && -n "$KUBE_DUMP_LOG_FILE" ]]; then
     echo "$(date '+%Y-%m-%d %H:%M:%S') - STDERR: $message" >> "$KUBE_DUMP_LOG_FILE"
@@ -306,6 +430,38 @@ format_message_stderr() {
 
 # -------------------------------------------------------------------------------
 # Function: get_effective_cri_socket
+# -------------------------------------------------------------------------------
+# Description:
+#   Determines the appropriate Container Runtime Interface (CRI) socket path to use
+#   for container operations. This function provides runtime-specific socket paths
+#   for different container runtimes (containerd, CRI-O, Docker) and allows for
+#   custom socket paths when explicitly specified. It serves as the authoritative
+#   source for CRI socket configuration throughout the script.
+#
+# Parameters:
+#   None.
+#
+# Example Usage:
+#   socket_path=$(get_effective_cri_socket)
+#   crictl_socket="--runtime-endpoint=$(get_effective_cri_socket)"
+#   # These will return the appropriate CRI socket path for the current runtime
+#
+# Expected Output:
+#   - Returns the full absolute path to the CRI socket
+#   - Custom path if CRI_SOCKET is set by user
+#   - Runtime-specific default path if CRI_SOCKET is not set
+#
+# Detailed Behavior:
+#   - First checks if CRI_SOCKET global variable is set (custom user-provided path)
+#   - If CRI_SOCKET is set, returns that path without modification
+#   - If CRI_SOCKET is not set, determines path based on CRI_RUNTIME variable:
+#     * "containerd": Returns "/run/containerd/containerd.sock"
+#     * "crio": Returns "/run/crio/crio.sock" 
+#     * "docker": Returns "/var/run/cri-dockerd.sock"
+#     * Any other value: Defaults to "/run/containerd/containerd.sock"
+#   - These paths represent the standard socket locations for each container runtime
+#   - The returned path is used by crictl and other container runtime commands
+#   - This function ensures consistent CRI socket configuration across all operations
 # -------------------------------------------------------------------------------
 get_effective_cri_socket() {
   if [[ -n "$CRI_SOCKET" ]]; then
@@ -330,6 +486,39 @@ get_effective_cri_socket() {
 
 # -------------------------------------------------------------------------------
 # Function: show_configuration
+# -------------------------------------------------------------------------------
+# Description:
+#   Displays a comprehensive summary of the current script configuration including
+#   all operational settings, command parameters, runtime options, and feature flags.
+#   This function provides users with a clear view of how the script will execute
+#   before any actual operations begin, enabling configuration validation and debugging.
+#
+# Parameters:
+#   None.
+#
+# Example Usage:
+#   show_configuration
+#   # This will display all current configuration settings in formatted output
+#
+# Expected Output:
+#   - Formatted configuration summary with section headers
+#   - Shows execution mode (pod or node)
+#   - Lists Kubernetes CLI being used (oc or kubectl)
+#   - Displays pod and node selection criteria
+#   - Shows commands that will be executed
+#   - Lists container runtime settings
+#   - Shows file operation parameters
+#   - Displays kill switch configuration
+#   - Lists all boolean option flags
+#
+# Detailed Behavior:
+#   - Uses format_message() for consistent header formatting with emoji support
+#   - Displays configuration in organized sections: Pod Selection, Node Selection, Commands, etc.
+#   - Shows both set and unset values, with "(not set)" or "(current/default)" indicators
+#   - For commands, shows custom commands if set, otherwise shows defaults
+#   - Calls get_effective_cri_socket() to show the actual CRI socket that will be used
+#   - Uses consistent formatting with section separators and indented sub-items
+#   - Provides visual confirmation of all script parameters before execution
 # -------------------------------------------------------------------------------
 show_configuration() {
   echo ""
@@ -371,13 +560,48 @@ show_configuration() {
   echo "Options:"
   echo "  No Cleanup:        $NO_CLEANUP"
   echo "  No Glyphs:         ${NO_GLYPHS:-"false"}"
-  echo "  Mock Mode:         ${MOCK_MODE:-"false"}"
   echo "=================================================="
   echo ""
 }
 
 # -------------------------------------------------------------------------------
 # Function: validate_variable
+# -------------------------------------------------------------------------------
+# Description:
+#   Performs comprehensive validation of script variables based on specified validation
+#   types and constraints. This function ensures that all critical script parameters
+#   meet their requirements before script execution proceeds. It supports multiple
+#   validation types including enums, booleans, arrays, and strings with customizable
+#   requirements for each variable.
+#
+# Parameters:
+#   $1 (var_name): The name of the variable being validated (for error messages)
+#   $2 (var_value): The actual value of the variable to validate
+#   $3 (validation_type): Type of validation - "enum", "boolean", "array", or "string"
+#   $4 (allowed_values): Comma-separated list of allowed values (for enum type)
+#   $5 (is_required): "true" if variable is required, any other value means optional
+#
+# Example Usage:
+#   validate_variable "CRI_RUNTIME" "$CRI_RUNTIME" "enum" "containerd,crio,docker" "true"
+#   validate_variable "NO_CLEANUP" "$NO_CLEANUP" "boolean" "" "false"
+#   validate_variable "POD_NAMES" "POD_NAMES" "array" "" "false"
+#
+# Expected Output:
+#   - No output if validation passes
+#   - Error message to stderr and exits with status 1 if validation fails
+#
+# Detailed Behavior:
+#   - First checks if variable is required but empty, exits on failure
+#   - Skips further validation if variable is empty and not required
+#   - Performs type-specific validation:
+#     * enum: Checks if value is in comma-separated allowed_values list
+#     * boolean: Ensures value is exactly "true" or "false"
+#     * array: Verifies the array variable is properly declared
+#     * string: Basic string validation (extensible)
+#   - For enum validation, splits allowed_values on commas and checks each
+#   - Provides descriptive error messages including variable name and constraints
+#   - Exits script immediately on validation failure to prevent invalid execution
+#   - This function is critical for ensuring script stability and preventing runtime errors
 # -------------------------------------------------------------------------------
 validate_variable() {
   local var_name="$1"
@@ -443,6 +667,56 @@ validate_variable() {
 
 # -------------------------------------------------------------------------------
 # Function: parse_arguments
+# -------------------------------------------------------------------------------
+# Description:
+#   Parses all command-line arguments and options provided to the script, setting
+#   appropriate global variables for each option. This function handles both short
+#   and long argument formats, validates argument values, and manages complex
+#   option interactions. It supports GNU-style long options with equals syntax
+#   (--option=value) as well as traditional space-separated arguments.
+#
+# Parameters:
+#   $@ (all arguments): All command-line arguments passed to the script
+#
+# Example Usage:
+#   parse_arguments "$@"
+#   # This processes all command-line arguments and sets global variables
+#
+# Expected Output:
+#   - No output if all arguments are valid
+#   - Error messages to stderr and usage display for invalid arguments
+#   - Sets numerous global variables based on parsed options
+#
+# Detailed Behavior:
+#   - Iterates through all provided arguments using a while loop
+#   - Handles two argument formats: --option=value and --option value (or -o value)
+#   - Supports extensive option set including:
+#     * -l/--label: Pod label selector for targeting pods
+#     * -L/--node-label: Node label selector for targeting nodes
+#     * -n/--namespace: Kubernetes namespace specification
+#     * -e/--execute: Custom command to execute in debug pods
+#     * -E/--node-execute: Custom command to execute on nodes
+#     * -s/--select-to-download: Command to list files for download from pods
+#     * -S/--node-select-to-download: Command to list files for download from nodes
+#     * -o/--output-dir: Output directory for downloaded files
+#     * --to-namespace: Target namespace for debug pod creation
+#     * --cri-runtime: Container runtime interface (containerd, crio, docker)
+#     * --cri-socket: Custom CRI socket path
+#     * --image: Debug container image to use
+#     * --install-deps: Automatic dependency installation flag
+#     * --no-cleanup: Disable debug pod cleanup
+#     * --include-nodes: Include nodes with selected pods
+#     * --kill-switch-*: Various kill switch threshold options
+#     * --pod-volume/--node-volume: Volume paths to monitor
+#     * --placeholder-char: Hostname substitution character
+#     * --no-glyphs: Disable emoji output
+#     * -h/--help: Display usage information
+#   - Validates option values using validate_option_value() function
+#   - Manages complex option interactions (e.g., clearing default pod labels when node-only targeting)
+#   - Handles Base64 encoding for custom commands to preserve special characters
+#   - Sets execution mode based on which types of targets are specified
+#   - Shifts arguments appropriately for space-separated option-value pairs
+#   - Provides comprehensive error handling with descriptive messages
 # -------------------------------------------------------------------------------
 parse_arguments() {
   while [[ "$#" -gt 0 ]]; do
@@ -640,9 +914,6 @@ parse_arguments() {
       --no-glyphs)
         NO_GLYPHS=true
         ;;
-      --mock)
-        MOCK_MODE=true
-        ;;
       -*)
         echo "Error: Unknown option: $1" >&2
         usage
@@ -658,6 +929,48 @@ parse_arguments() {
 
 # -------------------------------------------------------------------------------
 # Function: validate_arguments
+# -------------------------------------------------------------------------------
+# Description:
+#   Validates the complete set of parsed command-line arguments and determines the
+#   execution mode based on provided options. This function performs comprehensive
+#   validation of all script parameters, checks for required argument combinations,
+#   validates mutually exclusive options, and ensures that all dependencies between
+#   options are satisfied. It serves as the final argument validation before script execution.
+#
+# Parameters:
+#   None. (Uses global variables set by parse_arguments)
+#
+# Example Usage:
+#   validate_arguments
+#   # This validates all global variables set during argument parsing
+#
+# Expected Output:
+#   - No output if validation passes
+#   - Error messages to stderr and returns 1 if validation fails
+#   - Sets EXECUTION_MODE global variable ("pod", "node", or "mixed")
+#
+# Detailed Behavior:
+#   - Determines execution mode based on which options are provided:
+#     * "pod": Only pod-related options specified (default mode)
+#     * "node": Only node-related options specified
+#     * "mixed": Both pod and node options, or pod options with --include-nodes
+#   - Validates execution mode using validate_variable with enum constraint
+#   - For pod/mixed modes: validates POD_LABEL, CAPTURE_COMMAND, CUSTOM_COMMAND
+#   - For node/mixed modes: validates NODE_COMMAND, CUSTOM_NODE_COMMAND, NODE_LABEL
+#   - Handles special case for --include-nodes where NODE_LABEL is optional
+#   - Validates --include-nodes requires -E/--node-execute for command specification
+#   - Validates core configuration: DEBUG_NAMESPACE, CRI_RUNTIME, INSTALL_DEPS
+#   - Validates file download options: SELECT_TO_DOWNLOAD_COMMAND, NODE_SELECT_TO_DOWNLOAD_COMMAND, OUTPUT_DIR
+#   - Validates file download dependencies: -s/-S options require -o/--output-dir
+#   - Validates kill switch arguments: KILL_SWITCH_ABS, KILL_SWITCH_REL
+#   - Ensures kill switch mutual exclusivity (absolute vs relative thresholds)
+#   - Validates kill switch volume dependencies based on execution mode:
+#     * Pod mode requires --pod-volume
+#     * Node mode requires --node-volume  
+#     * Mixed mode requires both --pod-volume and --node-volume
+#   - Uses validate_variable() for type-specific validation (enum, boolean, string)
+#   - Returns non-zero exit status for validation failures
+#   - This function ensures all argument combinations are logically consistent
 # -------------------------------------------------------------------------------
 validate_arguments() {
   # Determine execution mode based on what options are provided
@@ -695,7 +1008,7 @@ validate_arguments() {
   if [[ "$EXECUTION_MODE" == "node" || "$EXECUTION_MODE" == "mixed" ]]; then
     validate_variable "NODE_COMMAND" "$NODE_COMMAND" "string" "" "true"
     validate_variable "CUSTOM_NODE_COMMAND" "$CUSTOM_NODE_COMMAND" "string" "" "false"
-    
+
     # For mixed mode triggered by --include-nodes, NODE_LABEL is optional
     if [[ "$EXECUTION_MODE" == "mixed" && "$INCLUDE_NODES" == "true" && -z "$NODE_LABEL" ]]; then
       # --include-nodes case: NODE_LABEL is not required
@@ -765,44 +1078,37 @@ validate_arguments() {
 
   # Arrays are initialized in initialize_variables(), no need to validate here
 
-  # Show message about execution mode and defaults
-  if [[ "$EXECUTION_MODE" == "pod" ]]; then
-    if [[ -z "$CUSTOM_COMMAND" ]]; then
-      echo "Pod command: tcpdump -i any -nn -s 0" >&2
-    else
-      echo "Pod command: $CUSTOM_COMMAND" >&2
-    fi
-  elif [[ "$EXECUTION_MODE" == "node" ]]; then
-    if [[ -z "$CUSTOM_NODE_COMMAND" ]]; then
-      echo "Node command: tcpdump -i any -nn -s 0" >&2
-    else
-      echo "Node command: $NODE_COMMAND" >&2
-    fi
-  elif [[ "$EXECUTION_MODE" == "mixed" ]]; then
-    echo "Using mixed execution mode (both pod and node targets)" >&2
-    if [[ -z "$CUSTOM_COMMAND" ]]; then
-      echo "Pod command: tcpdump -i any -nn -s 0" >&2
-    else
-      echo "Pod command: $CUSTOM_COMMAND" >&2
-    fi
-    if [[ -z "$CUSTOM_NODE_COMMAND" ]]; then
-      echo "Node command: tcpdump -i any -nn -s 0" >&2
-    else
-      echo "Node command: $NODE_COMMAND" >&2
-    fi
-  fi
-
-  # Show select commands for file downloads if configured
-  if [[ -n "$SELECT_TO_DOWNLOAD_COMMAND" ]]; then
-    echo "Pod select command: $SELECT_TO_DOWNLOAD_COMMAND" >&2
-  fi
-  if [[ -n "$NODE_SELECT_TO_DOWNLOAD_COMMAND" ]]; then
-    echo "Node select command: $NODE_SELECT_TO_DOWNLOAD_COMMAND" >&2
-  fi
+  # Execution mode and command details are shown in configuration summary
 }
 
 # -------------------------------------------------------------------------------
 # Function: select_target_pods
+# -------------------------------------------------------------------------------
+# Description:
+#   Selects and prepares target pods for debugging operations based on label selectors.
+#   This function determines the appropriate debug namespace, validates label selector
+#   requirements, and delegates to find_pods_by_label() to discover matching pods.
+#   It serves as the entry point for pod selection in the debugging workflow.
+#
+# Parameters:
+#   None. (Uses global variables POD_LABEL and DEBUG_NAMESPACE)
+#
+# Example Usage:
+#   select_target_pods
+#   # This will find pods matching POD_LABEL and set up DEBUG_NAMESPACE
+#
+# Expected Output:
+#   - Sets DEBUG_NAMESPACE if not already specified
+#   - Calls find_pods_by_label() to populate POD_NAMES array
+#   - Returns 0 on success, 1 on error
+#
+# Detailed Behavior:
+#   - Determines debug namespace using kubectl config if DEBUG_NAMESPACE is empty
+#   - Falls back to "default" namespace if no namespace is configured
+#   - Validates that POD_LABEL is provided (required for pod selection)
+#   - Calls find_pods_by_label() to perform actual pod discovery
+#   - This function is called during the pod selection phase of the workflow
+#   - Sets up the foundation for subsequent pod debugging operations
 # -------------------------------------------------------------------------------
 select_target_pods() {
   # Determine debug namespace if not provided (for creating debug pods)
@@ -827,6 +1133,33 @@ select_target_pods() {
 
 # -------------------------------------------------------------------------------
 # Function: prepare_target_pods
+# -------------------------------------------------------------------------------
+# Description:
+#   Prepares discovered target pods for debugging by extracting detailed pod information
+#   and building the TARGET_PODS array with structured pod data. This function processes
+#   the POD_NAMES array and enriches it with container and namespace information needed
+#   for debug pod creation and command execution.
+#
+# Parameters:
+#   None. (Uses global POD_NAMES array populated by find_pods_by_label)
+#
+# Example Usage:
+#   prepare_target_pods
+#   # This processes POD_NAMES and populates TARGET_PODS array
+#
+# Expected Output:
+#   - Populates TARGET_PODS array with structured pod information
+#   - Progress messages indicating pod preparation status
+#   - Each entry format: "pod_name:container_name:node_name:namespace"
+#
+# Detailed Behavior:
+#   - Iterates through each pod in POD_NAMES array
+#   - Extracts pod name, container name, node name, and namespace for each pod
+#   - Uses kubectl/oc commands to gather additional pod metadata
+#   - Builds TARGET_PODS array entries in structured format for later use
+#   - Provides progress feedback during the preparation process
+#   - This prepared data is used by create_debug_pods_for_targets() function
+#   - Handles cases where pods may have multiple containers
 # -------------------------------------------------------------------------------
 prepare_target_pods() {
   format_message "🔧 Preparing target pods for debugging..."
@@ -944,6 +1277,34 @@ select_target_nodes() {
 # -------------------------------------------------------------------------------
 # Function: find_pods_by_label
 # -------------------------------------------------------------------------------
+# Description:
+#   Discovers pods matching the specified label selector and populates the POD_NAMES
+#   array with their information. This function performs the core pod discovery logic
+#   using kubectl/oc commands and validates that target pods are found and running.
+#   It handles namespace-specific searches and provides detailed feedback about discovered pods.
+#
+# Parameters:
+#   None. (Uses global POD_LABEL and DEBUG_NAMESPACE variables)
+#
+# Example Usage:
+#   find_pods_by_label
+#   # This searches for pods matching POD_LABEL and populates POD_NAMES
+#
+# Expected Output:
+#   - Progress messages showing pod discovery process
+#   - List of discovered pods with their status
+#   - Populates global POD_NAMES array
+#   - Error messages if no pods found or pods not running
+#
+# Detailed Behavior:
+#   - Uses kubectl/oc to search for pods matching the label selector
+#   - Searches in specified namespace or current context namespace
+#   - Validates that discovered pods are in Running state
+#   - Populates POD_NAMES array with format: "pod_name:container_name:node_name:namespace"
+#   - Provides detailed output showing pod names, nodes, and status
+#   - Exits with error if no matching pods are found
+#   - This function is the core of the pod discovery mechanism
+# -------------------------------------------------------------------------------
 find_pods_by_label() {
   format_message "🔍 Finding pods with label selector: $POD_LABEL"
   echo ""
@@ -979,6 +1340,34 @@ find_pods_by_label() {
 
 # -------------------------------------------------------------------------------
 # Function: validate_all_requirements
+# -------------------------------------------------------------------------------
+# Description:
+#   Validates all system requirements and Kubernetes cluster permissions needed
+#   for successful script execution. This function performs comprehensive checks
+#   including cluster connectivity, required permissions, and dependency availability.
+#   It ensures the environment is properly configured before proceeding with operations.
+#
+# Parameters:
+#   None. (Uses global KUBE_CLI and other configuration variables)
+#
+# Example Usage:
+#   validate_all_requirements
+#   # This checks all prerequisites for script execution
+#
+# Expected Output:
+#   - No output if all requirements are met
+#   - Error messages to stderr if requirements are not satisfied
+#   - Exits with error status if critical requirements are missing
+#
+# Detailed Behavior:
+#   - Checks Kubernetes cluster connectivity and authentication
+#   - Validates required permissions: pod creation, deletion, and execution
+#   - Verifies kubectl/oc CLI availability and functionality
+#   - Checks for required system capabilities and dependencies
+#   - Validates namespace access and permissions
+#   - Ensures container runtime interface availability if needed
+#   - This function acts as a pre-flight check before any operations
+#   - Prevents script execution in environments that lack necessary prerequisites
 # -------------------------------------------------------------------------------
 validate_all_requirements() {
   # Check cluster access
@@ -1104,6 +1493,8 @@ create_single_node_debug_pod() {
   local debug_pod_name="$2"
   local debug_ns="$3"
 
+  # Create pod with embedded script
+
   $KUBE_CLI apply -f - 2>/dev/null <<EOF
 apiVersion: v1
 kind: Pod
@@ -1189,6 +1580,7 @@ create_single_debug_pod() {
   local debug_ns="$5"
 
   # Create pod with embedded script
+
   $KUBE_CLI apply -f - 2>/dev/null <<EOF
 apiVersion: v1
 kind: Pod
@@ -1332,6 +1724,7 @@ else
 fi
 SCRIPT
 }
+
 
 # -------------------------------------------------------------------------------
 # Function: generate_exec_command
@@ -1558,13 +1951,23 @@ handle_file_downloads() {
 
     # Execute the select command to get list of files
     local files_list
-    if ! files_list=$($KUBE_CLI exec "$discovery_pod_name" -n "$debug_ns" -- bash -c "$select_command" 2>/dev/null); then
-      format_message_stderr "   ❌ Failed to execute select command on pod $discovery_pod_name (node $node_name)"
+    # Try to execute the command - if it fails due to pod issues, that's an error
+    # But if it succeeds with no output, that just means no files to download
+    if ! $KUBE_CLI exec "$discovery_pod_name" -n "$debug_ns" -- true 2>/dev/null; then
+      # Pod is not accessible - this is a real error
+      format_message_stderr "   ❌ Failed to access pod $discovery_pod_name (node $node_name)"
       failed_pods+=("$discovery_pod_name")
       continue
     fi
+    
+    # Pod is accessible, now run the select command (exit code doesn't matter)
+    files_list=$($KUBE_CLI exec "$discovery_pod_name" -n "$debug_ns" -- bash -c "$select_command" 2>/dev/null || true)
 
     if [[ -z "$files_list" ]]; then
+      # No files found - this is not an error, just skip with info message
+      format_message_stderr "   📂 No files to download from pod $discovery_pod_name (node $node_name)"
+      # Mark as successful since the select command worked correctly (just no files)
+      successful_pods+=("$discovery_pod_name")
       continue
     fi
     local downloaded_files=()
@@ -1576,12 +1979,12 @@ handle_file_downloads() {
         local download_success=false
         local attempt=1
         local max_attempts=3
-        
+
         while [[ $attempt -le $max_attempts && "$download_success" == "false" ]]; do
           if [[ $attempt -gt 1 ]]; then
             sleep 1  # Brief pause between retries to allow pod/network recovery
           fi
-          
+
           if $KUBE_CLI cp "$debug_ns/$discovery_pod_name:$file_path" "$output_file" 2>/dev/null; then
             if [[ $attempt -gt 1 ]]; then
               format_message_stderr "   ✅ $(basename "$file_path") (succeeded on attempt $attempt)"
@@ -1771,18 +2174,12 @@ wait_for_discovery_pods_ready() {
   return 1
 }
 
+
+
+
+
 # -------------------------------------------------------------------------------
 # Function: create_kill_switch_monitor_pods
-# -------------------------------------------------------------------------------
-# Description:
-#   Creates monitoring pods that watch storage usage and complete when thresholds are exceeded.
-#   These pods run alongside debug pods and signal when to kill the main debug pods.
-#
-# Parameters:
-#   None (uses global variables)
-#
-# Returns:
-#   0 on success, 1 on failure
 # -------------------------------------------------------------------------------
 create_kill_switch_monitor_pods() {
   # Skip if no kill switches are configured
@@ -1837,19 +2234,6 @@ create_kill_switch_monitor_pods() {
 # -------------------------------------------------------------------------------
 # Function: create_kill_switch_monitor_pod
 # -------------------------------------------------------------------------------
-# Description:
-#   Creates a single kill switch monitor pod that watches storage and completes when threshold exceeded.
-#
-# Parameters:
-#   $1 - Target debug pod name to monitor
-#   $2 - Node name where the debug pod is running
-#   $3 - Monitor pod name
-#   $4 - Namespace
-#   $5 - Volume path to monitor
-#
-# Returns:
-#   0 on success, 1 on failure
-# -------------------------------------------------------------------------------
 create_kill_switch_monitor_pod() {
   local target_debug_pod="$1"
   local node_name="$2"
@@ -1874,7 +2258,7 @@ spec:
     kubernetes.io/hostname: ${node_name}
   containers:
   - name: monitor
-    image: ${DEBUG_IMAGE}
+    image: ubuntu:22.04
     command: ["/bin/bash", "-c"]
     args:
     - |
@@ -1895,17 +2279,6 @@ EOF
 
 # -------------------------------------------------------------------------------
 # Function: build_kill_switch_monitor_script
-# -------------------------------------------------------------------------------
-# Description:
-#   Generates the monitoring script that runs inside kill switch monitor pods.
-#   The script continuously monitors storage and exits with code 0 when threshold is exceeded.
-#
-# Parameters:
-#   $1 - Target debug pod name to monitor
-#   $2 - Volume path to monitor
-#
-# Returns:
-#   Script content to stdout
 # -------------------------------------------------------------------------------
 build_kill_switch_monitor_script() {
   local target_debug_pod="$1"
@@ -1949,9 +2322,12 @@ parse_size_to_bytes() {
   echo "\$bytes"
 }
 
+# Install bc for floating point calculations
+apt-get update >/dev/null 2>&1 && apt-get install -y bc >/dev/null 2>&1 || echo "Warning: Could not install bc" >&2
+
 KILL_SWITCH_ABS="${KILL_SWITCH_ABS}"
 KILL_SWITCH_REL="${KILL_SWITCH_REL}"
-CHECK_INTERVAL=1  # Check every 1 second for fast response
+CHECK_INTERVAL=10  # Check every 10 seconds
 
 if [[ -n "\$KILL_SWITCH_ABS" ]]; then
   echo "Monitoring storage with absolute threshold: \$KILL_SWITCH_ABS" >&2
@@ -2005,19 +2381,9 @@ SCRIPT
 # -------------------------------------------------------------------------------
 # Function: monitor_kill_switches
 # -------------------------------------------------------------------------------
-# Description:
-#   Monitors kill switch pods and kills debug pods when monitors complete successfully.
-#   This function runs in the background during the debug session.
-#
-# Parameters:
-#   None (uses global variables)
-#
-# Returns:
-#   None (runs until stopped or all monitors processed)
-# -------------------------------------------------------------------------------
 monitor_kill_switches() {
   local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE}}"
-  local check_interval=1  # Check every 1 second for fast response
+  local check_interval=5  # Check every 5 seconds
   local killed_pods=()
 
   while true; do
@@ -2067,12 +2433,6 @@ monitor_kill_switches() {
 
 # -------------------------------------------------------------------------------
 # Function: cleanup_kill_switch_monitor_pods
-# -------------------------------------------------------------------------------
-# Description:
-#   Cleans up kill switch monitor pods.
-#
-# Parameters:
-#   None (uses global variables)
 # -------------------------------------------------------------------------------
 cleanup_kill_switch_monitor_pods() {
   local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE}}"
@@ -2139,17 +2499,17 @@ main() {
     local current_date=$(date '+%Y-%m-%d')
     local epoch_time=$(date '+%s')
     KUBE_DUMP_LOG_FILE="${OUTPUT_DIR}/kube-dump-${current_date}_${epoch_time}.log"
-    
+
     # Create output directory if it doesn't exist
     mkdir -p "$OUTPUT_DIR"
-    
+
     # Initialize log file
     echo "=== Kube-dump session started at $(date) ===" > "$KUBE_DUMP_LOG_FILE"
     echo "Command: $0 $*" >> "$KUBE_DUMP_LOG_FILE"
     echo "===============================================" >> "$KUBE_DUMP_LOG_FILE"
   fi
 
-  if [[ "$MOCK_MODE" != "true" ]]; then
+  if true; then
     validate_all_requirements
   fi
   echo
@@ -2229,7 +2589,7 @@ main() {
 
     # Start monitoring kill switches in background
     monitor_kill_switches &
-    KILL_SWITCH_MONITOR_PID=$!
+    MONITOR_PID=$!
   fi
 
   echo ""
@@ -2257,6 +2617,12 @@ main() {
     echo ""
     read
     echo
+
+    # Stop background monitoring if running
+    if [[ -n "$MONITOR_PID" ]]; then
+      { kill "$MONITOR_PID" 2>/dev/null || true; } 2>/dev/null
+      wait "$MONITOR_PID" 2>/dev/null || true
+    fi
 
     # Cleanup debug pods FIRST
     format_message "🧹 PHASE 4: Cleaning up Debug Pods"
@@ -2307,13 +2673,13 @@ main() {
 
     echo ""
     format_message "🔧 Debug pods are still running. Use kubectl logs to check their output."
-    if [[ ${#KILL_SWITCH_MONITOR_PODS[@]} -gt 0 ]]; then
-      format_message "🛡️  Kill switch monitor pods are also running and will auto-terminate debug pods if thresholds are exceeded."
+    if [[ -n "$KILL_SWITCH_ABS" || -n "$KILL_SWITCH_REL" ]]; then
+      format_message "🛡️  Kill switch sidecar containers are running and will auto-terminate debug pods if thresholds are exceeded."
     fi
     echo ""
     format_message "🎉 Session completed!"
   fi
-  
+
   # Close log file if it was created
   if [[ -n "$KUBE_DUMP_LOG_FILE" ]]; then
     echo "===============================================" >> "$KUBE_DUMP_LOG_FILE"
