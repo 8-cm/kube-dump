@@ -146,6 +146,13 @@ jobs:
           echo "| Scan Error | - | - | - | - | Trivy scan failed for this image |" > details-$SAFE_IMAGE.md
         fi
     
+    - name: Sanitize image name for artifact
+      id: sanitize
+      run: |
+        IMAGE="${{ matrix.image }}"
+        SAFE_IMAGE=$(echo "$IMAGE" | sed 's/[^a-zA-Z0-9]/-/g')
+        echo "safe_image=$SAFE_IMAGE" >> $GITHUB_OUTPUT
+    
     - name: Upload scan artifacts
       uses: actions/upload-artifact@v4
       with:
@@ -216,6 +223,13 @@ jobs:
           echo "LOW=$LOW" >> sbom-results-$SAFE_IMAGE.env
           echo "TOTAL=$TOTAL" >> sbom-results-$SAFE_IMAGE.env
         fi
+    
+    - name: Sanitize image name for artifact
+      id: sanitize
+      run: |
+        IMAGE="${{ matrix.image }}"
+        SAFE_IMAGE=$(echo "$IMAGE" | sed 's/[^a-zA-Z0-9]/-/g')
+        echo "safe_image=$SAFE_IMAGE" >> $GITHUB_OUTPUT
     
     - name: Upload SBOM artifacts
       uses: actions/upload-artifact@v4
