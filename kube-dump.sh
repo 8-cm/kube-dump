@@ -2619,21 +2619,24 @@ cleanup_discovery_pods() {
   if [[ ${#DISCOVERY_POD_NAMES[@]} -gt 0 ]]; then
     format_message "🧹 Cleaning up discovery pods..."
     
-    # Download logs from each discovery pod before deletion
-    for discovery_pod in "${DISCOVERY_POD_NAMES[@]}"; do
-      format_message "   📥 Downloading logs from discovery pod: $discovery_pod"
-      if $KUBE_CLI get pod "$discovery_pod" -n "${debug_ns}" >/dev/null 2>&1; then
-        $KUBE_CLI logs "$discovery_pod" -n "${debug_ns}" --ignore-errors > "discovery-${discovery_pod}.log" 2>/dev/null || true
-        if [[ -s "discovery-${discovery_pod}.log" ]]; then
-          format_message "      ✅ Discovery logs saved to: discovery-${discovery_pod}.log"
+    # Download logs from each discovery pod before deletion (only if -o is specified)
+    if [[ -n "$OUTPUT_DIR" ]]; then
+      for discovery_pod in "${DISCOVERY_POD_NAMES[@]}"; do
+        format_message "   📥 Downloading logs from discovery pod: $discovery_pod"
+        if $KUBE_CLI get pod "$discovery_pod" -n "${debug_ns}" >/dev/null 2>&1; then
+          local log_file="${OUTPUT_DIR}/discovery-${discovery_pod}.log"
+          $KUBE_CLI logs "$discovery_pod" -n "${debug_ns}" --ignore-errors > "$log_file" 2>/dev/null || true
+          if [[ -s "$log_file" ]]; then
+            format_message "      ✅ Discovery logs saved to: $log_file"
+          else
+            format_message "      ⚠️  No logs available for: $discovery_pod"
+            rm -f "$log_file" 2>/dev/null || true
+          fi
         else
-          format_message "      ⚠️  No logs available for: $discovery_pod"
-          rm -f "discovery-${discovery_pod}.log" 2>/dev/null || true
+          format_message "      ⚠️  Discovery pod not found: $discovery_pod"
         fi
-      else
-        format_message "      ⚠️  Discovery pod not found: $discovery_pod"
-      fi
-    done
+      done
+    fi
     
     # Now delete all discovery pods
     $KUBE_CLI delete pods "${DISCOVERY_POD_NAMES[@]}" -n "${debug_ns}" --ignore-not-found >/dev/null 2>&1
@@ -3414,21 +3417,24 @@ cleanup_kill_switch_monitor_pods() {
   if [[ ${#KILL_SWITCH_MONITOR_PODS[@]} -gt 0 ]]; then
     format_message "🧹 Cleaning up kill switch monitor pods..."
     
-    # Download logs from each kill switch monitor pod before deletion
-    for monitor_pod in "${KILL_SWITCH_MONITOR_PODS[@]}"; do
-      format_message "   📥 Downloading logs from kill switch monitor: $monitor_pod"
-      if $KUBE_CLI get pod "$monitor_pod" -n "${debug_ns}" >/dev/null 2>&1; then
-        $KUBE_CLI logs "$monitor_pod" -n "${debug_ns}" --ignore-errors > "killswitch-${monitor_pod}.log" 2>/dev/null || true
-        if [[ -s "killswitch-${monitor_pod}.log" ]]; then
-          format_message "      ✅ Kill switch logs saved to: killswitch-${monitor_pod}.log"
+    # Download logs from each kill switch monitor pod before deletion (only if -o is specified)
+    if [[ -n "$OUTPUT_DIR" ]]; then
+      for monitor_pod in "${KILL_SWITCH_MONITOR_PODS[@]}"; do
+        format_message "   📥 Downloading logs from kill switch monitor: $monitor_pod"
+        if $KUBE_CLI get pod "$monitor_pod" -n "${debug_ns}" >/dev/null 2>&1; then
+          local log_file="${OUTPUT_DIR}/killswitch-${monitor_pod}.log"
+          $KUBE_CLI logs "$monitor_pod" -n "${debug_ns}" --ignore-errors > "$log_file" 2>/dev/null || true
+          if [[ -s "$log_file" ]]; then
+            format_message "      ✅ Kill switch logs saved to: $log_file"
+          else
+            format_message "      ⚠️  No logs available for: $monitor_pod"
+            rm -f "$log_file" 2>/dev/null || true
+          fi
         else
-          format_message "      ⚠️  No logs available for: $monitor_pod"
-          rm -f "killswitch-${monitor_pod}.log" 2>/dev/null || true
+          format_message "      ⚠️  Kill switch monitor pod not found: $monitor_pod"
         fi
-      else
-        format_message "      ⚠️  Kill switch monitor pod not found: $monitor_pod"
-      fi
-    done
+      done
+    fi
     
     # Now delete all kill switch monitor pods
     $KUBE_CLI delete pods "${KILL_SWITCH_MONITOR_PODS[@]}" -n "${debug_ns}" --ignore-not-found >/dev/null 2>&1
