@@ -323,8 +323,7 @@ jobs:
             ((.CVSS // {} | to_entries[] | .value.V3Score // .value.V2Score // "N/A") | tostring) + " | `" + 
             (.PkgName // "N/A") + "` | `" + (.InstalledVersion // "N/A") + "` | `" + 
             (.FixedVersion // "Not Available") + "` | " + 
-            ((.Description // .Title // "No description available") | gsub("\n"; " ") | .[0:150]) + 
-            (if ((.Description // .Title // "") | length) > 150 then "..." else "" end) + " |"
+            ((.Description // .Title // "No description available") | gsub("\n"; " ") ) + " |"
           ' "trivy-image-$SAFE_IMAGE.json" > details-$SAFE_IMAGE.md 2>/dev/null || echo "| Image | No vulnerabilities found | - | - | - | - | - | - |" > details-$SAFE_IMAGE.md
         else
           echo "IMAGE=$IMAGE" >> results-$SAFE_IMAGE.env
@@ -701,8 +700,7 @@ jobs:
             "| Config | `" + (.ID // "N/A") + "` | " + (.Severity // "UNKNOWN") + " | " + 
             severity_score[.Severity // "UNKNOWN"] + " | " + (.Title // "N/A") + " | - | `" + 
             (.Resolution // "N/A") + "` | " + 
-            ((.Description // "No description available") | gsub("\n"; " ") | .[0:150]) + 
-            (if (.Description // "" | length) > 150 then "..." else "" end) + " |"
+            ((.Description // "No description available") | gsub("\n"; " ")) + " |"
           ' trivy-config.json > config-details.md 2>/dev/null || echo "| Config | No issues found | - | - | - | - | - | - |" > config-details.md
         fi
         
@@ -716,8 +714,7 @@ jobs:
             ((.CVSS // {} | to_entries[] | .value.V3Score // .value.V2Score // "N/A") | tostring) + " | `" + 
             (.PkgName // "N/A") + "` | `" + (.InstalledVersion // "N/A") + "` | `" + 
             (.FixedVersion // "Not Available") + "` | " + 
-            ((.Description // .Title // "No description available") | gsub("\n"; " ") | .[0:150]) + 
-            (if ((.Description // .Title // "") | length) > 150 then "..." else "" end) + " |"
+            ((.Description // .Title // "No description available") | gsub("\n"; " ") ) + " |"
           ' trivy-fs.json > fs-details.md 2>/dev/null || echo "| FS | No vulnerabilities found | - | - | - | - | - | - |" > fs-details.md
         fi
     
