@@ -455,7 +455,7 @@ format_message_stderr() {
 #   - If CRI_SOCKET is set, returns that path without modification
 #   - If CRI_SOCKET is not set, determines path based on CRI_RUNTIME variable:
 #     * "containerd": Returns "/run/containerd/containerd.sock"
-#     * "crio": Returns "/run/crio/crio.sock" 
+#     * "crio": Returns "/run/crio/crio.sock"
 #     * "docker": Returns "/var/run/cri-dockerd.sock"
 #     * Any other value: Defaults to "/run/containerd/containerd.sock"
 #   - These paths represent the standard socket locations for each container runtime
@@ -965,7 +965,7 @@ parse_arguments() {
 #   - Ensures kill switch mutual exclusivity (absolute vs relative thresholds)
 #   - Validates kill switch volume dependencies based on execution mode:
 #     * Pod mode requires --pod-volume
-#     * Node mode requires --node-volume  
+#     * Node mode requires --node-volume
 #     * Mixed mode requires both --pod-volume and --node-volume
 #   - Uses validate_variable() for type-specific validation (enum, boolean, string)
 #   - Returns non-zero exit status for validation failures
@@ -1225,9 +1225,9 @@ prepare_target_pods() {
 #   NODE_LABEL="node-role.kubernetes.io/worker=true"
 #   select_target_nodes
 #   # Finds all worker nodes and adds them to TARGET_NODES
-#   
+#
 #   NODE_LABEL="zone=us-west"
-#   INCLUDE_NODES="true" 
+#   INCLUDE_NODES="true"
 #   select_target_nodes
 #   # Finds nodes with zone=us-west label AND nodes hosting selected pods
 #
@@ -1647,7 +1647,7 @@ create_node_debug_pods() {
 #
 # Parameters:
 #   $1 - node_name: Name of the target node where debug pod should be created
-#   $2 - debug_pod_name: Unique name for the debug pod to be created  
+#   $2 - debug_pod_name: Unique name for the debug pod to be created
 #   $3 - debug_ns: Namespace where the debug pod should be created
 #   Uses global variables:
 #     $DEBUG_IMAGE - Container image for debug pod (default: nicolaka/netshoot)
@@ -2253,7 +2253,7 @@ wait_for_debug_pods_ready() {
 # Parameters:
 #   Uses global variables:
 #     $SELECT_TO_DOWNLOAD_COMMAND      - Command to list files from pod targets
-#     $NODE_SELECT_TO_DOWNLOAD_COMMAND - Command to list files from node targets  
+#     $NODE_SELECT_TO_DOWNLOAD_COMMAND - Command to list files from node targets
 #     $POD_DEBUG_HOSTNAMES[]           - Array of pod debug hostnames
 #     $NODE_DEBUG_HOSTNAMES[]          - Array of node debug hostnames
 #     $TARGET_PODS[]                   - Array of target pod information
@@ -2287,7 +2287,7 @@ wait_for_debug_pods_ready() {
 #      - Creates pod-level discovery pods using create_discovery_pod()
 #      - Maintains mapping between original debug hostnames and discovery pods
 #   4. Node target discovery (if NODE_SELECT_TO_DOWNLOAD_COMMAND specified):
-#      - Iterates through TARGET_NODES array and NODE_DEBUG_HOSTNAMES  
+#      - Iterates through TARGET_NODES array and NODE_DEBUG_HOSTNAMES
 #      - Generates unique node discovery pod names using node hash+timestamp
 #      - Ensures name uniqueness for node discovery pods
 #      - Creates node-level discovery pods using create_node_discovery_pod()
@@ -2460,7 +2460,7 @@ handle_file_downloads() {
       failed_pods+=("$discovery_pod_name")
       continue
     fi
-    
+
     # Pod is accessible, now run the select command (exit code doesn't matter)
     files_list=$($KUBE_CLI exec "$discovery_pod_name" -n "$debug_ns" -- bash -c "$select_command" 2>/dev/null || true)
 
@@ -2617,11 +2617,212 @@ cleanup_discovery_pods() {
   local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE}}"
 
   if [[ ${#DISCOVERY_POD_NAMES[@]} -gt 0 ]]; then
+    format_message "🧹 Cleaning up discovery pods..."
+    
+    # Download logs from each discovery pod before deletion
+    for discovery_pod in "${DISCOVERY_POD_NAMES[@]}"; do
+      format_message "   📥 Downloading logs from discovery pod: $discovery_pod"
+      if $KUBE_CLI get pod "$discovery_pod" -n "${debug_ns}" >/dev/null 2>&1; then
+        $KUBE_CLI logs "$discovery_pod" -n "${debug_ns}" --ignore-errors > "discovery-${discovery_pod}.log" 2>/dev/null || true
+        if [[ -s "discovery-${discovery_pod}.log" ]]; then
+          format_message "      ✅ Discovery logs saved to: discovery-${discovery_pod}.log"
+        else
+          format_message "      ⚠️  No logs available for: $discovery_pod"
+          rm -f "discovery-${discovery_pod}.log" 2>/dev/null || true
+        fi
+      else
+        format_message "      ⚠️  Discovery pod not found: $discovery_pod"
+      fi
+    done
+    
+    # Now delete all discovery pods
     $KUBE_CLI delete pods "${DISCOVERY_POD_NAMES[@]}" -n "${debug_ns}" --ignore-not-found >/dev/null 2>&1
   fi
 }
 
 # -------------------------------------------------------------------------------
+# Function: build_discovery_script  
+# -------------------------------------------------------------------------------
+# Description:
+#   Generates a complete bash script for execution within discovery pods to continuously
+#   monitor and output file discovery results. This function creates a self-contained
+#   script that attaches to target pod network namespaces, executes file discovery
+#   commands every second, and outputs timestamped results to stdout for monitoring.
+#
+# Parameters:
+#   $1 - pod_name: Name of the target pod to discover files from
+#   $2 - container_name: Name of the target container within the pod
+#   $3 - node_name: Name of the node where the target pod resides
+#   $4 - discovery_pod_name: Name of the discovery pod (for logging)
+#
+# Expected Output:
+#   - Complete bash script suitable for execution in discovery pod
+#   - Script outputs timestamped file discovery results every second
+#   - Includes error handling and CRI socket configuration
+# -------------------------------------------------------------------------------
+build_discovery_script() {
+  local pod_name="$1" 
+  local container_name="$2"
+  local node_name="$3"
+  local discovery_pod_name="$4"
+  
+  cat <<DISCOVERY_SCRIPT
+#!/bin/bash
+set -e
+
+echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Discovery pod $discovery_pod_name starting on node $node_name" >&2
+echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Target: pod=$pod_name, container=$container_name" >&2
+
+# Configure crictl socket
+configure_crictl_socket() {
+  local socket_path=""
+  if [[ -n "\${CRI_SOCKET}" ]]; then
+    socket_path="/host\${CRI_SOCKET}"
+  else
+    case "\${CRI_RUNTIME:-containerd}" in
+      containerd)
+        socket_path="/host/run/containerd/containerd.sock"
+        ;;
+      crio)
+        socket_path="/host/var/run/crio/crio.sock"
+        ;;
+      docker)
+        socket_path="/host/var/run/docker.sock"
+        ;;
+      *)
+        socket_path="/host/run/containerd/containerd.sock"
+        ;;
+    esac
+  fi
+  echo "runtime-endpoint: unix://\$socket_path" > /etc/crictl.yaml
+  echo "image-endpoint: unix://\$socket_path" >> /etc/crictl.yaml
+  echo "Configured crictl to use: \$socket_path" >&2
+}
+
+configure_crictl_socket
+
+# Find target pod and container
+echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Searching for target pod: $pod_name" >&2
+
+while true; do
+  # Get current timestamp
+  timestamp="\$(date '+%Y-%m-%d %H:%M:%S')"
+  
+  # Try to find the pod and get its container PID
+  pod_id=\$(crictl pods --name "$pod_name" -q 2>/dev/null | head -1)
+  if [[ -z "\$pod_id" ]]; then
+    echo "[\$timestamp] ERROR: Pod $pod_name not found" 
+    sleep 1
+    continue
+  fi
+  
+  container_id=\$(crictl ps --pod "\$pod_id" --name "$container_name" -q 2>/dev/null | head -1)
+  if [[ -z "\$container_id" ]]; then
+    echo "[\$timestamp] ERROR: Container $container_name not found in pod $pod_name"
+    sleep 1  
+    continue
+  fi
+  
+  container_pid=\$(crictl inspect "\$container_id" 2>/dev/null | jq -r '.info.pid // .status.pid // empty' 2>/dev/null)
+  if [[ -z "\$container_pid" || "\$container_pid" == "null" ]]; then
+    echo "[\$timestamp] ERROR: Unable to get PID for container $container_name"
+    sleep 1
+    continue
+  fi
+  
+  # Execute the select command in the target container namespace
+  if [[ -n "\${ENCODED_SELECT_COMMAND:-}" ]]; then
+    select_cmd=\$(echo "\$ENCODED_SELECT_COMMAND" | base64 -d 2>/dev/null || echo "")
+    if [[ -n "\$select_cmd" ]]; then
+      # Apply placeholder substitution
+      select_cmd="\${select_cmd//\${PLACEHOLDER_CHAR:-\%}/\$discovery_pod_name}"
+      
+      # Execute command in container namespace and capture output
+      if result=\$(nsenter -t "\$container_pid" -n -p -m -u -i bash -c "\$select_cmd" 2>/dev/null); then
+        if [[ -n "\$result" ]]; then
+          echo "[\$timestamp] FILES_FOUND:"
+          echo "\$result" | while IFS= read -r line; do
+            [[ -n "\$line" ]] && echo "[\$timestamp]   \$line"
+          done
+        else
+          echo "[\$timestamp] NO_FILES_FOUND"
+        fi
+      else
+        echo "[\$timestamp] ERROR: Select command failed: \$select_cmd"
+      fi
+    fi
+  else
+    echo "[\$timestamp] ERROR: No select command configured"
+  fi
+  
+  sleep 1
+done
+DISCOVERY_SCRIPT
+}
+
+# -------------------------------------------------------------------------------
+# Function: build_node_discovery_script
+# -------------------------------------------------------------------------------
+# Description:
+#   Generates a complete bash script for execution within node discovery pods to 
+#   continuously monitor and output file discovery results from node filesystem.
+#   This function creates a self-contained script that executes file discovery
+#   commands every second on the host node and outputs timestamped results.
+#
+# Parameters:
+#   $1 - node_name: Name of the target node to discover files from
+#   $2 - discovery_pod_name: Name of the discovery pod (for logging)
+#
+# Expected Output:
+#   - Complete bash script suitable for execution in node discovery pod
+#   - Script outputs timestamped file discovery results every second
+#   - Executes commands directly on host filesystem
+# -------------------------------------------------------------------------------
+build_node_discovery_script() {
+  local node_name="$1"
+  local discovery_pod_name="$2"
+  
+  cat <<NODE_DISCOVERY_SCRIPT
+#!/bin/bash
+set -e
+
+echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Node discovery pod $discovery_pod_name starting on node $node_name" >&2
+
+while true; do
+  # Get current timestamp
+  timestamp="\$(date '+%Y-%m-%d %H:%M:%S')"
+  
+  # Execute the node select command on host filesystem
+  if [[ -n "\${ENCODED_NODE_SELECT_COMMAND:-}" ]]; then
+    select_cmd=\$(echo "\$ENCODED_NODE_SELECT_COMMAND" | base64 -d 2>/dev/null || echo "")
+    if [[ -n "\$select_cmd" ]]; then
+      # Apply placeholder substitution
+      select_cmd="\${select_cmd//\${PLACEHOLDER_CHAR:-\%}/\$discovery_pod_name}"
+      
+      # Execute command on host filesystem and capture output
+      if result=\$(cd /host && bash -c "\$select_cmd" 2>/dev/null); then
+        if [[ -n "\$result" ]]; then
+          echo "[\$timestamp] NODE_FILES_FOUND:"
+          echo "\$result" | while IFS= read -r line; do
+            [[ -n "\$line" ]] && echo "[\$timestamp]   \$line"
+          done
+        else
+          echo "[\$timestamp] NO_NODE_FILES_FOUND"
+        fi
+      else
+        echo "[\$timestamp] ERROR: Node select command failed: \$select_cmd"
+      fi
+    fi
+  else
+    echo "[\$timestamp] ERROR: No node select command configured"
+  fi
+  
+  sleep 1
+done
+NODE_DISCOVERY_SCRIPT
+}
+
+# -------------------------------------------------------------------------------  
 # Function: create_discovery_pod
 # -------------------------------------------------------------------------------
 # Description:
@@ -2676,9 +2877,21 @@ spec:
   containers:
   - name: discovery
     image: ${DEBUG_IMAGE}
-    command: ["tail", "-f", "/dev/null"]
+    command: ["/bin/bash", "-c"]
+    args:
+    - |
+$(build_discovery_script "$pod_name" "$container_name" "$node_name" "$discovery_pod_name" | sed 's/^/      /')
     securityContext:
       privileged: true
+    env:
+    - name: CRI_RUNTIME
+      value: "${CRI_RUNTIME}"
+    - name: CRI_SOCKET  
+      value: "${CRI_SOCKET}"
+    - name: ENCODED_SELECT_COMMAND
+      value: "${ENCODED_SELECT_COMMAND}"
+    - name: PLACEHOLDER_CHAR
+      value: "${PLACEHOLDER_CHAR}"
     volumeMounts:
     - name: host-root
       mountPath: /host
@@ -2715,9 +2928,17 @@ spec:
   containers:
   - name: discovery
     image: ${DEBUG_IMAGE}
-    command: ["tail", "-f", "/dev/null"]
+    command: ["/bin/bash", "-c"]
+    args:
+    - |
+$(build_node_discovery_script "$node_name" "$discovery_pod_name" | sed 's/^/      /')
     securityContext:
       privileged: true
+    env:
+    - name: ENCODED_NODE_SELECT_COMMAND
+      value: "${ENCODED_NODE_SELECT_COMMAND}"
+    - name: PLACEHOLDER_CHAR
+      value: "${PLACEHOLDER_CHAR}"
     volumeMounts:
     - name: host-root
       mountPath: /host
@@ -2903,7 +3124,7 @@ EOF
 #   4. Configures monitoring parameters from global variables:
 #      - KILL_SWITCH_ABS for absolute threshold monitoring
 #      - KILL_SWITCH_REL for relative threshold monitoring
-#      - CHECK_INTERVAL hardcoded to 10 seconds for filesystem checks
+#      - CHECK_INTERVAL hardcoded to 1 second for filesystem checks
 #   5. Implements continuous monitoring loop that:
 #      - Uses df command to get filesystem statistics for specified volume path
 #      - Extracts used_bytes, available_bytes, and total_bytes from df output
@@ -2992,12 +3213,9 @@ parse_size_to_bytes() {
   echo "\$bytes"
 }
 
-# Install bc for floating point calculations
-apt-get update >/dev/null 2>&1 && apt-get install -y bc >/dev/null 2>&1 || echo "Warning: Could not install bc" >&2
-
 KILL_SWITCH_ABS="${KILL_SWITCH_ABS}"
 KILL_SWITCH_REL="${KILL_SWITCH_REL}"
-CHECK_INTERVAL=10  # Check every 10 seconds
+CHECK_INTERVAL=1  # Check every 1 second
 
 if [[ -n "\$KILL_SWITCH_ABS" ]]; then
   echo "Monitoring storage with absolute threshold: \$KILL_SWITCH_ABS" >&2
@@ -3030,7 +3248,7 @@ while true; do
           echo "\${result}\${unit}"
         fi
       }
-      
+
       if [[ "\$total_bytes" -ge 1099511627776 ]]; then  # >= 1TB
         total_raw=\$(echo "scale=2; \$total_bytes / 1099511627776" | bc 2>/dev/null || echo "0")
         used_raw=\$(echo "scale=2; \$used_bytes / 1099511627776" | bc 2>/dev/null || echo "0")
@@ -3057,7 +3275,7 @@ while true; do
         used_human="\${used_bytes}B"
         avail_human="\${available_bytes}B"
       fi
-      
+
       # Calculate usage percentage
       if command -v bc >/dev/null 2>&1; then
         usage_percent_raw=\$(echo "scale=1; (\$used_bytes * 100) / \$total_bytes" | bc 2>/dev/null || echo "0.0")
@@ -3069,7 +3287,7 @@ while true; do
       else
         usage_percent="0.0"
       fi
-      
+
       echo "\$(date '+%Y-%m-%d %H:%M:%S') - Volume \$VOLUME_PATH: \${used_human} used of \${total_human} (\${usage_percent}% used, \${avail_human} available)" >&2
     fi
 
@@ -3108,7 +3326,7 @@ SCRIPT
 # -------------------------------------------------------------------------------
 monitor_kill_switches() {
   local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE}}"
-  local check_interval=5  # Check every 5 seconds
+  local check_interval=1  # Check every 1 second
   local killed_pods=()
 
   while true; do
@@ -3195,6 +3413,24 @@ cleanup_kill_switch_monitor_pods() {
 
   if [[ ${#KILL_SWITCH_MONITOR_PODS[@]} -gt 0 ]]; then
     format_message "🧹 Cleaning up kill switch monitor pods..."
+    
+    # Download logs from each kill switch monitor pod before deletion
+    for monitor_pod in "${KILL_SWITCH_MONITOR_PODS[@]}"; do
+      format_message "   📥 Downloading logs from kill switch monitor: $monitor_pod"
+      if $KUBE_CLI get pod "$monitor_pod" -n "${debug_ns}" >/dev/null 2>&1; then
+        $KUBE_CLI logs "$monitor_pod" -n "${debug_ns}" --ignore-errors > "killswitch-${monitor_pod}.log" 2>/dev/null || true
+        if [[ -s "killswitch-${monitor_pod}.log" ]]; then
+          format_message "      ✅ Kill switch logs saved to: killswitch-${monitor_pod}.log"
+        else
+          format_message "      ⚠️  No logs available for: $monitor_pod"
+          rm -f "killswitch-${monitor_pod}.log" 2>/dev/null || true
+        fi
+      else
+        format_message "      ⚠️  Kill switch monitor pod not found: $monitor_pod"
+      fi
+    done
+    
+    # Now delete all kill switch monitor pods
     $KUBE_CLI delete pods "${KILL_SWITCH_MONITOR_PODS[@]}" -n "${debug_ns}" --ignore-not-found >/dev/null 2>&1
   fi
 }
