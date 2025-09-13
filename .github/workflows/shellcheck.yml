@@ -212,16 +212,16 @@ jobs:
         echo "TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_ENV
     
     # ---------------------------------------------------------------------------
-    # Step: Update Repository Documentation with Analysis Results
+    # Step: Update Security Reports Documentation with Analysis Results
     # ---------------------------------------------------------------------------
     # Description:
-    #   Updates the README.md file with current ShellCheck analysis results,
+    #   Updates the docs/security-reports.md file with current ShellCheck analysis results,
     #   maintaining a dedicated section for code quality status. This step
     #   preserves existing documentation while replacing the shellcheck results
     #   section with current findings, ensuring up-to-date quality reporting.
     #
     # Documentation Integration Process:
-    #   1. Creates backup of existing README.md for safety
+    #   1. Creates backup of existing docs/security-reports.md for safety
     #   2. Preserves content before shellcheck results section
     #   3. Replaces shellcheck section with current analysis results
     #   4. Preserves content after shellcheck results section
@@ -236,17 +236,17 @@ jobs:
     #   - Detailed issue table with file, line, column, severity, code, and message
     #   - Remediation guidance with links to ShellCheck wiki documentation
     # ---------------------------------------------------------------------------
-    - name: Update README with shellcheck results
+    - name: Update security reports with shellcheck results
       run: |
-        echo "Updating README.md with shellcheck results..."
-        
+        echo "Updating docs/security-reports.md with shellcheck results..."
+
         # Create backup
-        cp README.md README.md.bak
-        
-        # Create new README content
+        cp docs/security-reports.md docs/security-reports.md.bak
+
+        # Create new security reports content
         {
           # Keep everything before the shellcheck section
-          sed '/<!-- SHELLCHECK-RESULTS-START -->/q' README.md | sed '$d' 2>/dev/null || echo ""
+          sed '/<!-- SHELLCHECK-RESULTS-START -->/q' docs/security-reports.md | sed '$d' 2>/dev/null || echo ""
           
           # Add shellcheck results section
           echo "<!-- SHELLCHECK-RESULTS-START -->"
@@ -279,30 +279,30 @@ jobs:
           echo ""
           
           # Keep everything after the shellcheck section
-          sed -n '/<!-- SHELLCHECK-RESULTS-END -->/,$p' README.md.bak | tail -n +2 2>/dev/null || echo ""
-        } > README.md.new
-        
-        # Replace old README with new one
-        mv README.md.new README.md
-        
+          sed -n '/<!-- SHELLCHECK-RESULTS-END -->/,$p' docs/security-reports.md.bak | tail -n +2 2>/dev/null || echo ""
+        } > docs/security-reports.md.new
+
+        # Replace old security reports with new one
+        mv docs/security-reports.md.new docs/security-reports.md
+
         # Show what changed
-        echo "README.md updated successfully!"
+        echo "docs/security-reports.md updated successfully!"
         echo "Changes made:"
-        git diff README.md.bak README.md || echo "No git diff available"
+        git diff docs/security-reports.md.bak docs/security-reports.md || echo "No git diff available"
     
     # ---------------------------------------------------------------------------
     # Step: Commit and Push Documentation Updates
     # ---------------------------------------------------------------------------  
     # Description:
-    #   Commits the updated README.md file to the repository with structured
+    #   Commits the updated docs/security-reports.md file to the repository with structured
     #   commit messages documenting the shellcheck analysis results. This step
     #   only commits when changes are detected, preventing unnecessary commits
     #   when analysis results remain unchanged.
     #
     # Commit Process:
     #   1. Configures Git with GitHub Actions user credentials
-    #   2. Checks for changes in README.md to prevent empty commits
-    #   3. Stages README.md file for commit when changes exist
+    #   2. Checks for changes in docs/security-reports.md to prevent empty commits
+    #   3. Stages docs/security-reports.md file for commit when changes exist
     #   4. Creates structured commit message with analysis summary
     #   5. Pushes changes to the current branch using GitHub Actions context
     #
@@ -318,19 +318,19 @@ jobs:
         git config --local user.name "GitHub Action"
         
         # Check if there are changes to commit
-        if git diff --quiet README.md; then
-          echo "No changes to README.md - skipping commit"
+        if git diff --quiet docs/security-reports.md; then
+          echo "No changes to docs/security-reports.md - skipping commit"
         else
-          git add README.md
+          git add docs/security-reports.md
           git commit -m "ci: Update shellcheck analysis results
-          
+
           - Status: $SHELLCHECK_STATUS
           - Issues: $ISSUE_COUNT
           - Timestamp: $TIMESTAMP
           - Commit: ${GITHUB_SHA:0:7}"
-          
+
           git push origin HEAD:${{ github.ref_name }}
-          echo "✅ README.md updated with shellcheck results"
+          echo "✅ docs/security-reports.md updated with shellcheck results"
         fi
     
     # ---------------------------------------------------------------------------
