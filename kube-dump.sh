@@ -3349,14 +3349,26 @@ monitor_kill_switches() {
           local target_pod
           if target_pod=$($KUBE_CLI get pod "$monitor_pod" -n "$debug_ns" -o jsonpath='{.metadata.labels.target-pod}' 2>/dev/null); then
             format_message_stderr "🔴 Kill switch triggered by $monitor_pod - terminating debug pod $target_pod"
-            $KUBE_CLI delete pod "$target_pod" -n "$debug_ns" --ignore-not-found >/dev/null 2>&1
 
-            # Also clean up the monitor pod
-            $KUBE_CLI delete pod "$monitor_pod" -n "$debug_ns" --ignore-not-found >/dev/null 2>&1
+            # Download kill switch monitor logs immediately
+            if [[ -n "$OUTPUT_DIR" ]]; then
+              local log_file="${OUTPUT_DIR}/killswitch-${monitor_pod}.log"
+              $KUBE_CLI logs "$monitor_pod" -n "$debug_ns" --ignore-errors > "$log_file" 2>/dev/null
+            fi
+
+            # Delete the target debug pod but leave monitor pod for cleanup later
+            $KUBE_CLI delete pod "$target_pod" -n "$debug_ns" --ignore-not-found >/dev/null 2>&1
           fi
           killed_pods+=("$monitor_pod")
         elif [[ "$pod_status" == "Failed" ]]; then
           format_message_stderr "⚠️  Kill switch monitor $monitor_pod failed - check logs for details"
+
+          # Download failed kill switch monitor logs for debugging
+          if [[ -n "$OUTPUT_DIR" ]]; then
+            local log_file="${OUTPUT_DIR}/killswitch-${monitor_pod}.log"
+            $KUBE_CLI logs "$monitor_pod" -n "$debug_ns" --ignore-errors > "$log_file" 2>/dev/null
+          fi
+
           killed_pods+=("$monitor_pod")
         fi
       else
