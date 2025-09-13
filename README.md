@@ -62,18 +62,6 @@ git clone <repository-url> && cd kube-dump && chmod +x kube-dump.sh
 <!-- TRIVY-SECURITY-START -->
 ## 🛡️ Security Analysis - Trivy Scanning
 
-**Overall Status:** ✅ NO CRITICAL ISSUES
-**Critical Issues:** 0
-**High Severity:** 0
-**Medium Severity:** 0
-**Low Severity:** 0
-**Config Issues:** 0
-**Filesystem Vulns:** 0
-**Last Updated:** 2025-09-12 18:30:00 UTC
-**Commit:** [`34d5771`](https://github.com/8-cm/kube-dump/commit/34d5771)
-
-🎉 **Great!** No critical or high severity vulnerabilities found in container images and filesystem.
-
 ### Scanning Coverage
 - **🖼️ Container Images**: All images used in kube-dump.sh
 - **📋 SBOM Analysis**: Software Bill of Materials vulnerability checking
@@ -83,6 +71,7 @@ git clone <repository-url> && cd kube-dump && chmod +x kube-dump.sh
 ---
 *This section is automatically updated by the [Security Scanning workflow](.github/workflows/security-trivy.yml)*
 <!-- TRIVY-SECURITY-END -->
+
 
 ---
 
