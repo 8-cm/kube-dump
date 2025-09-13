@@ -1,0 +1,51 @@
+=== Kube-dump session started at Thu Sep 11 14:30:37 CEST 2025 ===
+Command: kube-dump.sh -e tcpdump -nn -vvvv -s 0 -i any | tee /host/tmp/%.log -E tcpdump -nn -vvvv -s 0 -i any | tee /host/tmp/%.log --include-nodes --kill-switch-abs=63MB --pod-volume=/host/tmp --node-volume=/host/tmp -s ls /host/tmp/*.log -S ls /host/tmp/*.log --install-deps --to-namespace=dummy -o tester --no-glyphs
+===============================================
+2025-09-11 14:30:37 - [INFO] PHASE 1: Target Selection & Debug Pod Creation
+2025-09-11 14:30:38 - ====================================================
+2025-09-11 14:30:38 - [TARGET] Pod-based execution mode
+2025-09-11 14:30:38 - [SEARCH] Finding pods with label selector: dumpme=yes
+2025-09-11 14:30:38 - [OK] Found 2 pods:
+2025-09-11 14:30:38 -    [POD] coder-1f2cf230-cd19-4e3a-a35f-36f82c59a3f6-5d865679d8-r8vld
+2025-09-11 14:30:38 -    [POD] coder-78677fff96-6t9xh
+2025-09-11 14:30:38 - [SETUP] Preparing target pods for debugging...
+2025-09-11 14:30:39 -    [OK] coder-1f2cf230-cd19-4e3a-a35f-36f82c59a3f6-5d865679d8-r8vld -> dev on k8s-node-04
+2025-09-11 14:30:39 -    [OK] coder-78677fff96-6t9xh -> coder on k8s-node-05
+2025-09-11 14:30:39 - [LAUNCH] Creating debug pods for pod targets...
+2025-09-11 14:30:40 -    [POD] Creating debug pod for coder-1f2cf230-cd19-4e3a-a35f-36f82c59a3f6-5d865679d8-r8vld:dev on k8s-node-04
+2025-09-11 14:30:41 -    [POD] Creating debug pod for coder-78677fff96-6t9xh:coder on k8s-node-05
+2025-09-11 14:30:42 - [PROGRESS] Checking %d debug pods\n
+2025-09-11 14:30:46 -    [OK] All 2 debug pods are ready
+2025-09-11 14:30:46 - [SECURITY]  Creating kill switch monitor pods...
+2025-09-11 14:30:48 -    [OK] Created kill switch monitor: ks-k8s-node-04-ee0fbe39 -> k8s-node-04-debug-2c095f49-1757593839 (volume: /host/tmp)
+2025-09-11 14:30:49 -    [OK] Created kill switch monitor: ks-k8s-node-05-ea79217a -> k8s-node-05-debug-1f8077b9-1757593839 (volume: /host/tmp)
+2025-09-11 14:30:49 - [OK] PHASE 2: Debug Pods Running - Monitor Output
+2025-09-11 14:30:49 - ====================================================
+2025-09-11 14:30:49 - [STATUS] Debug pods are running with commands in their entrypoints.
+2025-09-11 14:30:49 - [SEARCH] Monitor command output with these commands:
+2025-09-11 14:30:49 - [CLEANUP]  Or delete all debug pods manually:
+2025-09-11 14:30:49 - [PAUSE]  PHASE 3: Waiting for User Input
+2025-09-11 14:30:49 - ====================================================
+2025-09-11 14:30:49 - [PROGRESS] Press Enter to cleanup all debug pods, or Ctrl+C to leave them running...
+2025-09-11 14:30:57 - [CLEAN] PHASE 4: Cleaning up Debug Pods
+2025-09-11 14:30:57 - ====================================================
+2025-09-11 14:30:57 - [CLEANUP]  Deleting 2 debug pods...
+2025-09-11 14:30:59 - [CLEAN] Cleaning up kill switch monitor pods...
+2025-09-11 14:31:01 -    [OK] All debug pods cleaned up
+2025-09-11 14:31:01 - [DOWNLOAD] PHASE 5: File Discovery & Download
+2025-09-11 14:31:01 - ====================================================
+2025-09-11 14:31:01 - [LAUNCH] Creating discovery pods for file download...
+2025-09-11 14:31:01 - [POD] Creating discovery pods for pod targets...
+2025-09-11 14:31:04 - [WAITING] Waiting for discovery pods to be ready...
+2025-09-11 14:31:07 -    [OK] All discovery pods are ready
+2025-09-11 14:31:07 - STDERR: [DOWNLOAD] Downloading files...
+2025-09-11 14:31:09 - STDERR:    [OK] k8s-node-04-debug-2c095f49-1757593839.log
+2025-09-11 14:31:24 - STDERR:    [ERROR] Failed: k8s-node-05-debug-1f8077b9-1757586160.log from pod disc-k8s-node-05-1f8077b9-1757593861-1 on node k8s-node-05
+2025-09-11 14:31:25 - STDERR:    [OK] k8s-node-05-debug-1f8077b9-1757593839.log
+2025-09-11 14:31:25 - [CLEAN] Cleaning up 1 successful discovery pods...
+2025-09-11 14:31:27 - [WARNING]  Keeping 1 discovery pods with issues for inspection:
+2025-09-11 14:31:27 -    [SEARCH] disc-k8s-node-05-1f8077b9-1757593861-1
+2025-09-11 14:31:27 - [COMPLETE] All operations completed!
+===============================================
+=== Kube-dump session ended at Thu Sep 11 14:31:27 CEST 2025 ===
+2025-09-11 14:31:27 - [INFO] Session log saved to: tester/kube-dump-2025-09-11_1757593837.log

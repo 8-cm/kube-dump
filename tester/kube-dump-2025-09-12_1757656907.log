@@ -1,0 +1,9 @@
+=== Kube-dump session started at Fri Sep 12 08:01:47 CEST 2025 ===
+Command: kube-dump.sh -e tcpdump -nn -vvvv -s 0 -i any | tee /host/tmp/%.log -E tcpdump -nn -vvvv -s 0 -i any | tee /host/tmp/%.log --include-nodes --kill-switch-abs=63MB --pod-volume=/host/tmp --node-volume=/host/tmp -s ls /host/tmp/*.log -S ls /host/tmp/*.log --install-deps --to-namespace=dummy -o tester
+===============================================
+2025-09-12 08:01:47 - 📋 PHASE 1: Target Selection & Debug Pod Creation
+2025-09-12 08:01:47 - ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2025-09-12 08:01:47 - 🎯 Mixed execution mode (pods + nodes)
+2025-09-12 08:01:47 - 📦 Handling pod targets...
+2025-09-12 08:01:47 - 🔍 Finding pods with label selector: dumpme=yes
+2025-09-12 08:01:47 - 🔧 Preparing target pods for debugging...

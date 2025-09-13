@@ -1,0 +1,45 @@
+12:21:10.701578 eth0  Out IP (tos 0x0, ttl 64, id 52740, offset 0, flags [DF], proto TCP (6), length 90)
+    10.244.8.97.58010 > 192.168.1.149.443: Flags [P.], cksum 0xd5de (incorrect -> 0xcd18), seq 2363102757:2363102795, ack 1684117476, win 4644, options [nop,nop,TS val 128410749 ecr 1934645122], length 38
+12:21:10.702369 eth0  Out IP (tos 0x0, ttl 64, id 35704, offset 0, flags [DF], proto TCP (6), length 392)
+    10.244.8.97.58012 > 192.168.1.149.443: Flags [P.], cksum 0xd70c (incorrect -> 0x45da), seq 2266276145:2266276485, ack 3934443048, win 537, options [nop,nop,TS val 128410750 ecr 1934645122], length 340
+12:21:10.716306 eth0  In  IP (tos 0x0, ttl 61, id 59902, offset 0, flags [DF], proto TCP (6), length 651)
+    192.168.1.149.443 > 10.244.8.97.58010: Flags [P.], cksum 0xe615 (correct), seq 1:600, ack 38, win 503, options [nop,nop,TS val 1934655142 ecr 128410749], length 599
+12:21:10.716390 eth0  In  IP (tos 0x0, ttl 61, id 59903, offset 0, flags [DF], proto TCP (6), length 83)
+    192.168.1.149.443 > 10.244.8.97.58010: Flags [P.], cksum 0xe233 (correct), seq 600:631, ack 38, win 503, options [nop,nop,TS val 1934655142 ecr 128410749], length 31
+12:21:10.718119 eth0  Out IP (tos 0x0, ttl 64, id 52741, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.8.97.58010 > 192.168.1.149.443: Flags [.], cksum 0xd5b8 (incorrect -> 0xaa8d), seq 38, ack 631, win 4666, options [nop,nop,TS val 128410766 ecr 1934655142], length 0
+12:21:10.718533 eth0  In  IP (tos 0x0, ttl 61, id 1218, offset 0, flags [DF], proto TCP (6), length 836)
+    192.168.1.149.443 > 10.244.8.97.58012: Flags [P.], cksum 0xb1dd (correct), seq 1:785, ack 340, win 503, options [nop,nop,TS val 1934655144 ecr 128410750], length 784
+12:21:10.718583 eth0  Out IP (tos 0x0, ttl 64, id 35705, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.8.97.58012 > 192.168.1.149.443: Flags [.], cksum 0xd5b8 (incorrect -> 0x6f3c), seq 340, ack 785, win 531, options [nop,nop,TS val 128410766 ecr 1934655144], length 0
+12:21:20.725171 eth0  Out IP (tos 0x0, ttl 64, id 52742, offset 0, flags [DF], proto TCP (6), length 90)
+    10.244.8.97.58010 > 192.168.1.149.443: Flags [P.], cksum 0xd5de (incorrect -> 0x89fc), seq 38:76, ack 631, win 4666, options [nop,nop,TS val 128420773 ecr 1934655142], length 38
+12:21:20.725685 eth0  Out IP (tos 0x0, ttl 64, id 35706, offset 0, flags [DF], proto TCP (6), length 392)
+    10.244.8.97.58012 > 192.168.1.149.443: Flags [P.], cksum 0xd70c (incorrect -> 0x8ba5), seq 340:680, ack 785, win 537, options [nop,nop,TS val 128420774 ecr 1934655144], length 340
+12:21:20.740923 eth0  In  IP (tos 0x0, ttl 61, id 1219, offset 0, flags [DF], proto TCP (6), length 836)
+    192.168.1.149.443 > 10.244.8.97.58012: Flags [P.], cksum 0x95a7 (correct), seq 785:1569, ack 680, win 503, options [nop,nop,TS val 1934665167 ecr 128420774], length 784
+12:21:20.740972 eth0  Out IP (tos 0x0, ttl 64, id 35707, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.8.97.58012 > 192.168.1.149.443: Flags [.], cksum 0xd5b8 (incorrect -> 0x1c84), seq 680, ack 1569, win 537, options [nop,nop,TS val 128420789 ecr 1934665167], length 0
+12:21:20.741016 eth0  In  IP (tos 0x0, ttl 61, id 59904, offset 0, flags [DF], proto TCP (6), length 651)
+    192.168.1.149.443 > 10.244.8.97.58010: Flags [P.], cksum 0xd596 (correct), seq 631:1230, ack 76, win 503, options [nop,nop,TS val 1934665167 ecr 128420773], length 599
+12:21:20.741275 eth0  In  IP (tos 0x0, ttl 61, id 59905, offset 0, flags [DF], proto TCP (6), length 83)
+    192.168.1.149.443 > 10.244.8.97.58010: Flags [P.], cksum 0xad6b (correct), seq 1230:1261, ack 76, win 503, options [nop,nop,TS val 1934665167 ecr 128420773], length 31
+12:21:20.741380 eth0  Out IP (tos 0x0, ttl 64, id 52743, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.8.97.58010 > 192.168.1.149.443: Flags [.], cksum 0xd5b8 (incorrect -> 0x598c), seq 76, ack 1261, win 4687, options [nop,nop,TS val 128420789 ecr 1934665167], length 0
+12:21:30.743976 eth0  Out IP (tos 0x0, ttl 64, id 52744, offset 0, flags [DF], proto TCP (6), length 90)
+    10.244.8.97.58010 > 192.168.1.149.443: Flags [P.], cksum 0xd5de (incorrect -> 0xcaca), seq 76:114, ack 1261, win 4687, options [nop,nop,TS val 128430792 ecr 1934665167], length 38
+12:21:30.744099 eth0  Out IP (tos 0x0, ttl 64, id 35708, offset 0, flags [DF], proto TCP (6), length 392)
+    10.244.8.97.58012 > 192.168.1.149.443: Flags [P.], cksum 0xd70c (incorrect -> 0x5771), seq 680:1020, ack 1569, win 537, options [nop,nop,TS val 128430792 ecr 1934665167], length 340
+12:21:30.758757 eth0  In  IP (tos 0x0, ttl 61, id 59906, offset 0, flags [DF], proto TCP (6), length 652)
+    192.168.1.149.443 > 10.244.8.97.58010: Flags [P.], cksum 0x2d00 (correct), seq 1261:1861, ack 114, win 503, options [nop,nop,TS val 1934675184 ecr 128430792], length 600
+12:21:30.758830 eth0  In  IP (tos 0x0, ttl 61, id 1220, offset 0, flags [DF], proto TCP (6), length 836)
+    192.168.1.149.443 > 10.244.8.97.58012: Flags [P.], cksum 0x51ab (correct), seq 1569:2353, ack 1020, win 503, options [nop,nop,TS val 1934675185 ecr 128430792], length 784
+12:21:30.758863 eth0  Out IP (tos 0x0, ttl 64, id 35709, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.8.97.58012 > 192.168.1.149.443: Flags [.], cksum 0xd5b8 (incorrect -> 0xc9db), seq 1020, ack 2353, win 537, options [nop,nop,TS val 128430807 ecr 1934675185], length 0
+12:21:30.759054 eth0  In  IP (tos 0x0, ttl 61, id 59907, offset 0, flags [DF], proto TCP (6), length 83)
+    192.168.1.149.443 > 10.244.8.97.58010: Flags [P.], cksum 0x676d (correct), seq 1861:1892, ack 114, win 503, options [nop,nop,TS val 1934675185 ecr 128430792], length 31
+12:21:30.759173 eth0  Out IP (tos 0x0, ttl 64, id 52745, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.8.97.58010 > 192.168.1.149.443: Flags [.], cksum 0xd5b8 (incorrect -> 0x0896), seq 114, ack 1892, win 4709, options [nop,nop,TS val 128430807 ecr 1934675184], length 0
+12:21:30.759969 eth0  Out IP (tos 0x0, ttl 64, id 52746, offset 0, flags [DF], proto TCP (6), length 87)
+    10.244.8.97.58010 > 192.168.1.149.443: Flags [P.], cksum 0xd5db (incorrect -> 0x2840), seq 114:149, ack 1892, win 4709, options [nop,nop,TS val 128430808 ecr 1934675184], length 35
+12:21:30.808772

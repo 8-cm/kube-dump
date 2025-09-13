@@ -1,0 +1,16 @@
+=== Kill switch monitor for k8s-node-05-debug-e90aec67-1757754170 ===
+Monitoring storage with absolute threshold: 63MB
+2025-09-13 09:03:02 - Volume /host/tmp: 0.19MB used of 64.00MB (0.2% used, 63.80MB available)
+2025-09-13 09:03:03 - Volume /host/tmp: 0.30MB used of 64.00MB (0.4% used, 63.69MB available)
+2025-09-13 09:03:04 - Volume /host/tmp: 0.42MB used of 64.00MB (0.6% used, 63.57MB available)
+2025-09-13 09:03:05 - Volume /host/tmp: 0.46MB used of 64.00MB (0.7% used, 63.53MB available)
+2025-09-13 09:03:06 - Volume /host/tmp: 0.52MB used of 64.00MB (0.8% used, 63.47MB available)
+2025-09-13 09:03:07 - Volume /host/tmp: 0.59MB used of 64.00MB (0.9% used, 63.40MB available)
+2025-09-13 09:03:08 - Volume /host/tmp: 0.71MB used of 64.00MB (1.1% used, 63.28MB available)
+2025-09-13 09:03:09 - Volume /host/tmp: 0.76MB used of 64.00MB (1.1% used, 63.23MB available)
+2025-09-13 09:03:10 - Volume /host/tmp: 0.85MB used of 64.00MB (1.3% used, 63.14MB available)
+2025-09-13 09:03:11 - Volume /host/tmp: 0.87MB used of 64.00MB (1.3% used, 63.12MB available)
+2025-09-13 09:03:12 - Volume /host/tmp: 0.92MB used of 64.00MB (1.4% used, 63.07MB available)
+2025-09-13 09:03:14 - Volume /host/tmp: 0.98MB used of 64.00MB (1.5% used, 63.01MB available)
+2025-09-13 09:03:15 - Volume /host/tmp: 1.07MB used of 64.00MB (1.6% used, 62.92MB available)
+KILL_SWITCH_TRIGGERED: Available space (65978368 bytes) is below absolute threshold (63MB = 66060288 bytes)

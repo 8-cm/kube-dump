@@ -1,0 +1,29 @@
+=== Kube-dump session started at Thu Sep 11 23:27:02 CEST 2025 ===
+Command: ./kube-dump.sh -l app.kubernetes.io/instance=coder -L topology.jiva.openebs.io/nodeName=k8s-node-00 --include-nodes -e tcpdump -nn -vvvv -s 0 -i any | tee /host/tmp/%.log -E tcpdump -nn -vvvv -s 0 -i any | tee /host/tmp/%.log -s ls /host/tmp/*.log -S ls /host/tmp/*.log -o tester --kill-switch-abs 63MB --pod-volume /host/tmp --node-volume /host/tmp --install-deps --mock
+===============================================
+2025-09-11 23:27:02 - 📋 PHASE 1: Target Selection & Debug Pod Creation
+2025-09-11 23:27:02 - ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2025-09-11 23:27:02 - 🎯 Mixed execution mode (pods + nodes)
+2025-09-11 23:27:02 - 📦 Handling pod targets...
+2025-09-11 23:27:02 - 🔍 Finding pods with label selector: app.kubernetes.io/instance=coder
+2025-09-11 23:27:03 - ✅ Found 1 pods:
+2025-09-11 23:27:03 -    📦 coder-78677fff96-pkdpp (namespace: coder)
+2025-09-11 23:27:03 - 🔧 Preparing target pods for debugging...
+2025-09-11 23:27:03 -    ✅ coder-78677fff96-pkdpp (coder) -> coder on k8s-node-05
+2025-09-11 23:27:03 - 🖥️  Handling node targets...
+2025-09-11 23:27:03 - 🔍 Finding nodes with label selector: topology.jiva.openebs.io/nodeName=k8s-node-00
+2025-09-11 23:27:03 - ✅ Found 1 nodes:
+2025-09-11 23:27:03 -    🖥️  k8s-node-00
+2025-09-11 23:27:03 - 🔍 Processing --include-nodes: adding nodes hosting selected pods
+2025-09-11 23:27:03 -       🖥️  k8s-node-05
+2025-09-11 23:27:03 - 🚀 Creating debug pods for pod targets...
+2025-09-11 23:27:03 -    📦 Creating debug pod for coder-78677fff96-pkdpp:coder on k8s-node-05
+2025-09-11 23:27:03 -       ❌ Failed to create debug pod for coder-78677fff96-pkdpp
+2025-09-11 23:27:03 - 🚀 Creating debug pods for node targets...
+2025-09-11 23:27:04 -    🖥️  Creating debug pod for node 'k8s-node-00'
+2025-09-11 23:27:04 -       ❌ Failed to create debug pod for node k8s-node-00
+2025-09-11 23:27:04 -    🖥️  Creating debug pod for node 'k8s-node-05'
+2025-09-11 23:27:04 -       ❌ Failed to create debug pod for node k8s-node-05
+2025-09-11 23:27:04 - 🔄 Checking %d debug pods\n
+2025-09-11 23:27:04 -    ✅ All 0 debug pods are ready
+2025-09-11 23:27:04 -    ❌ Error: No debug pods became ready

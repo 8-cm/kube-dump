@@ -1,0 +1,60 @@
+=== Kube-dump session started at Sat Sep 13 10:39:51 CEST 2025 ===
+Command: kube-dump.sh -e tcpdump -nn -vvvv -s 0 -i any | tee /host/tmp/%.log -E tcpdump -nn -vvvv -s 0 -i any | tee /host/tmp/%.log --include-nodes --kill-switch-abs=63MB --pod-volume=/host/tmp --node-volume=/host/tmp -s ls /host/tmp/*.log -S ls /host/tmp/*.log --install-deps --to-namespace=dummy -o tester -l app.kubernetes.io/part-of=coder -L kubernetes.io/hostname=k8s-node-01 --no-glyphs
+===============================================
+2025-09-13 10:39:52 - [INFO] PHASE 1: Target Selection & Debug Pod Creation
+2025-09-13 10:39:52 - ====================================================
+2025-09-13 10:39:52 - [TARGET] Mixed execution mode (pods + nodes)
+2025-09-13 10:39:52 - [POD] Handling pod targets...
+2025-09-13 10:39:52 - [SEARCH] Finding pods with label selector: app.kubernetes.io/part-of=coder
+2025-09-13 10:39:52 - [OK] Found 2 pods:
+2025-09-13 10:39:52 -    [POD] coder-1f2cf230-cd19-4e3a-a35f-36f82c59a3f6-5d865679d8-mwvm2 (namespace: coder)
+2025-09-13 10:39:52 -    [POD] coder-78677fff96-q7nxd (namespace: coder)
+2025-09-13 10:39:52 - [SETUP] Preparing target pods for debugging...
+2025-09-13 10:39:53 -    [OK] coder-1f2cf230-cd19-4e3a-a35f-36f82c59a3f6-5d865679d8-mwvm2 (coder) -> dev on k8s-node-04
+2025-09-13 10:39:53 -    [OK] coder-78677fff96-q7nxd (coder) -> coder on k8s-node-05
+2025-09-13 10:39:53 - [NODE]  Handling node targets...
+2025-09-13 10:39:53 - [SEARCH] Finding nodes with label selector: kubernetes.io/hostname=k8s-node-01
+2025-09-13 10:39:54 - [OK] Found 1 nodes:
+2025-09-13 10:39:54 -    [NODE]  k8s-node-01
+2025-09-13 10:39:54 - [SEARCH] Processing --include-nodes: adding nodes hosting selected pods
+2025-09-13 10:39:54 - [INFO]  No additional nodes needed (all pod nodes already selected by -L)
+2025-09-13 10:39:54 - [LAUNCH] Creating debug pods for pod targets...
+2025-09-13 10:39:54 -    [POD] Creating debug pod for coder-1f2cf230-cd19-4e3a-a35f-36f82c59a3f6-5d865679d8-mwvm2:dev on k8s-node-04
+2025-09-13 10:39:55 -    [POD] Creating debug pod for coder-78677fff96-q7nxd:coder on k8s-node-05
+2025-09-13 10:39:56 - [LAUNCH] Creating debug pods for node targets...
+2025-09-13 10:39:56 -    [NODE]  Creating debug pod for node 'k8s-node-01'
+2025-09-13 10:39:57 - [PROGRESS] Checking 3 debug pods
+2025-09-13 10:40:01 -    [OK] All 3 debug pods are ready
+2025-09-13 10:40:02 - [SECURITY]  Creating kill switch monitor pods...
+2025-09-13 10:40:02 -    [OK] Created kill switch monitor: ks-k8s-node-04-cea687fd -> k8s-node-04-debug-ff8cee6a-1757752794 (volume: /host/tmp)
+2025-09-13 10:40:04 -    [OK] Created kill switch monitor: ks-k8s-node-05-97218b0f -> k8s-node-05-debug-e90aec67-1757752794 (volume: /host/tmp)
+2025-09-13 10:40:05 -    [OK] Created kill switch monitor: ks-k8s-node-01-30f79d34 -> node-ffc9d6-1757752796 (volume: /host/tmp)
+2025-09-13 10:40:05 - [OK] PHASE 2: Debug Pods Running - Monitor Output
+2025-09-13 10:40:05 - ====================================================
+2025-09-13 10:40:05 - [STATUS] Debug pods are running with commands in their entrypoints.
+2025-09-13 10:40:05 - [SEARCH] Monitor command output with these commands:
+2025-09-13 10:40:05 - [CLEANUP]  Or delete all debug pods manually:
+2025-09-13 10:40:05 - [PAUSE]  PHASE 3: Waiting for User Input
+2025-09-13 10:40:05 - ====================================================
+2025-09-13 10:40:05 - [PROGRESS] Press Enter to cleanup all debug pods, or Ctrl+C to leave them running...
+2025-09-13 10:40:14 - [CLEAN] PHASE 4: Cleaning up Debug Pods
+2025-09-13 10:40:14 - ====================================================
+2025-09-13 10:40:14 - [CLEANUP]  Deleting 3 debug pods...
+2025-09-13 10:40:17 - [CLEAN] Cleaning up kill switch monitor pods...
+2025-09-13 10:40:21 -    [OK] All debug pods cleaned up
+2025-09-13 10:40:21 - [DOWNLOAD] PHASE 5: File Discovery & Download
+2025-09-13 10:40:21 - ====================================================
+2025-09-13 10:40:21 - [LAUNCH] Creating discovery pods for file download...
+2025-09-13 10:40:21 - [POD] Creating discovery pods for pod targets...
+2025-09-13 10:40:23 - [NODE]  Creating discovery pods for node targets...
+2025-09-13 10:40:24 - [WAITING] Waiting for discovery pods to be ready...
+2025-09-13 10:40:28 -    [OK] All discovery pods are ready
+2025-09-13 10:40:28 - STDERR: [DOWNLOAD] Downloading files...
+2025-09-13 10:40:30 - STDERR:    [OK] k8s-node-04-debug-ff8cee6a-1757752794.log
+2025-09-13 10:40:33 - STDERR:    [OK] k8s-node-05-debug-e90aec67-1757752794.log
+2025-09-13 10:40:38 - STDERR:    [OK] node-ffc9d6-1757752796.log
+2025-09-13 10:40:40 - [CLEAN] Cleaning up 3 successful discovery pods...
+2025-09-13 10:40:43 - [COMPLETE] All operations completed!
+===============================================
+=== Kube-dump session ended at Sat Sep 13 10:40:43 CEST 2025 ===
+2025-09-13 10:40:43 - [INFO] Session log saved to: tester/kube-dump-2025-09-13_1757752791.log

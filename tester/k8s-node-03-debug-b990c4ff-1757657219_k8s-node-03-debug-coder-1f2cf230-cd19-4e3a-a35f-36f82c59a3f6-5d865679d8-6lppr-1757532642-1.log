@@ -1,0 +1,15 @@
+19:31:07.363130 eth0  Out IP (tos 0x0, ttl 64, id 40415, offset 0, flags [DF], proto TCP (6), length 392)
+    10.244.6.113.52292 > 192.168.1.149.443: Flags [P.], cksum 0xd51c (incorrect -> 0x9dbb), seq 4080064826:4080065166, ack 2226794922, win 521, options [nop,nop,TS val 1493819625 ecr 3015061279], length 340
+19:31:07.364676 eth0  Out IP (tos 0x0, ttl 64, id 3651, offset 0, flags [DF], proto TCP (6), length 90)
+    10.244.6.113.52302 > 192.168.1.149.443: Flags [P.], cksum 0xd3ee (incorrect -> 0x5f8b), seq 3494673211:3494673249, ack 1702567575, win 4429, options [nop,nop,TS val 1493819627 ecr 3015061276], length 38
+19:31:07.371333 eth0  In  IP (tos 0x0, ttl 61, id 31027, offset 0, flags [DF], proto TCP (6), length 836)
+    192.168.1.149.443 > 10.244.6.113.52292: Flags [P.], cksum 0xdb37 (correct), seq 1:785, ack 340, win 503, options [nop,nop,TS val 3015071294 ecr 1493819625], length 784
+19:31:07.371448 eth0  Out IP (tos 0x0, ttl 64, id 40416, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.6.113.52292 > 192.168.1.149.443: Flags [.], cksum 0xd3c8 (incorrect -> 0x07f4), seq 340, ack 785, win 515, options [nop,nop,TS val 1493819633 ecr 3015071294], length 0
+19:31:07.374750 eth0  In  IP (tos 0x0, ttl 61, id 17076, offset 0, flags [DF], proto TCP (6), length 652)
+    192.168.1.149.443 > 10.244.6.113.52302: Flags [P.], cksum 0x4643 (correct), seq 1:601, ack 38, win 503, options [nop,nop,TS val 3015071297 ecr 1493819627], length 600
+19:31:07.374827 eth0  In  IP (tos 0x0, ttl 61, id 17077, offset 0, flags [DF], proto TCP (6), length 83)
+    192.168.1.149.443 > 10.244.6.113.52302: Flags [P.], cksum 0x5aaa (correct), seq 601:632, ack 38, win 503, options [nop,nop,TS val 3015071297 ecr 1493819627], length 31
+19:31:07.375356 eth0  Out IP (tos 0x0, ttl 64, id 3652, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.6.113.52302 > 192.168.1.149.443: Flags [.], cksum 0xd3c8 (incorrect -> 0xad95), seq 38, ack 632, win 4429, options [nop,nop,TS val 1493819637 ecr 3015071297], length 0
+

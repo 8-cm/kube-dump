@@ -1,0 +1,239 @@
+19:27:26.968652 eth0  In  IP (tos 0x0, ttl 63, id 60567, offset 0, flags [DF], proto TCP (6), length 480)
+    10.244.7.90.42366 > 10.244.7.125.8080: Flags [P.], cksum 0x2691 (incorrect -> 0x4add), seq 1658139290:1658139718, ack 2514012432, win 818, options [nop,nop,TS val 4222045425 ecr 1530970950], length 428: HTTP, length: 428
+	GET /api/v2/workspaceagents/me/reinit HTTP/1.1
+	Host: code.frightens.me
+	X-Request-ID: 4fb600758fdb8a798e178e4b4781e89b
+	X-Real-IP: 10.244.0.65
+	X-Forwarded-For: 10.244.0.65
+	X-Forwarded-Host: code.frightens.me
+	X-Forwarded-Port: 443
+	X-Forwarded-Proto: https
+	X-Forwarded-Scheme: https
+	X-Scheme: https
+	accept-encoding: gzip
+	user-agent: Go-http-client/2.0
+	cookie: coder_session_token=d75502c1-afef-4709-bc21-0c6e36e1c0d1
+	
+19:27:26.969426 eth0  Out IP (tos 0x0, ttl 64, id 62920, offset 0, flags [DF], proto TCP (6), length 3233)
+    10.244.7.125.45080 > 192.168.1.100.5432: Flags [P.], cksum 0xe110 (incorrect -> 0x0415), seq 4124968737:4124971918, ack 485071240, win 508, options [nop,nop,TS val 4034427797 ecr 3735193656], length 3181
+19:27:26.970349 eth0  In  IP (tos 0x0, ttl 61, id 5371, offset 0, flags [DF], proto TCP (6), length 52)
+    192.168.1.100.5432 > 10.244.7.125.45080: Flags [.], cksum 0x4814 (correct), seq 1, ack 3181, win 73, options [nop,nop,TS val 3735194114 ecr 4034427797], length 0
+19:27:26.970509 eth0  In  IP (tos 0x0, ttl 61, id 5372, offset 0, flags [DF], proto TCP (6), length 2279)
+    192.168.1.100.5432 > 10.244.7.125.45080: Flags [P.], cksum 0xdd56 (incorrect -> 0x7a57), seq 1:2228, ack 3181, win 73, options [nop,nop,TS val 3735194114 ecr 4034427797], length 2227
+19:27:26.970541 eth0  Out IP (tos 0x0, ttl 64, id 62923, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.7.125.45080 > 192.168.1.100.5432: Flags [.], cksum 0xd4a3 (incorrect -> 0x3db9), seq 3181, ack 2228, win 496, options [nop,nop,TS val 4034427798 ecr 3735194114], length 0
+19:27:26.970644 eth0  Out IP (tos 0x0, ttl 64, id 62924, offset 0, flags [DF], proto TCP (6), length 260)
+    10.244.7.125.45080 > 192.168.1.100.5432: Flags [P.], cksum 0xd573 (incorrect -> 0x301b), seq 3181:3389, ack 2228, win 508, options [nop,nop,TS val 4034427798 ecr 3735194114], length 208
+19:27:26.973209 eth0  In  IP (tos 0x0, ttl 61, id 5374, offset 0, flags [DF], proto TCP (6), length 77)
+    192.168.1.100.5432 > 10.244.7.125.45080: Flags [P.], cksum 0xbbad (correct), seq 2228:2253, ack 3389, win 73, options [nop,nop,TS val 3735194117 ecr 4034427798], length 25
+19:27:26.973617 eth0  In  IP (tos 0x0, ttl 63, id 37654, offset 0, flags [DF], proto TCP (6), length 602)
+    10.244.7.90.42354 > 10.244.7.125.8080: Flags [P.], cksum 0x270b (incorrect -> 0xd9be), seq 3862719014:3862719564, ack 160413495, win 420, options [nop,nop,TS val 4222045430 ecr 1530970954], length 550: HTTP, length: 550
+	GET /api/v2/workspaceagents/me/rpc?version=2.6 HTTP/1.1
+	Host: code.frightens.me
+	Upgrade: websocket
+	Connection: upgrade
+	X-Request-ID: 12bdcd382dcc489da257220465250263
+	X-Real-IP: 10.244.0.65
+	X-Forwarded-For: 10.244.0.65
+	X-Forwarded-Host: code.frightens.me
+	X-Forwarded-Port: 443
+	X-Forwarded-Proto: https
+	X-Forwarded-Scheme: https
+	X-Scheme: https
+	User-Agent: Go-http-client/1.1
+	Cookie: coder_session_token=d75502c1-afef-4709-bc21-0c6e36e1c0d1
+	Sec-Websocket-Key: 7G4r3/7pY7kUacQJ08m5EQ==
+	Sec-Websocket-Version: 13
+	Accept-Encoding: gzip
+	
+19:27:26.973818 eth0  Out IP (tos 0x0, ttl 64, id 60371, offset 0, flags [DF], proto TCP (6), length 726)
+    10.244.7.125.8080 > 10.244.7.90.42366: Flags [P.], cksum 0x2787 (incorrect -> 0x97ed), seq 1:675, ack 428, win 2926, options [nop,nop,TS val 1530980961 ecr 4222045425], length 674: HTTP, length: 674
+	HTTP/1.1 401 Unauthorized
+	Content-Type: application/json; charset=utf-8
+	Set-Cookie: csrf_token=kjL2GOfHhSnhYB+w9mvF1DMUpwSu6lTSjVZQlIDuXV8=; Path=/; HttpOnly; SameSite=Lax
+	Vary: Origin
+	Vary: Cookie
+	X-Coder-Build-Version: v2.25.2+f51e22d
+	X-Coder-Request-Id: 254c13f4-31c1-494d-92b7-2350d84930ec
+	X-Content-Type-Options: nosniff
+	X-Ratelimit-Limit: 512
+	X-Ratelimit-Remaining: 506
+	X-Ratelimit-Reset: 1757532480
+	Date: Wed, 10 Sep 2025 19:27:26 GMT
+	Content-Length: 197
+	
+	{"message":"Workspace agent not authorized.","detail":"The agent cannot authenticate until the workspace provision job has been completed. If the job is no longer running, this agent is invalid."}
+19:27:26.973975 eth0  In  IP (tos 0x0, ttl 63, id 60568, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.7.90.42366 > 10.244.7.125.8080: Flags [.], cksum 0x24e5 (incorrect -> 0x02d7), seq 428, ack 675, win 818, options [nop,nop,TS val 4222045430 ecr 1530980961], length 0
+19:27:26.974262 eth0  Out IP (tos 0x0, ttl 64, id 62925, offset 0, flags [DF], proto TCP (6), length 3233)
+    10.244.7.125.45080 > 192.168.1.100.5432: Flags [P.], cksum 0xe110 (incorrect -> 0xec39), seq 3389:6570, ack 2253, win 508, options [nop,nop,TS val 4034427802 ecr 3735194117], length 3181
+19:27:26.974944 eth0  In  IP (tos 0x0, ttl 61, id 5375, offset 0, flags [DF], proto TCP (6), length 52)
+    192.168.1.100.5432 > 10.244.7.125.45080: Flags [.], cksum 0x3201 (correct), seq 2253, ack 6570, win 73, options [nop,nop,TS val 3735194119 ecr 4034427802], length 0
+19:27:26.975398 eth0  In  IP (tos 0x0, ttl 61, id 5376, offset 0, flags [DF], proto TCP (6), length 2279)
+    192.168.1.100.5432 > 10.244.7.125.45080: Flags [P.], cksum 0xdd56 (incorrect -> 0x6444), seq 2253:4480, ack 6570, win 73, options [nop,nop,TS val 3735194119 ecr 4034427802], length 2227
+19:27:26.975546 eth0  Out IP (tos 0x0, ttl 64, id 62928, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.7.125.45080 > 192.168.1.100.5432: Flags [.], cksum 0xd4a3 (incorrect -> 0x279a), seq 6570, ack 4480, win 508, options [nop,nop,TS val 4034427803 ecr 3735194119], length 0
+19:27:26.975757 eth0  Out IP (tos 0x0, ttl 64, id 62929, offset 0, flags [DF], proto TCP (6), length 260)
+    10.244.7.125.45080 > 192.168.1.100.5432: Flags [P.], cksum 0xd573 (incorrect -> 0x1a08), seq 6570:6778, ack 4480, win 508, options [nop,nop,TS val 4034427803 ecr 3735194119], length 208
+19:27:26.977938 eth0  In  IP (tos 0x0, ttl 61, id 5378, offset 0, flags [DF], proto TCP (6), length 77)
+    192.168.1.100.5432 > 10.244.7.125.45080: Flags [P.], cksum 0xa59a (correct), seq 4480:4505, ack 6778, win 73, options [nop,nop,TS val 3735194122 ecr 4034427803], length 25
+19:27:26.978513 eth0  Out IP (tos 0x0, ttl 64, id 10997, offset 0, flags [DF], proto TCP (6), length 726)
+    10.244.7.125.8080 > 10.244.7.90.42354: Flags [P.], cksum 0x2787 (incorrect -> 0x38a7), seq 1:675, ack 550, win 372, options [nop,nop,TS val 1530980966 ecr 4222045430], length 674: HTTP, length: 674
+	HTTP/1.1 401 Unauthorized
+	Content-Type: application/json; charset=utf-8
+	Set-Cookie: csrf_token=38jPhtq3EKx2u++LdAN0wznYsbySwQjTF7Bt8PNN0+E=; Path=/; HttpOnly; SameSite=Lax
+	Vary: Origin
+	Vary: Cookie
+	X-Coder-Build-Version: v2.25.2+f51e22d
+	X-Coder-Request-Id: af9f1550-4efb-479e-a87b-69554e98ef63
+	X-Content-Type-Options: nosniff
+	X-Ratelimit-Limit: 512
+	X-Ratelimit-Remaining: 506
+	X-Ratelimit-Reset: 1757532480
+	Date: Wed, 10 Sep 2025 19:27:26 GMT
+	Content-Length: 197
+	
+	{"message":"Workspace agent not authorized.","detail":"The agent cannot authenticate until the workspace provision job has been completed. If the job is no longer running, this agent is invalid."}
+19:27:26.978656 eth0  In  IP (tos 0x0, ttl 63, id 37655, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.7.90.42354 > 10.244.7.125.8080: Flags [.], cksum 0x24e5 (incorrect -> 0xe720), seq 550, ack 675, win 415, options [nop,nop,TS val 4222045435 ecr 1530980966], length 0
+19:27:27.021052 eth0  Out IP (tos 0x0, ttl 64, id 62930, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.7.125.45080 > 192.168.1.100.5432: Flags [.], cksum 0xd4a3 (incorrect -> 0x2680), seq 6778, ack 4505, win 508, options [nop,nop,TS val 4034427849 ecr 3735194122], length 0
+19:27:27.400638 eth0  Out IP (tos 0x0, ttl 64, id 62931, offset 0, flags [DF], proto TCP (6), length 211)
+    10.244.7.125.45080 > 192.168.1.100.5432: Flags [P.], cksum 0xd542 (incorrect -> 0x5e8e), seq 6778:6937, ack 4505, win 508, options [nop,nop,TS val 4034428228 ecr 3735194122], length 159
+19:27:27.400642 eth0  Out IP (tos 0x0, ttl 64, id 17130, offset 0, flags [DF], proto TCP (6), length 211)
+    10.244.7.125.45098 > 192.168.1.100.5432: Flags [P.], cksum 0xd542 (incorrect -> 0xfb43), seq 370270206:370270365, ack 2069090985, win 656, options [nop,nop,TS val 4034428228 ecr 3735193637], length 159
+19:27:27.400816 eth0  Out IP (tos 0x0, ttl 64, id 21240, offset 0, flags [DF], proto TCP (6), length 211)
+    10.244.7.125.45076 > 192.168.1.100.5432: Flags [P.], cksum 0xd542 (incorrect -> 0xdf27), seq 1561249085:1561249244, ack 2142687263, win 524, options [nop,nop,TS val 4034428228 ecr 3735189190], length 159
+19:27:27.401632 eth0  In  IP (tos 0x0, ttl 61, id 5379, offset 0, flags [DF], proto TCP (6), length 83)
+    192.168.1.100.5432 > 10.244.7.125.45080: Flags [P.], cksum 0x2341 (correct), seq 4505:4536, ack 6937, win 73, options [nop,nop,TS val 3735194545 ecr 4034428228], length 31
+19:27:27.401663 eth0  Out IP (tos 0x0, ttl 64, id 62932, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.7.125.45080 > 192.168.1.100.5432: Flags [.], cksum 0xd4a3 (incorrect -> 0x229f), seq 6937, ack 4536, win 508, options [nop,nop,TS val 4034428229 ecr 3735194545], length 0
+19:27:27.401684 eth0  In  IP (tos 0x0, ttl 61, id 56048, offset 0, flags [DF], proto TCP (6), length 83)
+    192.168.1.100.5432 > 10.244.7.125.45098: Flags [P.], cksum 0xbe6c (correct), seq 1:32, ack 159, win 130, options [nop,nop,TS val 3735194545 ecr 4034428228], length 31
+19:27:27.401694 eth0  Out IP (tos 0x0, ttl 64, id 17131, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.7.125.45098 > 192.168.1.100.5432: Flags [.], cksum 0xd4a3 (incorrect -> 0xbd6f), seq 159, ack 32, win 656, options [nop,nop,TS val 4034428229 ecr 3735194545], length 0
+19:27:27.401939 eth0  Out IP (tos 0x0, ttl 64, id 17132, offset 0, flags [DF], proto TCP (6), length 151)
+    10.244.7.125.45098 > 192.168.1.100.5432: Flags [P.], cksum 0xd506 (incorrect -> 0x4070), seq 159:258, ack 32, win 656, options [nop,nop,TS val 4034428229 ecr 3735194545], length 99
+19:27:27.401939 eth0  Out IP (tos 0x0, ttl 64, id 62933, offset 0, flags [DF], proto TCP (6), length 151)
+    10.244.7.125.45080 > 192.168.1.100.5432: Flags [P.], cksum 0xd506 (incorrect -> 0xac91), seq 6937:7036, ack 4536, win 508, options [nop,nop,TS val 4034428229 ecr 3735194545], length 99
+19:27:27.403686 eth0  In  IP (tos 0x0, ttl 61, id 9957, offset 0, flags [DF], proto TCP (6), length 83)
+    192.168.1.100.5432 > 10.244.7.125.45076: Flags [P.], cksum 0x907b (correct), seq 1:32, ack 159, win 114, options [nop,nop,TS val 3735194547 ecr 4034428228], length 31
+19:27:27.403705 eth0  Out IP (tos 0x0, ttl 64, id 21241, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.7.125.45076 > 192.168.1.100.5432: Flags [.], cksum 0xd4a3 (incorrect -> 0x8ff0), seq 159, ack 32, win 524, options [nop,nop,TS val 4034428231 ecr 3735194547], length 0
+19:27:27.403849 eth0  Out IP (tos 0x0, ttl 64, id 21242, offset 0, flags [DF], proto TCP (6), length 151)
+    10.244.7.125.45076 > 192.168.1.100.5432: Flags [P.], cksum 0xd506 (incorrect -> 0xa10a), seq 159:258, ack 32, win 524, options [nop,nop,TS val 4034428231 ecr 3735194547], length 99
+19:27:27.406984 eth0  In  IP (tos 0x0, ttl 61, id 5380, offset 0, flags [DF], proto TCP (6), length 77)
+    192.168.1.100.5432 > 10.244.7.125.45080: Flags [P.], cksum 0x9610 (correct), seq 4536:4561, ack 7036, win 73, options [nop,nop,TS val 3735194551 ecr 4034428229], length 25
+19:27:27.409542 eth0  In  IP (tos 0x0, ttl 61, id 56049, offset 0, flags [DF], proto TCP (6), length 77)
+    192.168.1.100.5432 > 10.244.7.125.45098: Flags [P.], cksum 0x313a (correct), seq 32:57, ack 258, win 130, options [nop,nop,TS val 3735194553 ecr 4034428229], length 25
+19:27:27.409683 eth0  In  IP (tos 0x0, ttl 61, id 9958, offset 0, flags [DF], proto TCP (6), length 77)
+    192.168.1.100.5432 > 10.244.7.125.45076: Flags [P.], cksum 0x0349 (correct), seq 32:57, ack 258, win 114, options [nop,nop,TS val 3735194553 ecr 4034428231], length 25
+19:27:27.449137 eth0  Out IP (tos 0x0, ttl 64, id 62934, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.7.125.45080 > 192.168.1.100.5432: Flags [.], cksum 0xd4a3 (incorrect -> 0x21ed), seq 7036, ack 4561, win 508, options [nop,nop,TS val 4034428277 ecr 3735194551], length 0
+19:27:27.453070 eth0  Out IP (tos 0x0, ttl 64, id 21243, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.7.125.45076 > 192.168.1.100.5432: Flags [.], cksum 0xd4a3 (incorrect -> 0x8f3c), seq 258, ack 57, win 524, options [nop,nop,TS val 4034428281 ecr 3735194553], length 0
+19:27:27.453079 eth0  Out IP (tos 0x0, ttl 64, id 17133, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.7.125.45098 > 192.168.1.100.5432: Flags [.], cksum 0xd4a3 (incorrect -> 0xbcb7), seq 258, ack 57, win 656, options [nop,nop,TS val 4034428281 ecr 3735194553], length 0
+19:27:29.679760 eth0  In  IP (tos 0x0, ttl 63, id 5913, offset 0, flags [DF], proto TCP (6), length 60)
+    10.244.7.235.50494 > 10.244.7.125.8080: Flags [S], cksum 0x257e (incorrect -> 0x1544), seq 3867848569, win 64240, options [mss 1460,sackOK,TS val 889217704 ecr 0,nop,wscale 7], length 0
+19:27:29.679801 eth0  Out IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+    10.244.7.125.8080 > 10.244.7.235.50494: Flags [S.], cksum 0x257e (incorrect -> 0xa9cc), seq 2280664277, ack 3867848570, win 65160, options [mss 1460,sackOK,TS val 3939682357 ecr 889217704,nop,wscale 7], length 0
+19:27:29.679918 eth0  In  IP (tos 0x0, ttl 63, id 5914, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.7.235.50494 > 10.244.7.125.8080: Flags [.], cksum 0x2576 (incorrect -> 0xd52b), seq 1, ack 1, win 502, options [nop,nop,TS val 889217704 ecr 3939682357], length 0
+19:27:29.680387 eth0  In  IP (tos 0x0, ttl 63, id 5915, offset 0, flags [DF], proto TCP (6), length 163)
+    10.244.7.235.50494 > 10.244.7.125.8080: Flags [P.], cksum 0x25e5 (incorrect -> 0x6c3e), seq 1:112, ack 1, win 502, options [nop,nop,TS val 889217705 ecr 3939682357], length 111: HTTP, length: 111
+	GET /healthz HTTP/1.1
+	Host: 10.244.7.125:8080
+	User-Agent: kube-probe/1.32
+	Accept: */*
+	Connection: close
+	
+19:27:29.680414 eth0  Out IP (tos 0x0, ttl 64, id 1073, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.7.125.8080 > 10.244.7.235.50494: Flags [.], cksum 0x2576 (incorrect -> 0xd4b3), seq 1, ack 112, win 509, options [nop,nop,TS val 3939682358 ecr 889217705], length 0
+19:27:29.680896 eth0  Out IP (tos 0x0, ttl 64, id 1074, offset 0, flags [DF], proto TCP (6), length 449)
+    10.244.7.125.8080 > 10.244.7.235.50494: Flags [P.], cksum 0x2703 (incorrect -> 0x0b23), seq 1:398, ack 112, win 509, options [nop,nop,TS val 3939682358 ecr 889217705], length 397: HTTP, length: 397
+	HTTP/1.1 200 OK
+	Set-Cookie: csrf_token=tlwbJK8C/vMHNNoXBPlzxyyLPXEM44MA7VVFDf2wQeg=; Path=/; HttpOnly; SameSite=Lax
+	Vary: Origin
+	Vary: Cookie
+	X-Coder-Build-Version: v2.25.2+f51e22d
+	X-Coder-Request-Id: 32ef2369-df85-4e92-bf58-56d20bf81353
+	X-Content-Type-Options: nosniff
+	Date: Wed, 10 Sep 2025 19:27:29 GMT
+	Content-Length: 2
+	Content-Type: text/plain; charset=utf-8
+	Connection: close
+	
+	OK
+19:27:29.680996 eth0  In  IP (tos 0x0, ttl 63, id 5916, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.7.235.50494 > 10.244.7.125.8080: Flags [.], cksum 0x2576 (incorrect -> 0xd32e), seq 112, ack 398, win 501, options [nop,nop,TS val 889217705 ecr 3939682358], length 0
+19:27:29.681186 eth0  Out IP (tos 0x0, ttl 64, id 1075, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.7.125.8080 > 10.244.7.235.50494: Flags [F.], cksum 0x2576 (incorrect -> 0xd324), seq 398, ack 112, win 509, options [nop,nop,TS val 3939682359 ecr 889217705], length 0
+19:27:29.681357 eth0  In  IP (tos 0x0, ttl 63, id 5917, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.7.235.50494 > 10.244.7.125.8080: Flags [F.], cksum 0x2576 (incorrect -> 0xd32a), seq 112, ack 399, win 501, options [nop,nop,TS val 889217706 ecr 3939682359], length 0
+19:27:29.681372 eth0  Out IP (tos 0x0, ttl 64, id 1076, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.7.125.8080 > 10.244.7.235.50494: Flags [.], cksum 0x2576 (incorrect -> 0xd322), seq 399, ack 113, win 509, options [nop,nop,TS val 3939682359 ecr 889217706], length 0
+19:27:31.480568 eth0  Out IP (tos 0x0, ttl 64, id 21244, offset 0, flags [DF], proto TCP (6), length 310)
+    10.244.7.125.45076 > 192.168.1.100.5432: Flags [P.], cksum 0xd5a5 (incorrect -> 0xea29), seq 258:516, ack 57, win 524, options [nop,nop,TS val 4034432308 ecr 3735194553], length 258
+19:27:31.483446 eth0  In  IP (tos 0x0, ttl 61, id 9959, offset 0, flags [DF], proto TCP (6), length 416)
+    192.168.1.100.5432 > 10.244.7.125.45076: Flags [P.], cksum 0x054d (correct), seq 57:421, ack 516, win 114, options [nop,nop,TS val 3735198626 ecr 4034432308], length 364
+19:27:31.483519 eth0  Out IP (tos 0x0, ttl 64, id 21245, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.7.125.45076 > 192.168.1.100.5432: Flags [.], cksum 0xd4a3 (incorrect -> 0x6d29), seq 516, ack 421, win 522, options [nop,nop,TS val 4034432311 ecr 3735198626], length 0
+19:27:31.483877 eth0  Out IP (tos 0x0, ttl 64, id 21246, offset 0, flags [DF], proto TCP (6), length 135)
+    10.244.7.125.45076 > 192.168.1.100.5432: Flags [P.], cksum 0xd4f6 (incorrect -> 0x91d3), seq 516:599, ack 421, win 524, options [nop,nop,TS val 4034432311 ecr 3735198626], length 83
+19:27:31.484814 eth0  In  IP (tos 0x0, ttl 61, id 9960, offset 0, flags [DF], proto TCP (6), length 304)
+    192.168.1.100.5432 > 10.244.7.125.45076: Flags [P.], cksum 0x3b26 (correct), seq 421:673, ack 599, win 114, options [nop,nop,TS val 3735198629 ecr 4034432311], length 252
+19:27:31.485198 eth0  Out IP (tos 0x0, ttl 64, id 21247, offset 0, flags [DF], proto TCP (6), length 59)
+    10.244.7.125.45076 > 192.168.1.100.5432: Flags [P.], cksum 0xd4aa (incorrect -> 0x1489), seq 599:606, ack 673, win 524, options [nop,nop,TS val 4034432313 ecr 3735198629], length 7
+19:27:31.486012 eth0  In  IP (tos 0x0, ttl 61, id 9961, offset 0, flags [DF], proto TCP (6), length 63)
+    192.168.1.100.5432 > 10.244.7.125.45076: Flags [P.], cksum 0xd6f2 (correct), seq 673:684, ack 606, win 114, options [nop,nop,TS val 3735198630 ecr 4034432313], length 11
+19:27:31.486512 eth0  Out IP (tos 0x0, ttl 64, id 21248, offset 0, flags [DF], proto TCP (6), length 482)
+    10.244.7.125.45076 > 192.168.1.100.5432: Flags [P.], cksum 0xd651 (incorrect -> 0x85a1), seq 606:1036, ack 684, win 524, options [nop,nop,TS val 4034432314 ecr 3735198630], length 430
+19:27:31.487440 eth0  In  IP (tos 0x0, ttl 61, id 9962, offset 0, flags [DF], proto TCP (6), length 456)
+    192.168.1.100.5432 > 10.244.7.125.45076: Flags [P.], cksum 0xeb04 (correct), seq 684:1088, ack 1036, win 114, options [nop,nop,TS val 3735198631 ecr 4034432314], length 404
+19:27:31.487728 eth0  Out IP (tos 0x0, ttl 64, id 21249, offset 0, flags [DF], proto TCP (6), length 314)
+    10.244.7.125.45076 > 192.168.1.100.5432: Flags [P.], cksum 0xd5a9 (incorrect -> 0x4129), seq 1036:1298, ack 1088, win 524, options [nop,nop,TS val 4034432315 ecr 3735198631], length 262
+19:27:31.492942 eth0  In  IP (tos 0x0, ttl 61, id 9963, offset 0, flags [DF], proto TCP (6), length 304)
+    192.168.1.100.5432 > 10.244.7.125.45076: Flags [P.], cksum 0x3b65 (correct), seq 1088:1340, ack 1298, win 114, options [nop,nop,TS val 3735198637 ecr 4034432315], length 252
+19:27:31.533074 eth0  Out IP (tos 0x0, ttl 64, id 21250, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.7.125.45076 > 192.168.1.100.5432: Flags [.], cksum 0xd4a3 (incorrect -> 0x6645), seq 1298, ack 1340, win 524, options [nop,nop,TS val 4034432361 ecr 3735198637], length 0
+19:27:33.493610 eth0  In  IP (tos 0x0, ttl 63, id 12141, offset 0, flags [DF], proto TCP (6), length 60)
+    10.244.7.235.38432 > 10.244.7.125.8080: Flags [S], cksum 0x257e (incorrect -> 0x5803), seq 1846216050, win 64240, options [mss 1460,sackOK,TS val 889221518 ecr 0,nop,wscale 7], length 0
+19:27:33.493648 eth0  Out IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+    10.244.7.125.8080 > 10.244.7.235.38432: Flags [S.], cksum 0x257e (incorrect -> 0x825b), seq 130287692, ack 1846216051, win 65160, options [mss 1460,sackOK,TS val 3939686171 ecr 889221518,nop,wscale 7], length 0
+19:27:33.493761 eth0  In  IP (tos 0x0, ttl 63, id 12142, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.7.235.38432 > 10.244.7.125.8080: Flags [.], cksum 0x2576 (incorrect -> 0xadba), seq 1, ack 1, win 502, options [nop,nop,TS val 889221518 ecr 3939686171], length 0
+19:27:33.494207 eth0  In  IP (tos 0x0, ttl 63, id 12143, offset 0, flags [DF], proto TCP (6), length 163)
+    10.244.7.235.38432 > 10.244.7.125.8080: Flags [P.], cksum 0x25e5 (incorrect -> 0x44cd), seq 1:112, ack 1, win 502, options [nop,nop,TS val 889221519 ecr 3939686171], length 111: HTTP, length: 111
+	GET /healthz HTTP/1.1
+	Host: 10.244.7.125:8080
+	User-Agent: kube-probe/1.32
+	Accept: */*
+	Connection: close
+	
+19:27:33.494238 eth0  Out IP (tos 0x0, ttl 64, id 52984, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.7.125.8080 > 10.244.7.235.38432: Flags [.], cksum 0x2576 (incorrect -> 0xad42), seq 1, ack 112, win 509, options [nop,nop,TS val 3939686172 ecr 889221519], length 0
+19:27:33.494612 eth0  Out IP (tos 0x0, ttl 64, id 52985, offset 0, flags [DF], proto TCP (6), length 449)
+    10.244.7.125.8080 > 10.244.7.235.38432: Flags [P.], cksum 0x2703 (incorrect -> 0x1726), seq 1:398, ack 112, win 509, options [nop,nop,TS val 3939686172 ecr 889221519], length 397: HTTP, length: 397
+	HTTP/1.1 200 OK
+	Set-Cookie: csrf_token=N/ux99p2zQz40YgMsKwVdrRpDWgY32JDr7qszsFeTJs=; Path=/; HttpOnly; SameSite=Lax
+	Vary: Origin
+	Vary: Cookie
+	X-Coder-Build-Version: v2.25.2+f51e22d
+	X-Coder-Request-Id: ec24c991-0da6-4cd5-94ab-33fcbf89e2a0
+	X-Content-Type-Options: nosniff
+	Date: Wed, 10 Sep 2025 19:27:33 GMT
+	Content-Length: 2
+	Content-Type: text/plain; charset=utf-8
+	Connection: close
+	
+	OK
+19:27:33.494712 eth0  In  IP (tos 0x0, ttl 63, id 12144, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.7.235.38432 > 10.244.7.125.8080: Flags [.], cksum 0x2576 (incorrect -> 0xabbd), seq 112, ack 398, win 501, options [nop,nop,TS val 889221519 ecr 3939686172], length 0
+19:27:33.494794 eth0  Out IP (tos 0x0, ttl 64, id 52986, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.7.125.8080 > 10.244.7.235.38432: Flags [F.], cksum 0x2576 (incorrect -> 0xabb4), seq 398, ack 112, win 509, options [nop,nop,TS val 3939686172 ecr 889221519], length 0
+19:27:33.494887 eth0  In  IP (tos 0x0, ttl 63, id 12145, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.7.235.38432 > 10.244.7.125.8080: Flags [F.], cksum 0x2576 (incorrect -> 0xabbb), seq 112, ack 399, win 501, options [nop,nop,TS val 889221519 ecr 3939686172], length 0
+19:27:33.494906 eth0  Out IP (tos 0x0, ttl 64, id 52987, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.7.125.8080 > 10.244.7.235.38432: Flags [.], cksum 0x2576 (incorrect -> 0xabb3), seq 399, ack 113, win 509, options [nop,nop,TS val 3939686172 ecr 889221519], length 0
+

@@ -1,0 +1,52 @@
+=== Kube-dump session started at Thu Sep 11 23:19:07 CEST 2025 ===
+Command: kube-dump.sh -e tcpdump -nn -vvvv -s 0 -i any | tee /host/tmp/%.log -E tcpdump -nn -vvvv -s 0 -i any | tee /host/tmp/%.log --include-nodes --kill-switch-abs=63MB --pod-volume=/host/tmp --node-volume=/host/tmp -s ls /host/tmp/*.log -S ls /host/tmp/*.log --install-deps --to-namespace=dummy -o tester -l app.kubernetes.io/instance=coder -L topology.jiva.openebs.io/nodeName=k8s-node-00
+===============================================
+2025-09-11 23:19:08 - 📋 PHASE 1: Target Selection & Debug Pod Creation
+2025-09-11 23:19:08 - ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2025-09-11 23:19:08 - 🎯 Mixed execution mode (pods + nodes)
+2025-09-11 23:19:08 - 📦 Handling pod targets...
+2025-09-11 23:19:08 - 🔍 Finding pods with label selector: app.kubernetes.io/instance=coder
+2025-09-11 23:19:08 - ✅ Found 1 pods:
+2025-09-11 23:19:08 -    📦 coder-78677fff96-pkdpp (namespace: coder)
+2025-09-11 23:19:08 - 🔧 Preparing target pods for debugging...
+2025-09-11 23:19:08 -    ✅ coder-78677fff96-pkdpp (coder) -> coder on k8s-node-05
+2025-09-11 23:19:08 - 🖥️  Handling node targets...
+2025-09-11 23:19:08 - 🔍 Finding nodes with label selector: topology.jiva.openebs.io/nodeName=k8s-node-00
+2025-09-11 23:19:08 - ✅ Found 1 nodes:
+2025-09-11 23:19:08 -    🖥️  k8s-node-00
+2025-09-11 23:19:08 - 🔍 Processing --include-nodes: adding nodes hosting selected pods
+2025-09-11 23:19:08 -       🖥️  k8s-node-05
+2025-09-11 23:19:08 - 🚀 Creating debug pods for pod targets...
+2025-09-11 23:19:09 -    📦 Creating debug pod for coder-78677fff96-pkdpp:coder on k8s-node-05
+2025-09-11 23:19:09 -       ❌ Failed to create debug pod for coder-78677fff96-pkdpp
+2025-09-11 23:19:09 - 🚀 Creating debug pods for node targets...
+2025-09-11 23:19:09 -    🖥️  Creating debug pod for node 'k8s-node-00'
+2025-09-11 23:19:10 -    🖥️  Creating debug pod for node 'k8s-node-05'
+2025-09-11 23:19:10 - 🔄 Checking %d debug pods\n
+2025-09-11 23:19:13 -    ✅ All 2 debug pods are ready
+2025-09-11 23:19:13 - ✅ PHASE 2: Debug Pods Running - Monitor Output
+2025-09-11 23:19:13 - ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2025-09-11 23:19:13 - 📊 Debug pods are running with commands in their entrypoints.
+2025-09-11 23:19:13 - 🔍 Monitor command output with these commands:
+2025-09-11 23:19:13 - 🗑️  Or delete all debug pods manually:
+2025-09-11 23:19:13 - ⏸️  PHASE 3: Waiting for User Input
+2025-09-11 23:19:13 - ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2025-09-11 23:19:13 - 🔄 Press Enter to cleanup all debug pods, or Ctrl+C to leave them running...
+2025-09-11 23:20:00 - 🧹 PHASE 4: Cleaning up Debug Pods
+2025-09-11 23:20:00 - ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2025-09-11 23:20:00 - 🗑️  Deleting 2 debug pods...
+2025-09-11 23:20:01 -    ✅ All debug pods cleaned up
+2025-09-11 23:20:01 - 📥 PHASE 5: File Discovery & Download
+2025-09-11 23:20:01 - ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2025-09-11 23:20:01 - 🚀 Creating discovery pods for file download...
+2025-09-11 23:20:01 - 🖥️  Creating discovery pods for node targets...
+2025-09-11 23:20:02 - ⏳ Waiting for discovery pods to be ready...
+2025-09-11 23:20:07 -    ✅ All discovery pods are ready
+2025-09-11 23:20:07 - STDERR: 📥 Downloading files...
+2025-09-11 23:20:08 - STDERR:    ✅ node-d672ef-1757625549.log
+2025-09-11 23:20:09 - STDERR:    ✅ node-564dc9-1757625549.log
+2025-09-11 23:20:09 - 🧹 Cleaning up 2 successful discovery pods...
+2025-09-11 23:20:11 - 🎉 All operations completed!
+===============================================
+=== Kube-dump session ended at Thu Sep 11 23:20:11 CEST 2025 ===
+2025-09-11 23:20:11 - 📋 Session log saved to: tester/kube-dump-2025-09-11_1757625547.log

@@ -1,0 +1,39 @@
+=== Kube-dump session started at Sat Sep 13 10:56:20 CEST 2025 ===
+Command: kube-dump.sh -e tcpdump -nn -vvvv -s 0 -i any | tee /host/tmp/%.log -E tcpdump -nn -vvvv -s 0 -i any | tee /host/tmp/%.log --include-nodes --kill-switch-abs=63MB --pod-volume=/host/tmp --node-volume=/host/tmp -s ls /host/tmp/*.log -S ls /host/tmp/*.log --install-deps --to-namespace=dummy -o tester -l app.kubernetes.io/part-of=coder -L kubernetes.io/hostname=k8s-node-01
+===============================================
+2025-09-13 10:56:20 - 📋 PHASE 1: Target Selection & Debug Pod Creation
+2025-09-13 10:56:20 - ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2025-09-13 10:56:20 - 🎯 Mixed execution mode (pods + nodes)
+2025-09-13 10:56:20 - 📦 Handling pod targets...
+2025-09-13 10:56:20 - 🔍 Finding pods with label selector: app.kubernetes.io/part-of=coder
+2025-09-13 10:56:21 - ✅ Found 2 pods:
+2025-09-13 10:56:21 -    📦 coder-1f2cf230-cd19-4e3a-a35f-36f82c59a3f6-5d865679d8-mwvm2 (namespace: coder)
+2025-09-13 10:56:21 -    📦 coder-78677fff96-q7nxd (namespace: coder)
+2025-09-13 10:56:21 - 🔧 Preparing target pods for debugging...
+2025-09-13 10:56:21 -    ✅ coder-1f2cf230-cd19-4e3a-a35f-36f82c59a3f6-5d865679d8-mwvm2 (coder) -> dev on k8s-node-04
+2025-09-13 10:56:22 -    ✅ coder-78677fff96-q7nxd (coder) -> coder on k8s-node-05
+2025-09-13 10:56:22 - 🖥️  Handling node targets...
+2025-09-13 10:56:22 - 🔍 Finding nodes with label selector: kubernetes.io/hostname=k8s-node-01
+2025-09-13 10:56:22 - ✅ Found 1 nodes:
+2025-09-13 10:56:22 -    🖥️  k8s-node-01
+2025-09-13 10:56:22 - 🔍 Processing --include-nodes: adding nodes hosting selected pods
+2025-09-13 10:56:22 - ℹ️  No additional nodes needed (all pod nodes already selected by -L)
+2025-09-13 10:56:22 - 🚀 Creating debug pods for pod targets...
+2025-09-13 10:56:23 -    📦 Creating debug pod for coder-1f2cf230-cd19-4e3a-a35f-36f82c59a3f6-5d865679d8-mwvm2:dev on k8s-node-04
+2025-09-13 10:56:24 -    📦 Creating debug pod for coder-78677fff96-q7nxd:coder on k8s-node-05
+2025-09-13 10:56:24 - 🚀 Creating debug pods for node targets...
+2025-09-13 10:56:25 -    🖥️  Creating debug pod for node 'k8s-node-01'
+2025-09-13 10:56:25 - 🔄 Checking 3 debug pods
+2025-09-13 10:56:30 -    ✅ All 3 debug pods are ready
+2025-09-13 10:56:30 - 🛡️  Creating kill switch monitor pods...
+2025-09-13 10:56:31 -    ✅ Created kill switch monitor: ks-k8s-node-04-bd31ef5b -> k8s-node-04-debug-ff8cee6a-1757753782 (volume: /host/tmp)
+2025-09-13 10:56:32 -    ✅ Created kill switch monitor: ks-k8s-node-05-3150adb4 -> k8s-node-05-debug-e90aec67-1757753782 (volume: /host/tmp)
+2025-09-13 10:56:33 -    ✅ Created kill switch monitor: ks-k8s-node-01-e814dfab -> node-ffc9d6-1757753784 (volume: /host/tmp)
+2025-09-13 10:56:33 - ✅ PHASE 2: Debug Pods Running - Monitor Output
+2025-09-13 10:56:33 - ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2025-09-13 10:56:33 - 📊 Debug pods are running with commands in their entrypoints.
+2025-09-13 10:56:33 - 🔍 Monitor command output with these commands:
+2025-09-13 10:56:33 - 🗑️  Or delete all debug pods manually:
+2025-09-13 10:56:33 - ⏸️  PHASE 3: Waiting for User Input
+2025-09-13 10:56:33 - ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2025-09-13 10:56:33 - 🔄 Press Enter to cleanup all debug pods, or Ctrl+C to leave them running...

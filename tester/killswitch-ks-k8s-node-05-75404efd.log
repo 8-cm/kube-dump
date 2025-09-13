@@ -1,0 +1,8 @@
+=== Kill switch monitor for k8s-node-05-debug-e90aec67-1757754581 ===
+Monitoring storage with absolute threshold: 63MB
+2025-09-13 09:09:59 - Volume /host/tmp: 0.55MB used of 64.00MB (0.8% used, 63.44MB available)
+2025-09-13 09:10:00 - Volume /host/tmp: 0.72MB used of 64.00MB (1.1% used, 63.27MB available)
+2025-09-13 09:10:01 - Volume /host/tmp: 0.83MB used of 64.00MB (1.3% used, 63.16MB available)
+2025-09-13 09:10:02 - Volume /host/tmp: 0.89MB used of 64.00MB (1.3% used, 63.10MB available)
+2025-09-13 09:10:03 - Volume /host/tmp: 1.06MB used of 64.00MB (1.6% used, 62.93MB available)
+KILL_SWITCH_TRIGGERED: Available space (65990656 bytes) is below absolute threshold (63MB = 66060288 bytes)

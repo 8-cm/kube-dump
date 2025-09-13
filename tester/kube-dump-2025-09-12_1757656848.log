@@ -1,0 +1,64 @@
+=== Kube-dump session started at Fri Sep 12 08:00:48 CEST 2025 ===
+Command: ./kube-dump.sh -l app.kubernetes.io/instance=coder -L topology.jiva.openebs.io/nodeName=k8s-node-00 --include-nodes -e tcpdump -nn -vvvv -s 0 -i any | tee /host/tmp/%.log -E tcpdump -nn -vvvv -s 0 -i any | tee /host/tmp/%.log -s ls /host/tmp/*.log -S ls /host/tmp/*.log -o tester --kill-switch-abs 63MB --pod-volume /host/tmp --node-volume /host/tmp --install-deps --mock
+===============================================
+2025-09-12 08:00:48 - 📋 PHASE 1: Target Selection & Debug Pod Creation
+2025-09-12 08:00:48 - ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2025-09-12 08:00:48 - 🎯 Mixed execution mode (pods + nodes)
+2025-09-12 08:00:48 - 📦 Handling pod targets...
+2025-09-12 08:00:48 - 🔍 Finding pods with label selector: app.kubernetes.io/instance=coder
+2025-09-12 08:00:49 - ✅ Found 1 pods:
+2025-09-12 08:00:49 -    📦 coder-78677fff96-pkdpp (namespace: coder)
+2025-09-12 08:00:49 - 🔧 Preparing target pods for debugging...
+2025-09-12 08:00:49 -    ✅ coder-78677fff96-pkdpp (coder) -> coder on k8s-node-05
+2025-09-12 08:00:49 - 🖥️  Handling node targets...
+2025-09-12 08:00:49 - 🔍 Finding nodes with label selector: topology.jiva.openebs.io/nodeName=k8s-node-00
+2025-09-12 08:00:49 - ✅ Found 1 nodes:
+2025-09-12 08:00:49 -    🖥️  k8s-node-00
+2025-09-12 08:00:49 - 🔍 Processing --include-nodes: adding nodes hosting selected pods
+2025-09-12 08:00:49 -       🖥️  k8s-node-05
+2025-09-12 08:00:49 - 🚀 Creating debug pods for pod targets...
+2025-09-12 08:00:49 -    📦 Creating debug pod for coder-78677fff96-pkdpp:coder on k8s-node-05
+2025-09-12 08:00:50 - 🚀 Creating debug pods for node targets...
+2025-09-12 08:00:50 -    🖥️  Creating debug pod for node 'k8s-node-00'
+2025-09-12 08:00:50 -    🖥️  Creating debug pod for node 'k8s-node-05'
+2025-09-12 08:00:50 - 🔄 Checking %d debug pods\n
+2025-09-12 08:00:54 -    ✅ All 3 debug pods are ready
+2025-09-12 08:00:54 - ⚙️  Setting up kill switch monitors...
+2025-09-12 08:00:54 -    ✅ Created kill switch monitor: killswitch-k8s-node-05-debug-664b01dd-1757656849
+2025-09-12 08:00:54 -    ✅ Created kill switch monitor: killswitch-node-d672ef-1757656850
+2025-09-12 08:00:54 -    ✅ Created kill switch monitor: killswitch-node-564dc9-1757656850
+2025-09-12 08:00:54 - ✅ PHASE 2: Debug Pods Running - Monitor Output
+2025-09-12 08:00:54 - ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2025-09-12 08:00:54 - 📊 Debug pods are running with commands in their entrypoints.
+2025-09-12 08:00:54 - 🔍 Monitor command output with these commands:
+2025-09-12 08:00:54 - 🗑️  Or delete all debug pods manually:
+2025-09-12 08:00:54 - ⏸️  PHASE 3: Waiting for User Input
+2025-09-12 08:00:54 - ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2025-09-12 08:00:54 - 🔄 Press Enter to cleanup all debug pods, or Ctrl+C to leave them running...
+2025-09-12 08:00:54 - 🧹 PHASE 4: Cleaning up Debug Pods
+2025-09-12 08:00:54 - ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2025-09-12 08:00:54 - 🗑️  Deleting 3 debug pods...
+2025-09-12 08:00:56 - 🧹 Cleaning up kill switch monitors...
+2025-09-12 08:01:02 -    ✅ Deleted kill switch monitor: killswitch-k8s-node-05-debug-664b01dd-1757656849
+2025-09-12 08:01:02 -    ✅ Deleted kill switch monitor: killswitch-node-d672ef-1757656850
+2025-09-12 08:01:02 -    ✅ Deleted kill switch monitor: killswitch-node-564dc9-1757656850
+2025-09-12 08:01:02 -    ✅ All debug pods cleaned up
+2025-09-12 08:01:02 - 📥 PHASE 5: File Discovery & Download
+2025-09-12 08:01:02 - ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2025-09-12 08:01:02 - 🚀 Creating discovery pods for file download...
+2025-09-12 08:01:02 - 📦 Creating discovery pods for pod targets...
+2025-09-12 08:01:03 - 🖥️  Creating discovery pods for node targets...
+2025-09-12 08:01:04 - ⏳ Waiting for discovery pods to be ready...
+2025-09-12 08:01:07 -    ✅ All discovery pods are ready
+2025-09-12 08:01:07 - STDERR: 📥 Downloading files...
+2025-09-12 08:01:07 - STDERR:    ❌ Failed to execute select command on pod disc-k8s-node-05-664b01dd-1757656862-1 (node k8s-node-05)
+2025-09-12 08:01:08 - STDERR:    ❌ Failed to execute select command on pod ndisc-k8s-node-00-1757656862-1 (node k8s-node-00)
+2025-09-12 08:01:08 - STDERR:    ❌ Failed to execute select command on pod ndisc-k8s-node-05-1757656862-1 (node k8s-node-05)
+2025-09-12 08:01:08 - ⚠️  Keeping 3 discovery pods with issues for inspection:
+2025-09-12 08:01:08 -    🔍 disc-k8s-node-05-664b01dd-1757656862-1
+2025-09-12 08:01:08 -    🔍 ndisc-k8s-node-00-1757656862-1
+2025-09-12 08:01:08 -    🔍 ndisc-k8s-node-05-1757656862-1
+2025-09-12 08:01:08 - 🎉 All operations completed!
+===============================================
+=== Kube-dump session ended at Fri Sep 12 08:01:08 CEST 2025 ===
+2025-09-12 08:01:08 - 📋 Session log saved to: tester/kube-dump-2025-09-12_1757656848.log

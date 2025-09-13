@@ -1,0 +1,5 @@
+=== Kill switch monitor for node-2373a6-1757754350 ===
+Monitoring storage with absolute threshold: 63MB
+2025-09-13 09:06:04 - Volume /host/tmp: 0.92MB used of 64.00MB (1.4% used, 63.07MB available)
+2025-09-13 09:06:05 - Volume /host/tmp: 1.30MB used of 64.00MB (2.0% used, 62.69MB available)
+KILL_SWITCH_TRIGGERED: Available space (65736704 bytes) is below absolute threshold (63MB = 66060288 bytes)

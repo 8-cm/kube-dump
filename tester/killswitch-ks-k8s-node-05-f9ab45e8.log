@@ -1,0 +1,17 @@
+=== Kill switch monitor for node-564dc9-1757756170 ===
+Monitoring storage with absolute threshold: 63MB
+2025-09-13 09:36:20 - Volume /host/tmp: 0.11MB used of 64.00MB (0.1% used, 63.88MB available)
+2025-09-13 09:36:21 - Volume /host/tmp: 0.27MB used of 64.00MB (0.4% used, 63.72MB available)
+2025-09-13 09:36:22 - Volume /host/tmp: 0.35MB used of 64.00MB (0.5% used, 63.64MB available)
+2025-09-13 09:36:23 - Volume /host/tmp: 0.44MB used of 64.00MB (0.6% used, 63.55MB available)
+2025-09-13 09:36:24 - Volume /host/tmp: 0.51MB used of 64.00MB (0.8% used, 63.48MB available)
+2025-09-13 09:36:25 - Volume /host/tmp: 0.55MB used of 64.00MB (0.8% used, 63.44MB available)
+2025-09-13 09:36:26 - Volume /host/tmp: 0.58MB used of 64.00MB (0.9% used, 63.41MB available)
+2025-09-13 09:36:27 - Volume /host/tmp: 0.66MB used of 64.00MB (1.0% used, 63.33MB available)
+2025-09-13 09:36:28 - Volume /host/tmp: 0.70MB used of 64.00MB (1.1% used, 63.29MB available)
+2025-09-13 09:36:29 - Volume /host/tmp: 0.78MB used of 64.00MB (1.2% used, 63.21MB available)
+2025-09-13 09:36:30 - Volume /host/tmp: 0.84MB used of 64.00MB (1.3% used, 63.15MB available)
+2025-09-13 09:36:31 - Volume /host/tmp: 0.87MB used of 64.00MB (1.3% used, 63.12MB available)
+2025-09-13 09:36:32 - Volume /host/tmp: 0.97MB used of 64.00MB (1.5% used, 63.02MB available)
+2025-09-13 09:36:33 - Volume /host/tmp: 1.03MB used of 64.00MB (1.6% used, 62.96MB available)
+KILL_SWITCH_TRIGGERED: Available space (66023424 bytes) is below absolute threshold (63MB = 66060288 bytes)

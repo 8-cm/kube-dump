@@ -1,0 +1,13 @@
+=== Kill switch monitor for node-ffc9d6-1757756169 ===
+Monitoring storage with absolute threshold: 63MB
+2025-09-13 09:36:22 - Volume /host/tmp: 0MB used of 64.00MB (0% used, 64.00MB available)
+2025-09-13 09:36:24 - Volume /host/tmp: 0MB used of 64.00MB (0% used, 64.00MB available)
+2025-09-13 09:36:25 - Volume /host/tmp: 0MB used of 64.00MB (0% used, 64.00MB available)
+2025-09-13 09:36:27 - Volume /host/tmp: 0.22MB used of 64.00MB (0.3% used, 63.77MB available)
+2025-09-13 09:36:28 - Volume /host/tmp: 0.28MB used of 64.00MB (0.4% used, 63.71MB available)
+2025-09-13 09:36:29 - Volume /host/tmp: 0.35MB used of 64.00MB (0.5% used, 63.64MB available)
+2025-09-13 09:36:31 - Volume /host/tmp: 0.41MB used of 64.00MB (0.6% used, 63.58MB available)
+2025-09-13 09:36:33 - Volume /host/tmp: 0.47MB used of 64.00MB (0.7% used, 63.52MB available)
+2025-09-13 09:36:35 - Volume /host/tmp: 0.56MB used of 64.00MB (0.8% used, 63.43MB available)
+2025-09-13 09:36:38 - Volume /host/tmp: 1.03MB used of 64.00MB (1.6% used, 62.96MB available)
+KILL_SWITCH_TRIGGERED: Available space (66023424 bytes) is below absolute threshold (63MB = 66060288 bytes)

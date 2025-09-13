@@ -1,0 +1,16 @@
+06:25:05.800872 eth0  Out IP (tos 0x0, ttl 64, id 54572, offset 0, flags [DF], proto TCP (6), length 90)
+    10.244.6.155.56876 > 192.168.1.149.443: Flags [P.], cksum 0xd418 (incorrect -> 0xdb7d), seq 1170795198:1170795236, ack 2498353486, win 4339, options [nop,nop,TS val 2734738893 ecr 3173638499], length 38
+06:25:05.806611 eth0  Out IP (tos 0x0, ttl 64, id 63318, offset 0, flags [DF], proto TCP (6), length 392)
+    10.244.6.155.56874 > 192.168.1.149.443: Flags [P.], cksum 0xd546 (incorrect -> 0xa283), seq 2887392476:2887392816, ack 910796401, win 500, options [nop,nop,TS val 2734738898 ecr 3173638508], length 340
+06:25:05.813708 eth0  In  IP (tos 0x0, ttl 61, id 8667, offset 0, flags [DF], proto TCP (6), length 653)
+    192.168.1.149.443 > 10.244.6.155.56876: Flags [P.], cksum 0x7330 (correct), seq 1:602, ack 38, win 503, options [nop,nop,TS val 3173648520 ecr 2734738893], length 601
+06:25:05.813794 eth0  In  IP (tos 0x0, ttl 61, id 8668, offset 0, flags [DF], proto TCP (6), length 83)
+    192.168.1.149.443 > 10.244.6.155.56876: Flags [P.], cksum 0x2d0c (correct), seq 602:633, ack 38, win 503, options [nop,nop,TS val 3173648520 ecr 2734738893], length 31
+06:25:05.814009 eth0  Out IP (tos 0x0, ttl 64, id 54573, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.6.155.56876 > 192.168.1.149.443: Flags [.], cksum 0xd3f2 (incorrect -> 0xda14), seq 38, ack 633, win 4361, options [nop,nop,TS val 2734738906 ecr 3173648520], length 0
+06:25:05.814716 eth0  Out IP (tos 0x0, ttl 64, id 54574, offset 0, flags [DF], proto TCP (6), length 87)
+    10.244.6.155.56876 > 192.168.1.149.443: Flags [P.], cksum 0xd415 (incorrect -> 0xb683), seq 38:73, ack 633, win 4361, options [nop,nop,TS val 2734738907 ecr 3173648520], length 35
+06:25:05.822869 eth0  In  IP (tos 0x0, ttl 61, id 40754, offset 0, flags [DF], proto TCP (6), length 836)
+    192.168.1.149.443 > 10.244.6.155.56874: Flags [P.], cksum 0xe34a (correct), seq 1:785, ack 340, win 503, options [nop,nop,TS val 3173648523 ecr 2734738898], length 784
+06:25:05.822908 eth0  Out IP (tos 0x0, ttl 64, id 63319, offset 0, flags [DF], proto TCP (6), length 52)
+    10.244.6.155.56874 > 
