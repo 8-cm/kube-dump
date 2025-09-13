@@ -1293,7 +1293,9 @@ select_target_nodes() {
 
     # Remove duplicates and find nodes not already selected by -L
     local unique_pod_nodes=()
-    mapfile -t unique_pod_nodes < <(printf '%s\n' "${pod_nodes[@]}" | sort -u)
+    while IFS= read -r node; do
+      [[ -n "$node" ]] && unique_pod_nodes+=("$node")
+    done < <(printf '%s\n' "${pod_nodes[@]}" | sort -u)
     local additional_nodes=()
 
     for pod_node in "${unique_pod_nodes[@]}"; do
