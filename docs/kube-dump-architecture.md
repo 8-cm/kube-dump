@@ -11,30 +11,30 @@ graph TB
     Init --> ParseArgs[Parse Command Arguments]
     
     %% Configuration Decision Points
-    ParseArgs --> LogCheck{Output Directory<br/>Specified (-o)?}
-    LogCheck -->|Yes| CreateLog[Create Log File<br/>kube-dump-YYYY-MM-DD_epoch.log]
+    ParseArgs --> LogCheck{Output DirectorySpecified (-o)?}
+    LogCheck -->|Yes| CreateLog[Create Log Filekube-dump-YYYY-MM-DD_epoch.log]
     LogCheck -->|No| ExecModeCheck
     CreateLog --> ExecModeCheck
     
     %% Execution Mode Selection
     ExecModeCheck{Execution Mode?}
-    ExecModeCheck -->|Pod Mode<br/>(-l label)| PodFlow[Pod Execution Flow]
-    ExecModeCheck -->|Node Mode<br/>(-L node-label)| NodeFlow[Node Execution Flow]
-    ExecModeCheck -->|Mixed Mode<br/>(-l + -L)| MixedFlow[Mixed Execution Flow]
+    ExecModeCheck -->|Pod Mode(-l label)| PodFlow[Pod Execution Flow]
+    ExecModeCheck -->|Node Mode(-L node-label)| NodeFlow[Node Execution Flow]
+    ExecModeCheck -->|Mixed Mode(-l + -L)| MixedFlow[Mixed Execution Flow]
     
     %% Pod Flow
-    PodFlow --> FindPods[Find Pods by Label<br/>using kubectl/oc]
-    FindPods --> PrepPods[Prepare Target Pods<br/>validate running state]
-    PrepPods --> CreatePodDebug[Create Debug Pods<br/>for Pod Targets]
+    PodFlow --> FindPods[Find Pods by Labelusing kubectl/oc]
+    FindPods --> PrepPods[Prepare Target Podsvalidate running state]
+    PrepPods --> CreatePodDebug[Create Debug Podsfor Pod Targets]
     
     %% Node Flow
-    NodeFlow --> FindNodes[Find Nodes by Label<br/>using kubectl/oc]
-    FindNodes --> CreateNodeDebug[Create Debug Pods<br/>for Node Targets]
+    NodeFlow --> FindNodes[Find Nodes by Labelusing kubectl/oc]
+    FindNodes --> CreateNodeDebug[Create Debug Podsfor Node Targets]
     
     %% Mixed Flow
     MixedFlow --> MixedPods[Process Pod Targets]
     MixedPods --> MixedNodes[Process Node Targets]
-    MixedNodes --> MixedCreate[Create Debug Pods<br/>for Both Types]
+    MixedNodes --> MixedCreate[Create Debug Podsfor Both Types]
     
     %% Consolidation
     CreatePodDebug --> WaitReady
@@ -42,60 +42,60 @@ graph TB
     MixedCreate --> WaitReady
     
     %% Kill Switch Decision
-    WaitReady[Wait for Debug Pods Ready] --> KillSwitchCheck{Kill Switch<br/>Configured?}
+    WaitReady[Wait for Debug Pods Ready] --> KillSwitchCheck{Kill SwitchConfigured?}
     
     %% Kill Switch Flow
-    KillSwitchCheck -->|Yes<br/>--kill-switch-abs/rel| CreateKillMonitors[Create Kill Switch<br/>Monitor Pods]
+    KillSwitchCheck -->|Yes--kill-switch-abs/rel| CreateKillMonitors[Create Kill SwitchMonitor Pods]
     KillSwitchCheck -->|No| MonitorPhase
     
     CreateKillMonitors --> KillSwitchType{Kill Switch Type?}
-    KillSwitchType -->|Absolute<br/>--kill-switch-abs| AbsMonitor[Monitor Available Space<br/>vs Threshold<br/>e.g., 1GB, 500MB]
-    KillSwitchType -->|Relative<br/>--kill-switch-rel| RelMonitor[Monitor Free Space %<br/>vs Threshold<br/>e.g., 10%]
+    KillSwitchType -->|Absolute--kill-switch-abs| AbsMonitor[Monitor Available Spacevs Thresholde.g., 1GB, 500MB]
+    KillSwitchType -->|Relative--kill-switch-rel| RelMonitor[Monitor Free Space %vs Thresholde.g., 10%]
     
-    AbsMonitor --> StartBgMonitor[Start Background<br/>Kill Switch Monitoring]
+    AbsMonitor --> StartBgMonitor[Start BackgroundKill Switch Monitoring]
     RelMonitor --> StartBgMonitor
     StartBgMonitor --> MonitorPhase
     
     %% Main Monitoring Phase
-    MonitorPhase[📊 Debug Pods Running<br/>Monitor Command Output] --> CleanupCheck{No-Cleanup<br/>Mode?}
+    MonitorPhase[📊 Debug Pods RunningMonitor Command Output] --> CleanupCheck{No-CleanupMode?}
     
     %% Kill Switch Background Process
-    StartBgMonitor -.-> KillMonitorLoop{Monitor Loop<br/>Check Every 5s}
-    KillMonitorLoop -.-> KillThresholdCheck{Threshold<br/>Exceeded?}
-    KillThresholdCheck -.->|Yes| KillDebugPods[🔴 Kill Debug Pods<br/>Clean Monitor Pods]
+    StartBgMonitor -.-> KillMonitorLoop{Monitor LoopCheck Every 5s}
+    KillMonitorLoop -.-> KillThresholdCheck{ThresholdExceeded?}
+    KillThresholdCheck -.->|Yes| KillDebugPods[🔴 Kill Debug PodsClean Monitor Pods]
     KillThresholdCheck -.->|No| KillMonitorLoop
     KillDebugPods -.-> KillComplete[Kill Switch Complete]
     
     %% Cleanup Decision
-    CleanupCheck -->|--no-cleanup| NoCleanupFlow[Keep Debug Pods Running<br/>Show Monitor Commands]
-    CleanupCheck -->|Normal| UserWait[Wait for User Input<br/>Press Enter to cleanup]
+    CleanupCheck -->|--no-cleanup| NoCleanupFlow[Keep Debug Pods RunningShow Monitor Commands]
+    CleanupCheck -->|Normal| UserWait[Wait for User InputPress Enter to cleanup]
     
     UserWait --> CleanupDebug[🧹 Cleanup Debug Pods]
-    CleanupDebug --> CleanupKillSwitches[🧹 Cleanup Kill Switch<br/>Monitor Pods]
+    CleanupDebug --> CleanupKillSwitches[🧹 Cleanup Kill SwitchMonitor Pods]
     
     %% File Download Decision
-    CleanupKillSwitches --> FileDownloadCheck{File Download<br/>Requested?}
+    CleanupKillSwitches --> FileDownloadCheck{File DownloadRequested?}
     NoCleanupFlow --> FileDownloadCheck
     
-    FileDownloadCheck -->|Yes<br/>-s/-S + -o| CreateDiscovery[Create File Discovery Pods]
+    FileDownloadCheck -->|Yes-s/-S + -o| CreateDiscovery[Create File Discovery Pods]
     FileDownloadCheck -->|No| Complete
     
     %% File Discovery & Download Flow
     CreateDiscovery --> DiscoveryType{Discovery Type?}
-    DiscoveryType -->|Pod Files<br/>-s command| PodDiscovery[Pod File Discovery<br/>Execute select command<br/>with placeholder substitution]
-    DiscoveryType -->|Node Files<br/>-S command| NodeDiscovery[Node File Discovery<br/>Execute select command<br/>with placeholder substitution]
-    DiscoveryType -->|Both| BothDiscovery[Both Pod & Node<br/>Discovery]
+    DiscoveryType -->|Pod Files-s command| PodDiscovery[Pod File DiscoveryExecute select commandwith placeholder substitution]
+    DiscoveryType -->|Node Files-S command| NodeDiscovery[Node File DiscoveryExecute select commandwith placeholder substitution]
+    DiscoveryType -->|Both| BothDiscovery[Both Pod & NodeDiscovery]
     
-    PodDiscovery --> ExecuteSelect[Execute Select Commands<br/>Get File Lists]
+    PodDiscovery --> ExecuteSelect[Execute Select CommandsGet File Lists]
     NodeDiscovery --> ExecuteSelect
     BothDiscovery --> ExecuteSelect
     
-    ExecuteSelect --> DownloadFiles[📥 Download Files<br/>to Output Directory]
-    DownloadFiles --> CleanupDiscovery[🧹 Cleanup Successful<br/>Discovery Pods]
+    ExecuteSelect --> DownloadFiles[📥 Download Filesto Output Directory]
+    DownloadFiles --> CleanupDiscovery[🧹 Cleanup SuccessfulDiscovery Pods]
     CleanupDiscovery --> Complete
     
     %% Completion
-    Complete[🎉 Session Complete<br/>Close Log File if Created]
+    Complete[🎉 Session CompleteClose Log File if Created]
     
     %% Styling for different component types
     classDef startEnd fill:#e1f5fe,stroke:#01579b,stroke-width:3px
@@ -126,16 +126,16 @@ graph LR
     
     %% Pod Types
     subgraph "Pod Types Created"
-        DebugPod[Debug Pods<br/>- Execute commands<br/>- Network capture<br/>- Custom commands]
-        KillMonitor[Kill Switch Monitors<br/>- Storage monitoring<br/>- Threshold checking<br/>- Auto-termination]
-        DiscoveryPod[Discovery Pods<br/>- File discovery<br/>- File download<br/>- Cleanup operations]
+        DebugPod[Debug Pods- Execute commands- Network capture- Custom commands]
+        KillMonitor[Kill Switch Monitors- Storage monitoring- Threshold checking- Auto-termination]
+        DiscoveryPod[Discovery Pods- File discovery- File download- Cleanup operations]
     end
     
     %% Storage & Logging
     subgraph "Storage & Logging"
-        LogFile[Session Log File<br/>kube-dump-YYYY-MM-DD_epoch.log]
-        OutputDir[Output Directory<br/>Downloaded files]
-        HostFS[Host Filesystem<br/>Monitored volumes]
+        LogFile[Session Log Filekube-dump-YYYY-MM-DD_epoch.log]
+        OutputDir[Output DirectoryDownloaded files]
+        HostFS[Host FilesystemMonitored volumes]
     end
     
     %% Data Flows
@@ -173,25 +173,25 @@ sequenceDiagram
     Script->>Debug: Create debug pod
     Script->>Monitor: Create kill switch monitor pod
     
-    Note over Monitor: Monitor runs in background<br/>checking every 10 seconds
+    Note over Monitor: Monitor runs in backgroundchecking every 10 seconds
     
     loop Storage Monitoring
         Monitor->>HostFS: Check df -B1 /monitored/path
         HostFS-->>Monitor: Available: 2GB, Used: 8GB
-        Note over Monitor: Available (2GB) > Threshold (1GB)<br/>Continue monitoring
+        Note over Monitor: Available (2GB) > Threshold (1GB)Continue monitoring
     end
     
     Note over HostFS: Storage fills up
     
     Monitor->>HostFS: Check df -B1 /monitored/path
     HostFS-->>Monitor: Available: 800MB, Used: 9.2GB
-    Note over Monitor: Available (800MB) < Threshold (1GB)<br/>TRIGGER KILL SWITCH
+    Note over Monitor: Available (800MB) < Threshold (1GB)TRIGGER KILL SWITCH
     
     Monitor->>Script: Exit with success (threshold exceeded)
     Script->>Debug: kubectl delete pod (terminate)
     Script->>Monitor: kubectl delete pod (cleanup)
     
-    Note over User: Debug pod terminated<br/>to prevent disk pressure
+    Note over User: Debug pod terminatedto prevent disk pressure
 ```
 
 ## File Download Workflow Detail
@@ -201,26 +201,26 @@ graph TB
     StartDownload[File Download Phase] --> CreateDiscoveryPods[Create Discovery Pods]
     
     subgraph "Discovery Pod Creation"
-        CreateDiscoveryPods --> PodDiscoveryCreate[Pod Discovery Pods<br/>for -s commands]
-        CreateDiscoveryPods --> NodeDiscoveryCreate[Node Discovery Pods<br/>for -S commands]
+        CreateDiscoveryPods --> PodDiscoveryCreate[Pod Discovery Podsfor -s commands]
+        CreateDiscoveryPods --> NodeDiscoveryCreate[Node Discovery Podsfor -S commands]
     end
     
     PodDiscoveryCreate --> WaitDiscoveryReady[Wait for Discovery Pods Ready]
     NodeDiscoveryCreate --> WaitDiscoveryReady
     
-    WaitDiscoveryReady --> ExecuteCommands[Execute Select Commands<br/>with Placeholder Substitution]
+    WaitDiscoveryReady --> ExecuteCommands[Execute Select Commandswith Placeholder Substitution]
     
     subgraph "File Discovery Process"
-        ExecuteCommands --> ParseFileList[Parse File Lists<br/>from Command Output]
+        ExecuteCommands --> ParseFileList[Parse File Listsfrom Command Output]
         ParseFileList --> DownloadLoop{For Each File}
         DownloadLoop --> DownloadFile[kubectl cp namespace/pod:file local-output]
-        DownloadFile --> RemoveFromHost[Remove Downloaded File<br/>from Host Filesystem]
+        DownloadFile --> RemoveFromHost[Remove Downloaded Filefrom Host Filesystem]
         RemoveFromHost --> NextFile{More Files?}
         NextFile -->|Yes| DownloadLoop
-        NextFile -->|No| CleanupSuccess[Cleanup Successful<br/>Discovery Pods]
+        NextFile -->|No| CleanupSuccess[Cleanup SuccessfulDiscovery Pods]
     end
     
-    CleanupSuccess --> KeepFailedPods[Keep Failed Discovery Pods<br/>for Inspection]
+    CleanupSuccess --> KeepFailedPods[Keep Failed Discovery Podsfor Inspection]
     KeepFailedPods --> DownloadComplete[File Download Complete]
     
     %% Error Handling

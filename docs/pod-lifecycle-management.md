@@ -8,7 +8,7 @@ graph TD
     B --> C[Create Kill Switch Monitor Pods]
     C --> D[Debug Pods Running]
     D --> E[Background Kill Switch Monitoring]
-    E --> F{User Action or<br/>Kill Switch Triggered?}
+    E --> F{User Action orKill Switch Triggered?}
     
     F -->|User presses Enter| G[Manual Cleanup Path]
     F -->|Kill switch triggered| H[Automatic Kill Path]
@@ -17,13 +17,13 @@ graph TD
     G --> J[Stop Kill Switch Monitoring]
     J --> K[Delete Debug Pods]
     K --> L[Delete Kill Switch Monitors]
-    L --> M{File Downloads<br/>Requested?}
+    L --> M{File DownloadsRequested?}
     
     H --> N[Kill Switch Deletes Debug Pod]
     N --> O[Monitor Pod Exits]
     O --> P[Manual Cleanup of Monitors]
     
-    I --> Q{File Downloads<br/>Requested?}
+    I --> Q{File DownloadsRequested?}
     Q -->|Yes| R[Create Discovery Pods]
     Q -->|No| S[End - Pods Still Running]
     
@@ -54,22 +54,22 @@ graph TD
     B -->|mixed| E[Create Both Types]
     
     C --> F[For Each Target Pod]
-    F --> G[Get Pod Details:<br/>name, container, node, namespace]
-    G --> H[Create Debug Pod Name:<br/>debug-{epoch}-{node}-{hash}]
+    F --> G[Get Pod Details:name, container, node, namespace]
+    G --> H[Create Debug Pod Name:debug-{epoch}-{node}-{hash}]
     H --> I[Apply Debug Pod Manifest]
-    I --> J[Pod Spec for Pod-targeting:<br/>- Image: DEBUG_IMAGE<br/>- Target PID namespace<br/>- Network namespace shared<br/>- Privileged: true]
+    I --> J[Pod Spec for Pod-targeting:- Image: DEBUG_IMAGE- Target PID namespace- Network namespace shared- Privileged: true]
     
     D --> K[For Each Target Node]
     K --> L[Get Node Name]
-    L --> M[Create Node Debug Pod Name:<br/>node-debug-{epoch}-{node}]
+    L --> M[Create Node Debug Pod Name:node-debug-{epoch}-{node}]
     M --> N[Apply Node Debug Manifest]
-    N --> O[Pod Spec for Node-targeting:<br/>- Image: DEBUG_IMAGE<br/>- Host networking: true<br/>- Host PID: true<br/>- Privileged: true]
+    N --> O[Pod Spec for Node-targeting:- Image: DEBUG_IMAGE- Host networking: true- Host PID: true- Privileged: true]
     
     J --> P[Set Command with Placeholder Substitution]
     O --> P
     P --> Q[Add to DEBUG_POD_NAMES array]
     Q --> R[Wait for Pod Ready]
-    R --> S{All Pods<br/>Ready?}
+    R --> S{All PodsReady?}
     S -->|No| T[Continue Waiting]
     S -->|Yes| U[Debug Pods Active]
     
@@ -85,13 +85,13 @@ graph TD
 ```mermaid
 graph TD
     A[Kill Switch Configured] --> B[For Each Debug Pod]
-    B --> C[Create Monitor Pod:<br/>ks-{node}-{hash}]
+    B --> C[Create Monitor Pod:ks-{node}-{hash}]
     C --> D[Monitor Pod Starts]
     D --> E[Install bc Calculator]
     E --> F[Start Storage Monitoring Loop]
     
     F --> G[Check Storage Every 10s]
-    G --> H{Threshold<br/>Exceeded?}
+    G --> H{ThresholdExceeded?}
     H -->|No| I[Continue Monitoring]
     H -->|Yes| J[Execute Kill Command]
     
@@ -119,16 +119,16 @@ graph TD
     C -->|Pod discovery| D[Create fd-{epoch}-{node}-{hash}]
     C -->|Node discovery| E[Create nfd-{epoch}-{node}]
     
-    D --> F[Pod Discovery Spec:<br/>- Same node as original debug pod<br/>- Host networking and PID<br/>- Privileged access<br/>- Mount /host read-write]
+    D --> F[Pod Discovery Spec:- Same node as original debug pod- Host networking and PID- Privileged access- Mount /host read-write]
     
-    E --> G[Node Discovery Spec:<br/>- Target node<br/>- Host networking and PID<br/>- Privileged access<br/>- Mount /host read-write]
+    E --> G[Node Discovery Spec:- Target node- Host networking and PID- Privileged access- Mount /host read-write]
     
     F --> H[Discovery Pod Active]
     G --> H
     H --> I[Execute File Selection Commands]
     I --> J[Download Files with Retry]
     J --> K[Remove Downloaded Files from Node]
-    K --> L{Download<br/>Successful?}
+    K --> L{DownloadSuccessful?}
     
     L -->|Yes| M[Add to successful_pods array]
     L -->|No| N[Add to failed_pods array]
@@ -234,9 +234,9 @@ graph TD
     C --> F[Stop kill switch monitoring]
     F --> G[Delete debug pods array]
     G --> H[Delete monitor pods array]
-    H --> I{File downloads<br/>requested?}
+    H --> I{File downloadsrequested?}
     
-    D --> J{File downloads<br/>requested?}
+    D --> J{File downloadsrequested?}
     J -->|Yes| K[Keep debug pods running]
     J -->|No| L[End - All pods kept]
     

@@ -19,79 +19,79 @@ flowchart TD
     START([🚀 Start kube-dump.sh]):::terminal
     
     %% PHASE 1: Initialization
-    INIT[🔧 Initialize Variables<br/>• Default labels, commands, arrays<br/>• CRI runtime settings<br/>• Placeholder characters]:::initProcess
-    
-    DETECT[🔍 Detect Kube CLI<br/>• Check for 'oc' or 'kubectl'<br/>• Set KUBE_CLI variable]:::initProcess
-    
-    PARSE[📋 Parse Arguments<br/>• Process all CLI flags<br/>• Validate option values<br/>• Set execution parameters]:::initProcess
+    INIT["🔧 Initialize Variables"]:::initProcess
+
+    DETECT["🔍 Detect Kube CLI"]:::initProcess
+
+    PARSE["📋 Parse Arguments"]:::initProcess
     
     %% Argument validation decision
-    NO_ARGS{No arguments<br/>provided?}:::decision
+    NO_ARGS{No arguments provided?}:::decision
     USAGE[📖 Show Usage & Exit]:::terminal
     
     %% PHASE 2: Validation
-    VALIDATE[✅ Validate Arguments<br/>• Check required parameters<br/>• Validate enum values<br/>• Set execution mode]:::validationProcess
+    VALIDATE["✅ Validate Arguments"]:::validationProcess
     
     MODE_CHECK{Execution Mode?}:::decision
     
-    CLUSTER_VAL[🔐 Validate Cluster Access<br/>• Check pod creation permissions<br/>• Verify cluster connectivity]:::validationProcess
+    CLUSTER_VAL["🔐 Validate Cluster Access"]:::validationProcess
     
     %% PHASE 3: Target Discovery
-    POD_SELECT[📦 Select Target Pods<br/>• Query by label selector<br/>• Get pod info: name:containers:node<br/>• Filter running pods]:::discoveryProcess
+    POD_SELECT["📦 Select Target Pods"]:::discoveryProcess
     
-    NODE_SELECT[🖥️ Select Target Nodes<br/>• Query by node label selector<br/>• Build node list<br/>• Handle --include-nodes flag]:::discoveryProcess
+    NODE_SELECT["🖥️ Select Target Nodes"]:::discoveryProcess
     
-    PREPARE_PODS[🎯 Prepare Target Pods<br/>• Verify pod status (Running)<br/>• Select first container for PID<br/>• Build TARGET_PODS array]:::discoveryProcess
+    PREPARE_PODS["🎯 Prepare Target Pods"]:::discoveryProcess
     
     %% PHASE 4: Debug Pod Creation
-    POD_DEBUG[🚀 Create Pod Debug Pods<br/>• Generate unique pod names<br/>• Create privileged netshoot pods<br/>• Mount host filesystem<br/>• Inject debug script]:::debugPodProcess
+    POD_DEBUG["🚀 Create Pod Debug Pods"]:::debugPodProcess
     
-    NODE_DEBUG[🚀 Create Node Debug Pods<br/>• Generate unique pod names<br/>• Use host networking + PID<br/>• Create privileged containers<br/>• Mount host root]:::debugPodProcess
+    NODE_DEBUG["🚀 Create Node Debug Pods"]:::debugPodProcess
     
-    WAIT_READY[⏳ Wait for Debug Pods Ready<br/>• Check pod phase = Running<br/>• Track failed pods<br/>• Timeout after 60s]:::debugPodProcess
+    WAIT_READY["⏳ Wait for Debug Pods Ready"]:::debugPodProcess
     
     %% PHASE 5: Execution Monitoring
-    MONITOR[📊 Monitor Execution<br/>• Show kubectl logs commands<br/>• Display manual cleanup commands<br/>• Wait for user input]:::executionProcess
+    MONITOR["📊 Monitor Execution"]:::executionProcess
     
     %% PHASE 6: Cleanup Decision
-    NO_CLEANUP_FLAG{--no-cleanup<br/>flag set?}:::decision
+    NO_CLEANUP_FLAG{"--no-cleanup flag set?"}:::decision
     
-    USER_INPUT[⏸️ Wait for User Input<br/>• Press Enter to cleanup<br/>• Ctrl+C to keep running]:::executionProcess
+    USER_INPUT["⏸️ Wait for User Input"]:::executionProcess
     
     %% PHASE 7: Cleanup
-    CLEANUP_DEBUG[🧹 Cleanup Debug Pods<br/>• Delete all debug pods<br/>• Ignore not found errors]:::cleanupProcess
+    CLEANUP_DEBUG["🧾 Cleanup Debug Pods"]:::cleanupProcess
     
     %% PHASE 8: File Operations
-    FILE_DOWNLOAD_CHECK{File download<br/>requested?}:::decision
+    FILE_DOWNLOAD_CHECK{"File download requested?"}:::decision
     
-    CREATE_DISCOVERY[🔍 Create Discovery Pods<br/>• Generate unique names<br/>• Use Ubuntu image + tail -f<br/>• Mount host filesystem<br/>• Privileged access]:::fileProcess
+    CREATE_DISCOVERY["🔍 Create Discovery Pods"]:::fileProcess
     
-    WAIT_DISCOVERY[⏳ Wait Discovery Pods Ready<br/>• Check Running status<br/>• Timeout after 120s]:::fileProcess
+    WAIT_DISCOVERY["⏳ Wait Discovery Pods Ready"]:::fileProcess
     
-    DOWNLOAD_FILES[📥 Download Files<br/>• Execute select commands<br/>• Apply placeholder substitution<br/>• Copy files with kubectl cp<br/>• Clean up downloaded files]:::fileProcess
+    DOWNLOAD_FILES["📥 Download Files"]:::fileProcess
     
-    CLEANUP_DISCOVERY[🧹 Cleanup Discovery Pods<br/>• Delete successful pods<br/>• Keep failed pods for inspection]:::fileProcess
+    CLEANUP_DISCOVERY["🧾 Cleanup Discovery Pods"]:::fileProcess
     
     %% Terminal states
-    COMPLETE[🎉 Complete!<br/>All operations finished]:::terminal
-    NO_CLEANUP_COMPLETE[🔧 Debug pods still running<br/>Use kubectl logs to monitor]:::terminal
+    COMPLETE["🎉 Complete!"]:::terminal
+    NO_CLEANUP_COMPLETE["🔧 Debug pods still running"]:::terminal
     ERROR[❌ Error Exit]:::error
     
     %% Data stores
-    POD_NAMES[(POD_NAMES[]<br/>Pod discovery results)]:::dataStore
-    NODE_NAMES[(NODE_NAMES[]<br/>Node discovery results)]:::dataStore
-    TARGET_PODS[(TARGET_PODS[]<br/>Pod:container:node)]:::dataStore
-    TARGET_NODES[(TARGET_NODES[]<br/>Node names)]:::dataStore
-    DEBUG_POD_NAMES[(DEBUG_POD_NAMES[]<br/>Created debug pods)]:::dataStore
-    DISCOVERY_POD_INFO[(DISCOVERY_POD_INFO[]<br/>Discovery pod metadata)]:::dataStore
+    POD_NAMES[("POD_NAMES[]")]:::dataStore
+    NODE_NAMES[("NODE_NAMES[]")]:::dataStore
+    TARGET_PODS[("TARGET_PODS[]")]:::dataStore
+    TARGET_NODES[("TARGET_NODES[]")]:::dataStore
+    DEBUG_POD_NAMES[("DEBUG_POD_NAMES[]")]:::dataStore
+    DISCOVERY_POD_INFO[("DISCOVERY_POD_INFO[]")]:::dataStore
     
     %% CRI Configuration Subprocess
-    CRI_CONFIG[⚙️ CRI Configuration<br/>• Configure crictl socket<br/>• Handle containerd/crio/docker<br/>• Install dependencies if needed]:::initProcess
+    CRI_CONFIG["⚙️ CRI Configuration"]:::initProcess
     
     %% Debug Script Generation
-    POD_SCRIPT[📜 Generate Pod Debug Script<br/>• Find container PID via CRI<br/>• Use nsenter for network namespace<br/>• Execute command with placeholder substitution<br/>• Handle custom vs default commands]:::debugPodProcess
+    POD_SCRIPT["📜 Generate Pod Debug Script"]:::debugPodProcess
     
-    NODE_SCRIPT[📜 Generate Node Debug Script<br/>• Execute directly on host<br/>• Apply placeholder substitution<br/>• Install CRI deps if requested]:::debugPodProcess
+    NODE_SCRIPT["📜 Generate Node Debug Script"]:::debugPodProcess
 
     %% Main flow connections
     START --> INIT

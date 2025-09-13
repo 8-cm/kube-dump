@@ -5,9 +5,9 @@
 ```mermaid
 graph TD
     A[Start: kube-dump.sh] --> B[Initialize Variables]
-    B --> C[Detect Kube CLI<br/>oc or kubectl]
+    B --> C[Detect Kube CLIoc or kubectl]
     C --> D[Parse Arguments]
-    D --> E{Arguments<br/>provided?}
+    D --> E{Argumentsprovided?}
     E -->|No| F[Show Usage & Exit]
     E -->|Yes| G[Validate Arguments]
     G --> H[Show Configuration Summary]
@@ -35,7 +35,7 @@ graph TD
     T --> X
     W --> X
     
-    X --> Y{Kill Switch<br/>Configured?}
+    X --> Y{Kill SwitchConfigured?}
     Y -->|Yes| Z[Create Kill Switch Monitor Pods]
     Y -->|No| AA[Skip Kill Switch]
     Z --> BB[Start Background Kill Switch Monitoring]
@@ -43,10 +43,10 @@ graph TD
     BB --> CC
     
     CC --> DD[Show Monitoring Commands]
-    DD --> EE{No Cleanup<br/>Flag Set?}
+    DD --> EE{No CleanupFlag Set?}
     
     EE -->|Yes| FF[PHASE 3: No-Cleanup Mode]
-    FF --> GG{File Download<br/>Requested?}
+    FF --> GG{File DownloadRequested?}
     GG -->|Yes| HH[PHASE 4: File Discovery & Download]
     GG -->|No| II[Keep Debug Pods Running]
     
@@ -56,7 +56,7 @@ graph TD
     LL --> MM[PHASE 4: Cleanup Debug Pods]
     MM --> NN[Delete Debug Pods]
     NN --> OO[Cleanup Kill Switch Monitor Pods]
-    OO --> PP{File Download<br/>Requested?}
+    OO --> PP{File DownloadRequested?}
     PP -->|Yes| QQ[PHASE 5: File Discovery & Download]
     PP -->|No| RR[Complete - All Operations Done]
     
@@ -96,15 +96,15 @@ graph TD
 
 ```mermaid
 graph TD
-    A[Parse Arguments] --> B{NODE_LABEL<br/>specified?}
-    B -->|Yes| C{POD_LABEL<br/>specified?}
-    B -->|No| D{POD_LABEL<br/>specified?}
+    A[Parse Arguments] --> B{NODE_LABELspecified?}
+    B -->|Yes| C{POD_LABELspecified?}
+    B -->|No| D{POD_LABELspecified?}
     
-    C -->|Yes| E[Mixed Mode:<br/>Both pods and nodes]
-    C -->|No| F[Node Mode:<br/>Node targets only]
+    C -->|Yes| E[Mixed Mode:Both pods and nodes]
+    C -->|No| F[Node Mode:Node targets only]
     
-    D -->|Yes| G[Pod Mode:<br/>Pod targets only]
-    D -->|No| H[Default:<br/>dumpme=yes label]
+    D -->|Yes| G[Pod Mode:Pod targets only]
+    D -->|No| H[Default:dumpme=yes label]
     
     E --> I[EXECUTION_MODE = mixed]
     F --> J[EXECUTION_MODE = node]
@@ -132,13 +132,13 @@ graph LR
     B --> J[Kill Switch]
     B --> K[Options]
     
-    E --> E1[Label Selector<br/>Namespace]
-    F --> F1[Node Label<br/>Include Nodes Flag]
-    G --> G1[Pod Command<br/>Node Command]
-    H --> H1[Image<br/>CRI Runtime<br/>CRI Socket<br/>Install Deps]
-    I --> I1[Pod File Command<br/>Node File Command<br/>Output Directory<br/>Placeholder Character]
-    J --> J1[Absolute Threshold<br/>Relative Threshold<br/>Pod Volume<br/>Node Volume]
-    K --> K1[No Cleanup<br/>No Glyphs]
+    E --> E1[Label SelectorNamespace]
+    F --> F1[Node LabelInclude Nodes Flag]
+    G --> G1[Pod CommandNode Command]
+    H --> H1[ImageCRI RuntimeCRI SocketInstall Deps]
+    I --> I1[Pod File CommandNode File CommandOutput DirectoryPlaceholder Character]
+    J --> J1[Absolute ThresholdRelative ThresholdPod VolumeNode Volume]
+    K --> K1[No CleanupNo Glyphs]
     
     style B fill:#e1f5fe
     style E fill:#f3e5f5

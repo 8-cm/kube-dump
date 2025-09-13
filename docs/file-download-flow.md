@@ -4,7 +4,7 @@
 
 ```mermaid
 graph TD
-    A[File Download Requested?<br/>-s or -S options + -o directory] --> B{Output Directory<br/>Specified?}
+    A[File Download Requested?-s or -S options + -o directory] --> B{Output DirectorySpecified?}
     B -->|No| C[Skip File Download]
     B -->|Yes| D[Create File Discovery Pods]
     
@@ -13,19 +13,19 @@ graph TD
     F --> G[Test Pod Accessibility]
     
     G --> H{Pod Accessible?}
-    H -->|No| I[❌ Mark as Failed Pod<br/>Skip to next pod]
-    H -->|Yes| J[Execute Select Command<br/>Ignore exit code]
+    H -->|No| I[❌ Mark as Failed PodSkip to next pod]
+    H -->|Yes| J[Execute Select CommandIgnore exit code]
     
     J --> K{Files Found?}
-    K -->|No| L[📂 No files to download<br/>Mark as Successful]
-    K -->|Yes| M[Download Each File<br/>with Retry Logic]
+    K -->|No| L[📂 No files to downloadMark as Successful]
+    K -->|Yes| M[Download Each Filewith Retry Logic]
     
     M --> N[For Each File Found]
     N --> O[Download with 3 Attempts]
-    O --> P{Download<br/>Successful?}
+    O --> P{DownloadSuccessful?}
     
     P -->|Yes| Q[✅ File Downloaded]
-    P -->|No| R[❌ Download Failed<br/>after 3 attempts]
+    P -->|No| R[❌ Download Failedafter 3 attempts]
     
     Q --> S[Remove File from Node]
     R --> T[Mark Pod as Failed]
@@ -38,7 +38,7 @@ graph TD
     
     L --> W
     I --> W
-    W --> X{More Discovery<br/>Pods?}
+    W --> X{More DiscoveryPods?}
     X -->|Yes| F
     X -->|No| Y[Cleanup Successful Pods]
     
@@ -65,22 +65,22 @@ graph TD
 ```mermaid
 graph TD
     A[Discovery Pod Created] --> B[Apply Placeholder Substitution]
-    B --> C[Replace PLACEHOLDER_CHAR<br/>with original debug pod name]
+    B --> C[Replace PLACEHOLDER_CHARwith original debug pod name]
     
     C --> D{Pod Type?}
-    D -->|pod| E[Use ENCODED_SELECT_COMMAND<br/>from -s option]
-    D -->|node| F[Use ENCODED_NODE_SELECT_COMMAND<br/>from -S option]
+    D -->|pod| E[Use ENCODED_SELECT_COMMANDfrom -s option]
+    D -->|node| F[Use ENCODED_NODE_SELECT_COMMANDfrom -S option]
     
     E --> G[Decode Base64 Command]
     F --> G
     G --> H[Execute: kubectl exec pod -- bash -c command]
     H --> I[Parse Output as File List]
     
-    I --> J{Command Output<br/>Empty?}
-    J -->|Yes| K[No Files Found<br/>This is normal, not an error]
+    I --> J{Command OutputEmpty?}
+    J -->|Yes| K[No Files FoundThis is normal, not an error]
     J -->|No| L[Process Each File Path]
     
-    L --> M[Create Download Path:<br/>OUTPUT_DIR/original_pod_name_filename]
+    L --> M[Create Download Path:OUTPUT_DIR/original_pod_name_filename]
     M --> N[Attempt File Download]
     
     style B fill:#fff3e0
@@ -96,7 +96,7 @@ graph TD
 ```mermaid
 graph TD
     A[Start Pod Accessibility Test] --> B[Execute: kubectl exec pod -- true]
-    B --> C{Command<br/>Successful?}
+    B --> C{CommandSuccessful?}
     
     C -->|Yes| D[✅ Pod is Accessible]
     C -->|No| E[❌ Pod Not Accessible]
@@ -107,8 +107,8 @@ graph TD
     H --> I[Skip File Processing]
     I --> J[Continue to Next Pod]
     
-    F --> K[Execute Select Command<br/>with || true suffix]
-    K --> L[Capture Output<br/>Exit code ignored]
+    F --> K[Execute Select Commandwith || true suffix]
+    K --> L[Capture OutputExit code ignored]
     
     style C fill:#fff2cc
     style D fill:#e8f5e8
@@ -120,36 +120,36 @@ graph TD
 
 ```mermaid
 graph TD
-    A[Start File Download] --> B[Initialize:<br/>- attempt = 1<br/>- max_attempts = 3<br/>- download_success = false]
+    A[Start File Download] --> B[Initialize:- attempt = 1- max_attempts = 3- download_success = false]
     
-    B --> C{attempt <= max_attempts<br/>AND not successful?}
+    B --> C{attempt <= max_attemptsAND not successful?}
     C -->|No| D[Max Attempts Reached]
     C -->|Yes| E{attempt > 1?}
     
-    E -->|Yes| F[Sleep 1 second<br/>Brief pause for recovery]
-    E -->|No| G[Execute Download:<br/>kubectl cp pod:file local_file]
+    E -->|Yes| F[Sleep 1 secondBrief pause for recovery]
+    E -->|No| G[Execute Download:kubectl cp pod:file local_file]
     
     F --> G
-    G --> H{Download<br/>Successful?}
+    G --> H{DownloadSuccessful?}
     
     H -->|Yes| I[download_success = true]
     H -->|No| J[attempt++]
     
     I --> K{First Attempt?}
     K -->|Yes| L[✅ filename]
-    K -->|No| M[✅ filename<br/>(succeeded on attempt N)]
+    K -->|No| M[✅ filename(succeeded on attempt N)]
     
     J --> N{Last Attempt?}
-    N -->|Yes| O[❌ Failed: filename<br/>(after 3 attempts)]
-    N -->|No| P[⚠️ Retrying filename<br/>(attempt X/3)]
+    N -->|Yes| O[❌ Failed: filename(after 3 attempts)]
+    N -->|No| P[⚠️ Retrying filename(attempt X/3)]
     
     L --> Q[Add to downloaded_files array]
     M --> Q
     P --> R[Continue to Next Attempt]
     O --> S[Mark pod_had_failure = true]
     
-    D --> T{Any Downloads<br/>Successful?}
-    T -->|Yes| U[Remove Downloaded Files<br/>from Node Filesystem]
+    D --> T{Any DownloadsSuccessful?}
+    T -->|Yes| U[Remove Downloaded Filesfrom Node Filesystem]
     T -->|No| V[No Cleanup Needed]
     
     Q --> U
@@ -175,28 +175,28 @@ graph TD
 
 ```mermaid
 graph TD
-    A[Create File Discovery Pods] --> B{Pod or Node<br/>Select Commands?}
+    A[Create File Discovery Pods] --> B{Pod or NodeSelect Commands?}
     B -->|Pod commands (-s)| C[Create Pod Discovery Pods]
     B -->|Node commands (-S)| D[Create Node Discovery Pods]
     B -->|Both| E[Create Both Types]
     
     C --> F[For Each Original Debug Pod]
-    F --> G[Get Pod Info:<br/>name, container, node, namespace]
-    G --> H[Create Discovery Pod Name:<br/>fd-{epoch}-{node}-{hash}]
+    F --> G[Get Pod Info:name, container, node, namespace]
+    G --> H[Create Discovery Pod Name:fd-{epoch}-{node}-{hash}]
     H --> I[Apply Pod Discovery Manifest]
     
     D --> J[For Each Node Debug Pod]
     J --> K[Get Node Name]
-    K --> L[Create Node Discovery Pod Name:<br/>nfd-{epoch}-{node}]
+    K --> L[Create Node Discovery Pod Name:nfd-{epoch}-{node}]
     L --> M[Apply Node Discovery Manifest]
     
-    I --> N[Pod Spec:<br/>- Image: DEBUG_IMAGE<br/>- Host networking: true<br/>- Host PID: true<br/>- Privileged: true<br/>- Command: tail -f /dev/null]
+    I --> N[Pod Spec:- Image: DEBUG_IMAGE- Host networking: true- Host PID: true- Privileged: true- Command: tail -f /dev/null]
     
-    M --> O[Node Pod Spec:<br/>- Image: DEBUG_IMAGE<br/>- Host networking: true<br/>- Host PID: true<br/>- Privileged: true<br/>- Command: tail -f /dev/null]
+    M --> O[Node Pod Spec:- Image: DEBUG_IMAGE- Host networking: true- Host PID: true- Privileged: true- Command: tail -f /dev/null]
     
     N --> P[Mount /host (read-write)]
     O --> P
-    P --> Q[Add to DISCOVERY_POD_INFO array<br/>Format: pod:node:type:original]
+    P --> Q[Add to DISCOVERY_POD_INFO arrayFormat: pod:node:type:original]
     Q --> R[Wait for All Discovery Pods Ready]
     
     style B fill:#fff2cc
@@ -209,17 +209,17 @@ graph TD
 
 ```mermaid
 graph TD
-    A[Initialize Arrays:<br/>successful_pods=()<br/>failed_pods=()] --> B[Process Each Discovery Pod]
+    A[Initialize Arrays:successful_pods=()failed_pods=()] --> B[Process Each Discovery Pod]
     
     B --> C[pod_had_failure = false]
     C --> D[Process All Files in Pod]
-    D --> E{Any Download<br/>Failed?}
+    D --> E{Any DownloadFailed?}
     
     E -->|Yes| F[pod_had_failure = true]
     E -->|No| G[All Downloads Successful]
     
     F --> H[Add to failed_pods array]
-    G --> I{Pod Was<br/>Accessible?}
+    G --> I{Pod WasAccessible?}
     
     I -->|Yes| J[Add to successful_pods array]
     I -->|No| H
@@ -231,9 +231,9 @@ graph TD
     L -->|Yes| B
     L -->|No| M[Processing Complete]
     
-    M --> N[Delete Successful Pods:<br/>kubectl delete pods successful_pods...]
+    M --> N[Delete Successful Pods:kubectl delete pods successful_pods...]
     N --> O[Keep Failed Pods Running]
-    O --> P[Display Failed Pods for Inspection:<br/>🔍 pod-name]
+    O --> P[Display Failed Pods for Inspection:🔍 pod-name]
     
     style E fill:#fff2cc
     style I fill:#fff2cc
