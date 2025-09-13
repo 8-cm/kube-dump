@@ -18,9 +18,9 @@ graph TB
     
     %% Execution Mode Selection
     ExecModeCheck{Execution Mode?}
-    ExecModeCheck -->|Pod Mode<br/>(-l label)| PodFlow[Pod Execution Flow]
-    ExecModeCheck -->|Node Mode<br/>(-L node-label)| NodeFlow[Node Execution Flow]
-    ExecModeCheck -->|Mixed Mode<br/>(-l + -L)| MixedFlow[Mixed Execution Flow]
+    ExecModeCheck -->|Pod Mode| PodFlow[Pod Execution Flow]
+    ExecModeCheck -->|Node Mode| NodeFlow[Node Execution Flow]
+    ExecModeCheck -->|Mixed Mode| MixedFlow[Mixed Execution Flow]
     
     %% Pod Flow
     PodFlow --> FindPods[Find Pods by Label<br/>using kubectl/oc]
@@ -45,12 +45,12 @@ graph TB
     WaitReady[Wait for Debug Pods Ready] --> KillSwitchCheck{Kill Switch<br/>Configured?}
     
     %% Kill Switch Flow
-    KillSwitchCheck -->|Yes<br/>--kill-switch-abs/rel| CreateKillMonitors[Create Kill Switch<br/>Monitor Pods]
+    KillSwitchCheck -->|Yes| CreateKillMonitors[Create Kill Switch<br/>Monitor Pods]
     KillSwitchCheck -->|No| MonitorPhase
     
     CreateKillMonitors --> KillSwitchType{Kill Switch Type?}
-    KillSwitchType -->|Absolute<br/>--kill-switch-abs| AbsMonitor[Monitor Available Space<br/>vs Threshold<br/>e.g., 1GB, 500MB]
-    KillSwitchType -->|Relative<br/>--kill-switch-rel| RelMonitor[Monitor Free Space %<br/>vs Threshold<br/>e.g., 10%]
+    KillSwitchType -->|Absolute| AbsMonitor[Monitor Available Space<br/>vs Threshold]
+    KillSwitchType -->|Relative| RelMonitor[Monitor Free Space %<br/>vs Threshold]
     
     AbsMonitor --> StartBgMonitor[Start Background<br/>Kill Switch Monitoring]
     RelMonitor --> StartBgMonitor
@@ -67,7 +67,7 @@ graph TB
     KillDebugPods -.-> KillComplete[Kill Switch Complete]
     
     %% Cleanup Decision
-    CleanupCheck -->|--no-cleanup| NoCleanupFlow[Keep Debug Pods Running<br/>Show Monitor Commands]
+    CleanupCheck -->|No Cleanup Mode| NoCleanupFlow[Keep Debug Pods Running<br/>Show Monitor Commands]
     CleanupCheck -->|Normal| UserWait[Wait for User Input<br/>Press Enter to cleanup]
     
     UserWait --> CleanupDebug[🧹 Cleanup Debug Pods]
@@ -77,13 +77,13 @@ graph TB
     CleanupKillSwitches --> FileDownloadCheck{File Download<br/>Requested?}
     NoCleanupFlow --> FileDownloadCheck
     
-    FileDownloadCheck -->|Yes<br/>-s/-S + -o| CreateDiscovery[Create File Discovery Pods]
+    FileDownloadCheck -->|Yes| CreateDiscovery[Create File Discovery Pods]
     FileDownloadCheck -->|No| Complete
     
     %% File Discovery & Download Flow
     CreateDiscovery --> DiscoveryType{Discovery Type?}
-    DiscoveryType -->|Pod Files<br/>-s command| PodDiscovery[Pod File Discovery<br/>Execute select command<br/>with placeholder substitution]
-    DiscoveryType -->|Node Files<br/>-S command| NodeDiscovery[Node File Discovery<br/>Execute select command<br/>with placeholder substitution]
+    DiscoveryType -->|Pod Files| PodDiscovery[Pod File Discovery<br/>Execute select command<br/>with placeholder substitution]
+    DiscoveryType -->|Node Files| NodeDiscovery[Node File Discovery<br/>Execute select command<br/>with placeholder substitution]
     DiscoveryType -->|Both| BothDiscovery[Both Pod & Node<br/>Discovery]
     
     PodDiscovery --> ExecuteSelect[Execute Select Commands<br/>Get File Lists]
