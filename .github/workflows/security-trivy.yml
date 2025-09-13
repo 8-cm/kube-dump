@@ -965,17 +965,17 @@ jobs:
         echo "TIMESTAMP=$TIMESTAMP" >> $GITHUB_ENV
     
     # ---------------------------------------------------------------------------
-    # Step: Update Repository Documentation with Security Results
+    # Step: Update Security Reports Documentation with Security Results
     # ---------------------------------------------------------------------------
     # Description:
-    #   Updates README.md with comprehensive security analysis results, maintaining
+    #   Updates docs/security-reports.md with comprehensive security analysis results, maintaining
     #   a dedicated section for security status reporting. Preserves existing
     #   documentation while replacing the security results section with current
     #   findings from all security scans.
     #
     # Documentation Integration Process:
-    #   1. Creates backup of existing README.md for safety and rollback
-    #   2. Preserves all content before the security results section  
+    #   1. Creates backup of existing docs/security-reports.md for safety and rollback
+    #   2. Preserves all content before the security results section
     #   3. Replaces Trivy security section with current comprehensive analysis
     #   4. Preserves all content after the security results section
     #   5. Includes overall security status with visual indicators
@@ -992,17 +992,17 @@ jobs:
     #   - Remediation steps and security improvement recommendations
     #   - Scanning coverage information and compliance documentation
     # ---------------------------------------------------------------------------
-    - name: Update README with security results
+    - name: Update security reports with scan results
       run: |
-        echo "Updating README.md with Trivy security results..."
-        
+        echo "Updating docs/security-reports.md with Trivy security results..."
+
         # Create backup
-        cp README.md README.md.bak
-        
-        # Create new README content
+        cp docs/security-reports.md docs/security-reports.md.bak
+
+        # Create new security reports content
         {
           # Keep everything before the security section
-          sed '/<!-- TRIVY-SECURITY-START -->/q' README.md | sed '$d' 2>/dev/null || cat README.md
+          sed '/<!-- TRIVY-SECURITY-START -->/q' docs/security-reports.md | sed '$d' 2>/dev/null || cat docs/security-reports.md
           
           # Add security results section
           echo "<!-- TRIVY-SECURITY-START -->"
@@ -1072,28 +1072,28 @@ jobs:
           echo "<!-- TRIVY-SECURITY-END -->"
           echo ""
           
-          # Keep everything after the security section  
-          sed -n '/<!-- TRIVY-SECURITY-END -->/,$p' README.md.bak | tail -n +2 2>/dev/null || echo ""
-        } > README.md.new
-        
-        # Replace old README with new one
-        mv README.md.new README.md
-        
-        echo "Security section updated in README.md"
+          # Keep everything after the security section
+          sed -n '/<!-- TRIVY-SECURITY-END -->/,$p' docs/security-reports.md.bak | tail -n +2 2>/dev/null || echo ""
+        } > docs/security-reports.md.new
+
+        # Replace old security reports with new one
+        mv docs/security-reports.md.new docs/security-reports.md
+
+        echo "Security section updated in docs/security-reports.md"
     
     # ---------------------------------------------------------------------------
     # Step: Commit and Push Security Documentation Updates
     # ---------------------------------------------------------------------------
     # Description:
-    #   Commits updated README.md with comprehensive security analysis results
+    #   Commits updated docs/security-reports.md with comprehensive security analysis results
     #   to the repository. Creates structured commit messages documenting the
     #   security scan results and only commits when changes are detected to
     #   prevent unnecessary commit history pollution.
     #
     # Commit Process:
     #   1. Configures Git with GitHub Actions service user credentials
-    #   2. Checks for actual changes in README.md to prevent empty commits
-    #   3. Stages README.md file for commit when meaningful changes exist
+    #   2. Checks for actual changes in docs/security-reports.md to prevent empty commits
+    #   3. Stages docs/security-reports.md file for commit when meaningful changes exist
     #   4. Creates comprehensive commit message with security analysis summary
     #   5. Pushes changes to current branch using GitHub Actions context
     #
@@ -1111,22 +1111,22 @@ jobs:
         git config --local user.name "GitHub Action"
         
         # Check if there are changes to commit
-        if git diff --quiet README.md; then
-          echo "No changes to README.md - skipping commit"
+        if git diff --quiet docs/security-reports.md; then
+          echo "No changes to docs/security-reports.md - skipping commit"
         else
-          git add README.md
+          git add docs/security-reports.md
           git commit -m "ci: Update Trivy security analysis results
-          
+
           - Status: $SECURITY_STATUS
           - Critical: $TOTAL_CRITICAL, High: $TOTAL_HIGH
-          - Medium: $TOTAL_MEDIUM, Low: $TOTAL_LOW  
+          - Medium: $TOTAL_MEDIUM, Low: $TOTAL_LOW
           - Config Issues: $TOTAL_CONFIG_ISSUES
           - FS Vulnerabilities: $TOTAL_FS_VULNS
           - Updated: $TIMESTAMP
           - Commit: ${GITHUB_SHA:0:7}"
-          
+
           git push origin HEAD:${{ github.ref_name }}
-          echo "✅ README.md updated with security scan results"
+          echo "✅ docs/security-reports.md updated with security scan results"
         fi
     
     # ---------------------------------------------------------------------------

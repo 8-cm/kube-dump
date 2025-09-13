@@ -2,6 +2,10 @@
 
 ## File Download Process Overview
 
+This diagram illustrates the comprehensive file download decision tree and execution flow in kube-dump. The process determines whether file downloads should occur based on user options and systematically handles file discovery, accessibility testing, download operations, and cleanup strategies.
+
+The file download workflow is triggered when users specify selection commands (-s for pod files, -S for node files) combined with an output directory (-o). The system creates specialized discovery pods, tests their accessibility, executes file selection commands, and performs robust multi-attempt downloads with automatic retry logic. Failed operations are preserved for troubleshooting while successful operations are cleaned up automatically, ensuring efficient resource utilization and comprehensive error handling.
+
 ```mermaid
 graph TD
     A[File Download Requested?-s or -S options + -o directory] --> B{Output DirectorySpecified?}
@@ -62,6 +66,10 @@ graph TD
 
 ## File Selection Command Processing
 
+This diagram details how kube-dump processes file selection commands within discovery pods. The system handles placeholder substitution, command decoding, execution, and output parsing to identify files for download.
+
+The file selection process begins with applying placeholder character substitution to restore original debug pod names in the selection commands. Commands are base64-decoded and executed within the discovery pod environment using kubectl exec. The system gracefully handles empty outputs (no files found) as normal operations, while non-empty outputs trigger file path processing and download preparation. This approach ensures that file selection commands can reference specific debug pod contexts while maintaining security through encoded command transmission.
+
 ```mermaid
 graph TD
     A[Discovery Pod Created] --> B[Apply Placeholder Substitution]
@@ -93,6 +101,10 @@ graph TD
 
 ## Pod Accessibility Test Logic
 
+This diagram shows the pod accessibility validation process that ensures discovery pods are ready for file operations before attempting downloads. The test prevents wasted effort on inaccessible pods and provides early failure detection.
+
+The accessibility test executes a simple `kubectl exec pod -- true` command to verify basic connectivity and command execution capability. Successful tests indicate the pod is ready for file selection commands, while failures result in immediate pod marking for cleanup without attempting file operations. This pre-validation step improves overall efficiency by identifying problematic pods early in the download process, allowing the system to focus resources on accessible pods that can successfully complete file transfer operations.
+
 ```mermaid
 graph TD
     A[Start Pod Accessibility Test] --> B[Execute: kubectl exec pod -- true]
@@ -117,6 +129,10 @@ graph TD
 ```
 
 ## File Download Retry Mechanism
+
+This diagram illustrates the robust retry logic that handles transient network issues, temporary pod unavailability, and other intermittent failures during file downloads. The mechanism ensures maximum download success rates while providing clear feedback on retry attempts.
+
+The retry system implements a three-attempt strategy with brief recovery pauses between failures. Each attempt uses `kubectl cp` to transfer files from pod filesystem to local storage, with detailed logging of success, failure, and retry states. The system distinguishes between first-attempt successes and recovered successes, providing users with transparency about download reliability. Failed downloads after exhausting all attempts are clearly marked, allowing users to identify problematic files or pods that may require manual intervention or alternative download strategies.
 
 ```mermaid
 graph TD
@@ -173,6 +189,10 @@ graph TD
 
 ## Discovery Pod Creation Process
 
+This diagram details the specialized pod creation process for file download operations. Discovery pods are configured with the necessary privileges and filesystem access to securely extract files from cluster nodes while maintaining proper isolation and security boundaries.
+
+The creation process adapts to different file selection contexts: pod-based selection creates discovery pods that mirror the original debug pod configuration, while node-based selection creates pods with direct host access. Both types receive read-write host filesystem mounts via `/host`, privileged security contexts, and host networking/PID access. The pods use a simple `tail -f /dev/null` command to remain active during file operations, ensuring stable connectivity for download procedures while minimizing resource consumption.
+
 ```mermaid
 graph TD
     A[Create File Discovery Pods] --> B{Pod or NodeSelect Commands?}
@@ -206,6 +226,10 @@ graph TD
 ```
 
 ## File Download Success/Failure Tracking
+
+This diagram illustrates the comprehensive tracking system that monitors file download outcomes and implements appropriate cleanup strategies. The system maintains separate arrays for successful and failed operations, enabling selective pod cleanup and troubleshooting support.
+
+The tracking mechanism evaluates each discovery pod's overall download success rate, considering both individual file failures and pod accessibility issues. Pods with any download failures or accessibility problems are preserved for inspection, while completely successful pods are automatically cleaned up to conserve cluster resources. This approach balances operational efficiency with debugging capability, ensuring that problematic pods remain available for analysis while successful operations are cleaned up promptly. The system provides clear feedback about failed pod preservation, helping users identify and resolve download issues.
 
 ```mermaid
 graph TD

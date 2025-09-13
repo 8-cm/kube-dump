@@ -2,6 +2,10 @@
 
 ## Complete Pod Lifecycle Overview
 
+This diagram illustrates the comprehensive pod lifecycle in kube-dump, showing how different types of pods are created, managed, and cleaned up based on user actions and system triggers. The lifecycle encompasses three main paths: manual cleanup (user-initiated), automatic kill switch activation, and no-cleanup mode where pods continue running.
+
+The process begins with debug pod creation, followed by optional kill switch monitor deployment. The system then enters a monitoring phase where it waits for one of three possible triggers: user input for manual cleanup, kill switch activation due to resource thresholds, or no-cleanup mode continuation. Each path has distinct cleanup strategies and file download handling, ultimately converging on completion states that preserve failed discovery pods for inspection while cleaning up successful operations.
+
 ```mermaid
 graph TD
     A[Kube-dump Start] --> B[Create Debug Pods]
@@ -46,6 +50,10 @@ graph TD
 
 ## Debug Pod Creation and Management
 
+This diagram details the debug pod creation process, which varies based on execution mode (pod-targeted, node-targeted, or mixed). The system intelligently determines the appropriate debug pod type based on the target resources and creates pods with the necessary privileges and namespace access.
+
+For pod-targeted debugging, the system creates debug pods that share the target pod's network and PID namespaces, enabling deep inspection of application behavior. Node-targeted debugging creates pods with host-level access, allowing system-wide monitoring and troubleshooting. Each debug pod is assigned a unique name incorporating timestamps and node identifiers to ensure proper tracking and avoid conflicts during concurrent operations.
+
 ```mermaid
 graph TD
     A[Debug Pod Creation Request] --> B{Execution Mode?}
@@ -82,6 +90,10 @@ graph TD
 
 ## Kill Switch Monitor Pod Lifecycle
 
+This diagram illustrates the kill switch monitoring system that protects nodes from resource exhaustion. Monitor pods continuously check storage usage every second and automatically terminate debug pods when thresholds are exceeded, preventing system instability.
+
+The kill switch mechanism operates independently for each debug pod, creating dedicated monitor pods that run storage calculations using the `bc` calculator. When a threshold violation occurs, the monitor pod immediately executes a targeted kill command, logs the action, and exits successfully. The main process detects these completed monitor pods and performs immediate log collection before cleaning up the terminated debug pods, ensuring no forensic data is lost during emergency terminations.
+
 ```mermaid
 graph TD
     A[Kill Switch Configured] --> B[For Each Debug Pod]
@@ -111,6 +123,10 @@ graph TD
 ```
 
 ## Discovery Pod Lifecycle (File Downloads)
+
+This diagram shows the file download process that occurs when users request file extraction from debug pods. Discovery pods are created specifically for file operations, with different configurations for pod-level and node-level file discovery.
+
+The discovery phase creates specialized pods with read-write access to the host filesystem via `/host` mounts. These pods execute user-defined file selection commands and handle the secure transfer of files from the cluster to the local system. The process includes automatic cleanup of successful discovery pods while preserving failed ones for troubleshooting, ensuring that file download issues can be diagnosed and resolved efficiently.
 
 ```mermaid
 graph TD
@@ -151,6 +167,10 @@ graph TD
 
 ## Pod State Transitions
 
+This state diagram represents the standard Kubernetes pod states and transitions that occur throughout the kube-dump lifecycle. Understanding these states is crucial for monitoring pod health and troubleshooting deployment issues.
+
+Pods progress through predictable states from creation to termination: Pending (scheduled but not running), ContainerCreating (image pulling and container setup), Running (active execution), and Terminating (graceful shutdown). Failed states can occur due to container crashes or resource constraints. The diagram highlights that running pods can be terminated through multiple paths: manual cleanup by users, automatic kill switch activation, or timeout-based cleanup in no-cleanup mode. Each transition includes specific cleanup actions and resource release procedures.
+
 ```mermaid
 stateDiagram-v2
     [*] --> Pending: Pod created
@@ -173,6 +193,10 @@ stateDiagram-v2
 ```
 
 ## Pod Resource Management
+
+This diagram illustrates the internal resource tracking system that manages different pod types throughout their lifecycle. The system maintains separate arrays for debug pods, monitor pods, and discovery pods, enabling precise control over cleanup operations.
+
+The resource management system uses dedicated arrays to track pod names, states, and metadata. DEBUG_POD_NAMES tracks active debug pods, KILL_SWITCH_MONITOR_PODS manages monitoring infrastructure, DISCOVERY_POD_NAMES handles file operation pods, and DISCOVERY_POD_INFO maintains detailed metadata for download operations. This separation allows for granular cleanup strategies where successful pods are automatically removed while failed pods are preserved for analysis, ensuring operational efficiency while maintaining troubleshooting capabilities.
 
 ```mermaid
 graph LR
@@ -223,6 +247,10 @@ graph LR
 ```
 
 ## Pod Cleanup Strategies
+
+This diagram outlines the different cleanup approaches based on user preferences and system events. The cleanup strategy determines which pods are removed, which are preserved, and how file download operations are handled.
+
+The system supports three primary cleanup modes: manual cleanup (user presses Enter), no-cleanup mode (--no-cleanup flag), and kill switch activation (threshold exceeded). Each mode has distinct behaviors: manual cleanup removes all pods after optional file downloads, no-cleanup mode preserves debug pods for continued use, and kill switch activation performs emergency pod termination with immediate log collection. The strategy selection affects resource utilization, forensic data availability, and operational continuity, allowing users to balance between thorough cleanup and debugging capability preservation.
 
 ```mermaid
 graph TD
