@@ -1,5 +1,16 @@
 # Kube-Dump Main Execution Flow
 
+This document provides detailed explanations of the main execution phases in kube-dump, from startup initialization through completion.
+
+## Table of Contents
+
+1. [Complete Main Execution Flow with All Phases](#complete-main-execution-flow-with-all-phases)
+   - [Process Description](#main-execution-process-description)
+2. [Execution Mode Decision Flow](#execution-mode-decision-flow)
+   - [Process Description](#mode-decision-process-description)
+3. [Configuration Summary Display](#configuration-summary-display)
+   - [Process Description](#configuration-display-process-description)
+
 ## Complete Main Execution Flow with All Phases
 
 ```mermaid
@@ -91,6 +102,83 @@ graph TD
     class E,L,Y,EE,GG,PP decisionStyle
     class A,ZZ errorStyle
 ```
+
+### Main Execution Process Description
+
+This comprehensive flow diagram illustrates the complete lifecycle of a kube-dump execution from initial startup through final completion, showing all major decision points, phases, and possible execution paths.
+
+#### Initial Startup and Validation (Steps A-J)
+
+**A. Script Initialization**: The kube-dump.sh script begins execution, setting up the runtime environment and preparing for argument processing. Initial shell options are configured, and basic prerequisites are checked.
+
+**B. Variable Initialization**: Core system variables are established including:
+- Default label selectors (`dumpme=yes`)
+- Command templates for pod and node debugging
+- Array structures for tracking pods and operations
+- CRI (Container Runtime Interface) configuration settings
+- Placeholder character settings for dynamic substitution
+
+**C. CLI Tool Detection**: The system automatically detects the available Kubernetes CLI tool, preferring OpenShift's `oc` command when available, falling back to standard `kubectl` for regular Kubernetes clusters. This ensures compatibility across different cluster types.
+
+**D. Argument Processing**: All command-line arguments are parsed, validated, and stored in appropriate variables. This includes pod/node selectors, custom commands, kill switch configurations, file operation settings, and output preferences.
+
+**E. Argument Validation**: The system checks if any arguments were provided. If no arguments are given, the help system is activated to guide users through available options and usage patterns.
+
+**F. Usage Display**: When no arguments are provided, comprehensive usage information is displayed including examples, flag descriptions, and common use cases, then the script exits cleanly.
+
+**G. Argument Validation**: Provided arguments are validated for syntax correctness, logical consistency, and system compatibility. Invalid combinations are detected and reported with helpful error messages.
+
+**H. Configuration Summary**: A detailed summary of the parsed configuration is displayed, showing users exactly what operations will be performed, which resources will be targeted, and what safety measures are in place.
+
+**I. Log File Setup**: If an output directory is specified (`-o` flag), a timestamped log file is created to capture all session activities, providing audit trails and debugging information for later analysis.
+
+**J. Requirements Validation**: Final system checks ensure all prerequisites are met including cluster connectivity, required permissions, and tool availability before proceeding with pod operations.
+
+#### Phase 1: Target Selection and Debug Pod Creation (Steps K-X)
+
+**K. Phase 1 Entry**: The system transitions into the first major operational phase, focusing on target discovery and debug pod deployment across the determined execution mode.
+
+**L-O. Execution Mode Branching**: Based on the provided arguments, the system branches into one of three execution paths:
+- **Pod-based Mode (M)**: Targets specific pods using label selectors for container-level debugging
+- **Node-based Mode (N)**: Targets entire nodes using node labels for system-level debugging
+- **Mixed Mode (O)**: Combines both approaches for comprehensive debugging across multiple resource types
+
+**P-W. Target Processing**: Each execution mode follows specific workflows:
+- **Pod Processing**: Discovery of target pods, validation of running state, and preparation of container-specific debugging configurations
+- **Node Processing**: Identification of target nodes, validation of accessibility, and preparation of host-level debugging configurations
+- **Mixed Processing**: Parallel execution of both pod and node discovery processes
+
+**X. Debug Pod Readiness**: All created debug pods are monitored until they reach Running state, with timeout handling and failure recovery mechanisms ensuring reliable deployment.
+
+#### Phase 2: Kill Switch Configuration (Steps Y-BB)
+
+**Y. Kill Switch Decision**: The system evaluates whether kill switch protection has been configured through `--kill-switch-abs` or `--kill-switch-rel` flags, determining the need for protective monitoring.
+
+**Z. Monitor Pod Creation**: When kill switches are enabled, specialized monitor pods are created to continuously watch storage usage on specified volumes and provide automatic protection against resource exhaustion.
+
+**BB. Background Monitoring**: Kill switch monitors begin continuous operation, checking storage conditions every second and maintaining readiness to terminate debug pods if thresholds are exceeded.
+
+#### Phase 3: Active Debugging and User Interaction (Steps CC-MM)
+
+**CC. Debug Pod Execution**: Debug pods begin executing their configured commands (network capture, custom diagnostics, system analysis), generating debugging data while being monitored for completion and resource usage.
+
+**DD. Monitoring Commands Display**: Users are provided with kubectl commands to monitor debug pod outputs in real-time, enabling interactive debugging and live analysis of collected data.
+
+**EE. Cleanup Mode Decision**: The system evaluates whether `--no-cleanup` mode has been specified, determining the cleanup strategy and user interaction requirements.
+
+**FF-II. No-Cleanup Path**: When `--no-cleanup` is specified, debug pods continue running for extended analysis, with the session transitioning directly to file download operations if requested, or completing while leaving pods active.
+
+**JJ-MM. Standard Cleanup Path**: In normal mode, the system waits for user input (Enter key press) before proceeding with systematic cleanup of debug pods and associated monitoring infrastructure.
+
+#### Phase 4/5: File Operations and Completion (Steps NN-ZZ)
+
+**NN-PP. Resource Cleanup**: Debug pods and kill switch monitors are systematically removed, with proper error handling for resources that may have been terminated by kill switches or other cluster operations.
+
+**QQ-WW. File Download Operations**: When file selection commands have been specified (`-s` for pods, `-S` for nodes), the system creates discovery pods, executes file selection commands, downloads located files with retry mechanisms, and cleans up successful operations while preserving failed pods for inspection.
+
+**XX-ZZ. Session Completion**: The script concludes by closing log files, providing operation summaries, and displaying information about any preserved resources or downloaded files, ensuring users have complete visibility into session outcomes.
+
+This comprehensive workflow provides multiple decision points, error handling mechanisms, and user control options while maintaining safety through protective monitoring and systematic resource management.
 
 ## Execution Mode Decision Flow
 
