@@ -12,7 +12,7 @@ graph TB
     
     %% Configuration Decision Points
     ParseArgs --> LogCheck{"Output Directory Specified?"}
-    LogCheck -->|Yes| CreateLog[Create Log File<br/>kube-dump-YYYY-MM-DD_epoch.log]
+    LogCheck -->|Yes| CreateLog[Create Log File]
     LogCheck -->|No| ExecModeCheck
     CreateLog --> ExecModeCheck
     
@@ -23,18 +23,18 @@ graph TB
     ExecModeCheck -->|Mixed Mode| MixedFlow[Mixed Execution Flow]
     
     %% Pod Flow
-    PodFlow --> FindPods[Find Pods by Label<br/>using kubectl/oc]
-    FindPods --> PrepPods[Prepare Target Pods<br/>validate running state]
-    PrepPods --> CreatePodDebug[Create Debug Pods<br/>for Pod Targets]
-    
+    PodFlow --> FindPods[Find Pods by Label]
+    FindPods --> PrepPods[Prepare Target Pods]
+    PrepPods --> CreatePodDebug[Create Pod Debug Pods]
+
     %% Node Flow
-    NodeFlow --> FindNodes[Find Nodes by Label<br/>using kubectl/oc]
-    FindNodes --> CreateNodeDebug[Create Debug Pods<br/>for Node Targets]
+    NodeFlow --> FindNodes[Find Nodes by Label]
+    FindNodes --> CreateNodeDebug[Create Node Debug Pods]
     
     %% Mixed Flow
     MixedFlow --> MixedPods[Process Pod Targets]
     MixedPods --> MixedNodes[Process Node Targets]
-    MixedNodes --> MixedCreate[Create Debug Pods<br/>for Both Types]
+    MixedNodes --> MixedCreate[Create Mixed Debug Pods]
     
     %% Consolidation
     CreatePodDebug --> WaitReady
@@ -42,39 +42,39 @@ graph TB
     MixedCreate --> WaitReady
     
     %% Kill Switch Decision
-    WaitReady[Wait for Debug Pods Ready] --> KillSwitchCheck{Kill Switch<br/>Configured?}
-    
+    WaitReady[Wait for Debug Pods Ready] --> KillSwitchCheck{Kill Switch Configured?}
+
     %% Kill Switch Flow
-    KillSwitchCheck -->|Yes| CreateKillMonitors[Create Kill Switch<br/>Monitor Pods]
+    KillSwitchCheck -->|Yes| CreateKillMonitors[Create Kill Switch Monitors]
     KillSwitchCheck -->|No| MonitorPhase
     
     CreateKillMonitors --> KillSwitchType{Kill Switch Type?}
-    KillSwitchType -->|Absolute| AbsMonitor[Monitor Available Space<br/>vs Threshold]
-    KillSwitchType -->|Relative| RelMonitor[Monitor Free Space %<br/>vs Threshold]
-    
-    AbsMonitor --> StartBgMonitor[Start Background<br/>Kill Switch Monitoring]
+    KillSwitchType -->|Absolute| AbsMonitor[Monitor Available Space]
+    KillSwitchType -->|Relative| RelMonitor[Monitor Free Space %]
+
+    AbsMonitor --> StartBgMonitor[Start Background Monitoring]
     RelMonitor --> StartBgMonitor
     StartBgMonitor --> MonitorPhase
     
     %% Main Monitoring Phase
-    MonitorPhase[📊 Debug Pods Running<br/>Monitor Command Output] --> CleanupCheck{No-Cleanup<br/>Mode?}
-    
+    MonitorPhase[Debug Pods Running] --> CleanupCheck{No-Cleanup Mode?}
+
     %% Kill Switch Background Process
-    StartBgMonitor -.-> KillMonitorLoop{Monitor Loop<br/>Check Every 5s}
-    KillMonitorLoop -.-> KillThresholdCheck{Threshold<br/>Exceeded?}
-    KillThresholdCheck -.->|Yes| KillDebugPods[🔴 Kill Debug Pods<br/>Clean Monitor Pods]
+    StartBgMonitor -.-> KillMonitorLoop{Monitor Loop}
+    KillMonitorLoop -.-> KillThresholdCheck{Threshold Exceeded?}
+    KillThresholdCheck -.->|Yes| KillDebugPods[Kill Debug Pods]
     KillThresholdCheck -.->|No| KillMonitorLoop
     KillDebugPods -.-> KillComplete[Kill Switch Complete]
     
     %% Cleanup Decision
-    CleanupCheck -->|No Cleanup Mode| NoCleanupFlow[Keep Debug Pods Running<br/>Show Monitor Commands]
-    CleanupCheck -->|Normal| UserWait[Wait for User Input<br/>Press Enter to cleanup]
-    
-    UserWait --> CleanupDebug[🧹 Cleanup Debug Pods]
-    CleanupDebug --> CleanupKillSwitches[🧹 Cleanup Kill Switch<br/>Monitor Pods]
+    CleanupCheck -->|No Cleanup Mode| NoCleanupFlow[Keep Debug Pods Running]
+    CleanupCheck -->|Normal| UserWait[Wait for User Input]
+
+    UserWait --> CleanupDebug[Cleanup Debug Pods]
+    CleanupDebug --> CleanupKillSwitches[Cleanup Kill Switch Monitors]
     
     %% File Download Decision
-    CleanupKillSwitches --> FileDownloadCheck{File Download<br/>Requested?}
+    CleanupKillSwitches --> FileDownloadCheck{File Download Requested?}
     NoCleanupFlow --> FileDownloadCheck
     
     FileDownloadCheck -->|Yes| CreateDiscovery[Create File Discovery Pods]
@@ -82,28 +82,28 @@ graph TB
     
     %% File Discovery & Download Flow
     CreateDiscovery --> DiscoveryType{Discovery Type?}
-    DiscoveryType -->|Pod Files| PodDiscovery[Pod File Discovery<br/>Execute select command<br/>with placeholder substitution]
-    DiscoveryType -->|Node Files| NodeDiscovery[Node File Discovery<br/>Execute select command<br/>with placeholder substitution]
-    DiscoveryType -->|Both| BothDiscovery[Both Pod & Node<br/>Discovery]
-    
-    PodDiscovery --> ExecuteSelect[Execute Select Commands<br/>Get File Lists]
+    DiscoveryType -->|Pod Files| PodDiscovery[Pod File Discovery]
+    DiscoveryType -->|Node Files| NodeDiscovery[Node File Discovery]
+    DiscoveryType -->|Both| BothDiscovery[Both Pod & Node Discovery]
+
+    PodDiscovery --> ExecuteSelect[Execute Select Commands]
     NodeDiscovery --> ExecuteSelect
     BothDiscovery --> ExecuteSelect
     
-    ExecuteSelect --> DownloadFiles[📥 Download Files<br/>to Output Directory]
-    DownloadFiles --> CleanupDiscovery[🧹 Cleanup Successful<br/>Discovery Pods]
+    ExecuteSelect --> DownloadFiles[Download Files]
+    DownloadFiles --> CleanupDiscovery[Cleanup Successful Discovery Pods]
     CleanupDiscovery --> Complete
-    
+
     %% Completion
-    Complete[🎉 Session Complete<br/>Close Log File if Created]
+    Complete[Session Complete]
     
     %% Styling for different component types
-    classDef startEnd fill:#e1f5fe,stroke:#01579b,stroke-width:3px
-    classDef decision fill:#fff3e0,stroke:#e65100,stroke-width:2px
-    classDef process fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
-    classDef killswitch fill:#ffebee,stroke:#c62828,stroke-width:2px
-    classDef monitor fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
-    classDef cleanup fill:#fff8e1,stroke:#f57f17,stroke-width:2px
+    classDef startEnd fill:#1e3a8a,stroke:#3b82f6,stroke-width:3px,color:#fff
+    classDef decision fill:#f59e0b,stroke:#d97706,stroke-width:2px,color:#000
+    classDef process fill:#059669,stroke:#10b981,stroke-width:2px,color:#fff
+    classDef killswitch fill:#dc2626,stroke:#ef4444,stroke-width:2px,color:#fff
+    classDef monitor fill:#7c3aed,stroke:#a855f7,stroke-width:2px,color:#fff
+    classDef cleanup fill:#ea580c,stroke:#f97316,stroke-width:2px,color:#fff
     
     class Start,Complete startEnd
     class LogCheck,ExecModeCheck,KillSwitchCheck,KillSwitchType,CleanupCheck,FileDownloadCheck,DiscoveryType decision
