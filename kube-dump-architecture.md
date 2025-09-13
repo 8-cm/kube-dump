@@ -11,7 +11,7 @@ graph TB
     Init --> ParseArgs[Parse Command Arguments]
     
     %% Configuration Decision Points
-    ParseArgs --> LogCheck{Output Directory<br/>Specified (-o)?}
+    ParseArgs --> LogCheck{"Output Directory Specified?"}
     LogCheck -->|Yes| CreateLog[Create Log File<br/>kube-dump-YYYY-MM-DD_epoch.log]
     LogCheck -->|No| ExecModeCheck
     CreateLog --> ExecModeCheck
