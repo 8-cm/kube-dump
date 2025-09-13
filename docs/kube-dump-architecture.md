@@ -5,14 +5,14 @@ This comprehensive Mermaid diagram shows the complete architecture and workflow 
 ## Complete Architecture & Workflow
 
 ```mermaid
-graph TB
+flowchart TD
     %% User Input & Configuration
     Start([User Starts kube-dump.sh]) --> Init[Initialize Variables]
     Init --> ParseArgs[Parse Command Arguments]
     
     %% Configuration Decision Points
     ParseArgs --> LogCheck{"Output Directory Specified?"}
-    LogCheck -->|Yes| CreateLog[Create Log File]
+    LogCheck -->|Yes| CreateLog[Create Log File<br/>kube-dump-YYYY-MM-DD_epoch.log]
     LogCheck -->|No| ExecModeCheck
     CreateLog --> ExecModeCheck
     
@@ -23,18 +23,18 @@ graph TB
     ExecModeCheck -->|Mixed Mode| MixedFlow[Mixed Execution Flow]
     
     %% Pod Flow
-    PodFlow --> FindPods[Find Pods by Label]
-    FindPods --> PrepPods[Prepare Target Pods]
-    PrepPods --> CreatePodDebug[Create Pod Debug Pods]
-
+    PodFlow --> FindPods[Find Pods by Label<br/>using kubectl/oc]
+    FindPods --> PrepPods[Prepare Target Pods<br/>validate running state]
+    PrepPods --> CreatePodDebug[Create Debug Pods<br/>for Pod Targets]
+    
     %% Node Flow
-    NodeFlow --> FindNodes[Find Nodes by Label]
-    FindNodes --> CreateNodeDebug[Create Node Debug Pods]
+    NodeFlow --> FindNodes[Find Nodes by Label<br/>using kubectl/oc]
+    FindNodes --> CreateNodeDebug[Create Debug Pods<br/>for Node Targets]
     
     %% Mixed Flow
     MixedFlow --> MixedPods[Process Pod Targets]
     MixedPods --> MixedNodes[Process Node Targets]
-    MixedNodes --> MixedCreate[Create Mixed Debug Pods]
+    MixedNodes --> MixedCreate[Create Debug Pods<br/>for Both Types]
     
     %% Consolidation
     CreatePodDebug --> WaitReady
@@ -42,39 +42,39 @@ graph TB
     MixedCreate --> WaitReady
     
     %% Kill Switch Decision
-    WaitReady[Wait for Debug Pods Ready] --> KillSwitchCheck{Kill Switch Configured?}
-
+    WaitReady[Wait for Debug Pods Ready] --> KillSwitchCheck{Kill Switch<br/>Configured?}
+    
     %% Kill Switch Flow
-    KillSwitchCheck -->|Yes| CreateKillMonitors[Create Kill Switch Monitors]
+    KillSwitchCheck -->|Yes| CreateKillMonitors[Create Kill Switch<br/>Monitor Pods]
     KillSwitchCheck -->|No| MonitorPhase
     
     CreateKillMonitors --> KillSwitchType{Kill Switch Type?}
-    KillSwitchType -->|Absolute| AbsMonitor[Monitor Available Space]
-    KillSwitchType -->|Relative| RelMonitor[Monitor Free Space %]
-
-    AbsMonitor --> StartBgMonitor[Start Background Monitoring]
+    KillSwitchType -->|Absolute| AbsMonitor[Monitor Available Space<br/>vs Threshold]
+    KillSwitchType -->|Relative| RelMonitor[Monitor Free Space %<br/>vs Threshold]
+    
+    AbsMonitor --> StartBgMonitor[Start Background<br/>Kill Switch Monitoring]
     RelMonitor --> StartBgMonitor
     StartBgMonitor --> MonitorPhase
     
     %% Main Monitoring Phase
-    MonitorPhase[Debug Pods Running] --> CleanupCheck{No-Cleanup Mode?}
-
+    MonitorPhase[📊 Debug Pods Running<br/>Monitor Command Output] --> CleanupCheck{No-Cleanup<br/>Mode?}
+    
     %% Kill Switch Background Process
-    StartBgMonitor -.-> KillMonitorLoop{Monitor Loop}
-    KillMonitorLoop -.-> KillThresholdCheck{Threshold Exceeded?}
-    KillThresholdCheck -.->|Yes| KillDebugPods[Kill Debug Pods]
+    StartBgMonitor -.-> KillMonitorLoop{Monitor Loop<br/>Check Every 5s}
+    KillMonitorLoop -.-> KillThresholdCheck{Threshold<br/>Exceeded?}
+    KillThresholdCheck -.->|Yes| KillDebugPods[🔴 Kill Debug Pods<br/>Clean Monitor Pods]
     KillThresholdCheck -.->|No| KillMonitorLoop
     KillDebugPods -.-> KillComplete[Kill Switch Complete]
     
     %% Cleanup Decision
-    CleanupCheck -->|No Cleanup Mode| NoCleanupFlow[Keep Debug Pods Running]
-    CleanupCheck -->|Normal| UserWait[Wait for User Input]
-
-    UserWait --> CleanupDebug[Cleanup Debug Pods]
-    CleanupDebug --> CleanupKillSwitches[Cleanup Kill Switch Monitors]
+    CleanupCheck -->|No Cleanup Mode| NoCleanupFlow[Keep Debug Pods Running<br/>Show Monitor Commands]
+    CleanupCheck -->|Normal| UserWait[Wait for User Input<br/>Press Enter to cleanup]
+    
+    UserWait --> CleanupDebug[🧹 Cleanup Debug Pods]
+    CleanupDebug --> CleanupKillSwitches[🧹 Cleanup Kill Switch<br/>Monitor Pods]
     
     %% File Download Decision
-    CleanupKillSwitches --> FileDownloadCheck{File Download Requested?}
+    CleanupKillSwitches --> FileDownloadCheck{File Download<br/>Requested?}
     NoCleanupFlow --> FileDownloadCheck
     
     FileDownloadCheck -->|Yes| CreateDiscovery[Create File Discovery Pods]
@@ -82,20 +82,20 @@ graph TB
     
     %% File Discovery & Download Flow
     CreateDiscovery --> DiscoveryType{Discovery Type?}
-    DiscoveryType -->|Pod Files| PodDiscovery[Pod File Discovery]
-    DiscoveryType -->|Node Files| NodeDiscovery[Node File Discovery]
-    DiscoveryType -->|Both| BothDiscovery[Both Pod & Node Discovery]
-
-    PodDiscovery --> ExecuteSelect[Execute Select Commands]
+    DiscoveryType -->|Pod Files| PodDiscovery[Pod File Discovery<br/>Execute select command<br/>with placeholder substitution]
+    DiscoveryType -->|Node Files| NodeDiscovery[Node File Discovery<br/>Execute select command<br/>with placeholder substitution]
+    DiscoveryType -->|Both| BothDiscovery[Both Pod & Node<br/>Discovery]
+    
+    PodDiscovery --> ExecuteSelect[Execute Select Commands<br/>Get File Lists]
     NodeDiscovery --> ExecuteSelect
     BothDiscovery --> ExecuteSelect
     
-    ExecuteSelect --> DownloadFiles[Download Files]
-    DownloadFiles --> CleanupDiscovery[Cleanup Successful Discovery Pods]
+    ExecuteSelect --> DownloadFiles[📥 Download Files<br/>to Output Directory]
+    DownloadFiles --> CleanupDiscovery[🧹 Cleanup Successful<br/>Discovery Pods]
     CleanupDiscovery --> Complete
-
+    
     %% Completion
-    Complete[Session Complete]
+    Complete[🎉 Session Complete<br/>Close Log File if Created]
     
     %% Styling for different component types
     classDef startEnd fill:#1e3a8a,stroke:#3b82f6,stroke-width:3px,color:#fff
