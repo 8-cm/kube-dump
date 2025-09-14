@@ -991,8 +991,16 @@ jobs:
           echo ""
           echo "| Component | Status | Last Updated |"
           echo "|-----------|--------|--------------|"
+
+          # Get code quality status from security-reports.md if it exists
+          if grep -q "Code Quality - Shellcheck Analysis" docs/security-reports.md 2>/dev/null; then
+            CODE_QUALITY_STATUS=$(grep -A 5 "Code Quality - Shellcheck Analysis" docs/security-reports.md | grep "Status:" | head -1 | sed 's/.*Status: *//' | sed 's/ .*//' || echo "🔄 Analyzing")
+          else
+            CODE_QUALITY_STATUS="🔄 Analyzing"
+          fi
+
           echo "| **Container Security** | $SECURITY_STATUS | $TIMESTAMP |"
-          echo "| **Code Quality** | ✅ Passing | $TIMESTAMP |"
+          echo "| **Code Quality** | $CODE_QUALITY_STATUS | Automated |"
           echo ""
           echo "**Vulnerability Summary:** Critical: $TOTAL_CRITICAL, High: $TOTAL_HIGH, Medium: $TOTAL_MEDIUM, Low: $TOTAL_LOW"
           echo ""
@@ -1064,40 +1072,38 @@ jobs:
           echo "**Last Updated:** $TIMESTAMP  "
           echo "**Commit:** [\`${GITHUB_SHA:0:7}\`](https://github.com/${{ github.repository }}/commit/${GITHUB_SHA})  "
           echo ""
-          
+
           if [[ $TOTAL_CRITICAL -eq 0 && $TOTAL_HIGH -eq 0 ]]; then
             echo "🎉 **Great!** No critical or high severity vulnerabilities found in container images and filesystem."
           else
+            echo "### Scanning Coverage"
+            echo "- **🖼️ Container Images**: All images used in kube-dump.sh"
+            echo "- **📋 SBOM Analysis**: Software Bill of Materials vulnerability checking"
+            echo "- **📁 Filesystem**: Local files and configurations"
+            echo "- **⚙️ Configuration**: Security misconfigurations"
+            echo ""
+
             echo "### Container Image Vulnerabilities"
             echo ""
             if [[ -f "image-summary.md" ]]; then
               cat image-summary.md
             fi
             echo ""
-            
+
             echo "### SBOM Analysis Results"
             echo ""
             if [[ -f "sbom-summary.md" ]]; then
               cat sbom-summary.md
             fi
             echo ""
-            
+
             echo "### Filesystem Security Issues"
             echo ""
             echo "| Type | Config Issues | FS Vulnerabilities |"
             echo "|------|---------------|-------------------|"
             echo "| Count | $TOTAL_CONFIG_ISSUES | $TOTAL_FS_VULNS |"
             echo ""
-            
-            echo "### Vulnerability Details (Sorted by CVSS Score)"
-            echo ""
-            if [[ -f "detailed-vulns.md" && -s "detailed-vulns.md" ]]; then
-              cat detailed-vulns.md
-            else
-              echo "No vulnerabilities or security issues found."
-            fi
-            echo ""
-            
+
             echo "### Remediation Steps"
             echo "1. **Update Images**: Use latest versions of container images with security patches"
             echo "2. **Review Dependencies**: Check for vulnerable packages in container images"
@@ -1105,13 +1111,7 @@ jobs:
             echo "4. **Monitor Regularly**: Set up automated scanning for new vulnerabilities"
             echo "5. **SBOM Review**: Analyze Software Bill of Materials for supply chain security"
           fi
-          
-          echo ""
-          echo "### Scanning Coverage"
-          echo "- **🖼️ Container Images**: All images used in kube-dump.sh"
-          echo "- **📋 SBOM Analysis**: Software Bill of Materials vulnerability checking" 
-          echo "- **📁 Filesystem**: Local files and configurations"
-          echo "- **⚙️ Configuration**: Security misconfigurations"
+
           echo ""
           echo "---"
           echo "*This section is automatically updated by the [Security Scanning workflow](.github/workflows/security-trivy.yml)*"
@@ -1124,6 +1124,26 @@ jobs:
 
         # Replace old security reports with new one
         mv docs/security-reports.md.new docs/security-reports.md
+
+        # Add vulnerability details table at the very end if vulnerabilities exist
+        if [[ $TOTAL_CRITICAL -gt 0 || $TOTAL_HIGH -gt 0 || $TOTAL_MEDIUM -gt 0 || $TOTAL_LOW -gt 0 ]]; then
+          echo "" >> docs/security-reports.md
+          echo "---" >> docs/security-reports.md
+          echo "" >> docs/security-reports.md
+          echo "## 📊 Detailed Vulnerability Table" >> docs/security-reports.md
+          echo "" >> docs/security-reports.md
+          echo "### Complete Vulnerability Details (Sorted by CVSS Score)" >> docs/security-reports.md
+          echo "" >> docs/security-reports.md
+
+          if [[ -f "detailed-vulns.md" && -s "detailed-vulns.md" ]]; then
+            cat detailed-vulns.md >> docs/security-reports.md
+          else
+            echo "No vulnerabilities found." >> docs/security-reports.md
+          fi
+
+          echo "" >> docs/security-reports.md
+          echo "*Last updated: $TIMESTAMP*" >> docs/security-reports.md
+        fi
 
         echo "Security section updated in docs/security-reports.md"
     

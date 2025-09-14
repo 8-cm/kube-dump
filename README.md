@@ -1,5 +1,20 @@
 # kube-dump
 
+<!-- SECURITY-DASHBOARD-START -->
+
+## 🛡️ Security Status
+
+| Component | Status | Last Updated |
+|-----------|--------|--------------|
+| **Container Security** | 🔴 CRITICAL ISSUES FOUND | 2025-09-14 07:52:54 UTC |
+| **Code Quality** | ✅ Passing | 2025-09-14 07:52:54 UTC |
+
+**Vulnerability Summary:** Critical: 14, High: 110, Medium: 137, Low: 15
+
+📋 [View Detailed Security Reports](docs/security-reports.md) for complete vulnerability analysis and recommendations.
+
+<!-- SECURITY-DASHBOARD-END -->
+
 A powerful Kubernetes debugging tool that enables network capture, command execution, and file operations across multiple pods and nodes simultaneously through privileged debug pods.
 
 ## Quick Start
@@ -52,22 +67,6 @@ git clone <repository-url> && cd kube-dump && chmod +x kube-dump.sh
 - 📖 [Documentation](docs/) - Complete guides and references
 - 🐛 [Issues](https://github.com/your-org/kube-dump/issues) - Bug reports and feature requests
 - 💡 [Discussions](https://github.com/your-org/kube-dump/discussions) - Questions and community
-
-<!-- SECURITY-DASHBOARD-START -->
-
-## 🛡️ Security Status
-
-| Component | Status | Last Updated |
-|-----------|--------|--------------|
-| **Container Security** | 🔴 CRITICAL ISSUES FOUND | 2025-09-14 07:52:54 UTC |
-| **Code Quality** | ✅ Passing | 2025-09-14 07:52:54 UTC |
-
-**Vulnerability Summary:** Critical: 14, High: 110, Medium: 137, Low: 15
-
-📋 [View Detailed Security Reports](docs/security-reports.md) for complete vulnerability analysis and recommendations.
-
-<!-- SECURITY-DASHBOARD-END -->
-
 
 ---
 

@@ -309,6 +309,9 @@ jobs:
       run: |
         echo "Updating README.md with security dashboard..."
 
+        # Small delay to prevent race condition with trivy workflow
+        sleep $((RANDOM % 5 + 2))
+
         # Create backup
         cp README.md README.md.bak
 
@@ -324,8 +327,8 @@ jobs:
           echo "|-----------|--------|--------------|"
 
           # Get container security status from security-reports.md if it exists
-          if grep -q "Container Security" docs/security-reports.md 2>/dev/null; then
-            CONTAINER_STATUS=$(grep -A 10 "Container Security" docs/security-reports.md | grep "Status:" | head -1 | sed 's/.*Status: *//' | sed 's/ .*//' || echo "🔄 Scanning")
+          if grep -q "Overall Status:" docs/security-reports.md 2>/dev/null; then
+            CONTAINER_STATUS=$(grep "Overall Status:" docs/security-reports.md | head -1 | sed 's/.*Overall Status: *//' | sed 's/ .*//' || echo "🔄 Scanning")
           else
             CONTAINER_STATUS="🔄 Scanning"
           fi
