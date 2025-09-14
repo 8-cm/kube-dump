@@ -33,8 +33,8 @@ Security scan results will appear below when the automated workflows complete th
 **High Severity:** 220  
 **Medium Severity:** 274  
 **Low Severity:** 30  
-**Last Updated:** 2025-09-14 23:17:16 UTC  
-**Commit:** [`bff19fa`](https://github.com/8-cm/kube-dump/commit/bff19fa08dac76ac50e6543c906b26e2025ae355)  
+**Last Updated:** 2025-09-14 23:55:07 UTC  
+**Commit:** [`505f4ce`](https://github.com/8-cm/kube-dump/commit/505f4cec916475a45e8a3caca583242b1820109c)  
 
 ### Container Image Vulnerabilities
 
@@ -58,14 +58,15 @@ Security scan results will appear below when the automated workflows complete th
 
 **Status:** ✅ PASSED  
 **Issues Found:** 0  
-**Last Updated:** 2025-09-14 23:17:16 UTC  
-**Commit:** [`bff19fa`](https://github.com/8-cm/kube-dump/commit/bff19fa08dac76ac50e6543c906b26e2025ae355)  
+**Last Updated:** 2025-09-14 23:55:07 UTC  
+**Commit:** [`505f4ce`](https://github.com/8-cm/kube-dump/commit/505f4cec916475a45e8a3caca583242b1820109c)  
 
 🎉 **Excellent!** No shellcheck issues found. The script follows shell scripting best practices.
 
 ---
 *This section is automatically updated by the [Comprehensive Security Analysis workflow](.github/workflows/security-analysis.yml)*
 <!-- SHELLCHECK-RESULTS-END -->
+
 
 
 
@@ -765,3 +766,5 @@ If you discover a security vulnerability in kube-dump:
 *Last updated: 2025-09-14 08:10:21 UTC*
 
 <sub><i>Last updated: 2025-09-14 23:17:16 UTC</i></sub>
+
+<sub><i>Last updated: 2025-09-14 23:55:07 UTC</i></sub>
