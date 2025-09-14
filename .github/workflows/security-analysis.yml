@@ -391,7 +391,7 @@ jobs:
                 [.Results[]?.Vulnerabilities[]? | select(.Severity != null)] |
                 sort_by(-severity_score(.Severity), -.CVSS.nvd.V3Score // 0) |
                 .[] |
-                "| `" + $image + "` | " + (.VulnerabilityID // "N/A") + " | " + (.VulnerabilityID // "N/A") + " | " +
+                "| `" + $image + "` | " + (.Type // "CVE") + " | " + (.VulnerabilityID // "N/A") + " | " +
                 (.Severity // "UNKNOWN") + " | " +
                 ((.CVSS.nvd.V3Score // 0) | tostring) + " | `" +
                 (.PkgName // "N/A") + "` | `" + (.InstalledVersion // "N/A") + "` | `" +
