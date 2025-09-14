@@ -402,10 +402,7 @@ jobs:
           done
         fi
 
-        # If no vulnerabilities found, add a placeholder
-        if [[ $(wc -l < detailed-vulns.md) -eq 2 ]]; then
-          echo "| - | - | - | No vulnerabilities found | - | - | - | - | All scanned images are clean |" >> detailed-vulns.md
-        fi
+        # If no vulnerabilities found, the table will be empty (just header and separator)
 
     - name: Update README with security dashboard
       run: |

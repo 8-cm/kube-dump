@@ -188,7 +188,6 @@ sequenceDiagram
 
             KD->>Arrays: Add to downloaded_files array
             break
-
         else Download failed
             KD->>KD: attempt++
 
