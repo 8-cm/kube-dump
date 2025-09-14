@@ -39,14 +39,15 @@ Security scan results will appear below when the automated workflows complete th
 
 **Status:** ✅ PASSED  
 **Issues Found:** 0  
-**Last Updated:** 2025-09-13 19:07:13 UTC  
-**Commit:** [`9bc12bf`](https://github.com/8-cm/kube-dump/commit/9bc12bf6e0a7104f254c00e33092324a00b9f93f)  
+**Last Updated:** 2025-09-14 07:50:26 UTC  
+**Commit:** [`4714d34`](https://github.com/8-cm/kube-dump/commit/4714d34400e1b79c419cc527af872bc3bb98e368)  
 
 🎉 **Excellent!** No shellcheck issues found. The script follows shell scripting best practices.
 
 ---
 *This section is automatically updated by the [Shellcheck Analysis workflow](.github/workflows/shellcheck.yml)*
 <!-- SHELLCHECK-RESULTS-END -->
+
 
 
 ---

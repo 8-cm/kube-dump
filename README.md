@@ -59,8 +59,8 @@ git clone <repository-url> && cd kube-dump && chmod +x kube-dump.sh
 
 | Component | Status | Last Updated |
 |-----------|--------|--------------|
-| **Container Security** | 🔄 Scanning | Automated |
-| **Code Quality** | 🔄 Analyzing | Automated |
+| **Container Security** |  | Automated |
+| **Code Quality** | ✅ PASSED | Automated |
 
 **Vulnerability Summary:** Automated security scanning in progress
 
