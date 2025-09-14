@@ -525,8 +525,8 @@ jobs:
         # Replace old security reports with new one
         mv docs/security-reports.md.new docs/security-reports.md
 
-        # Add detailed vulnerability table at the very end if vulnerabilities exist
-        if [[ $TOTAL_CRITICAL -gt 0 || $TOTAL_HIGH -gt 0 || $TOTAL_MEDIUM -gt 0 || $TOTAL_LOW -gt 0 ]]; then
+        # Add detailed vulnerability table only if vulnerabilities exist and table has content
+        if [[ $TOTAL_CRITICAL -gt 0 || $TOTAL_HIGH -gt 0 || $TOTAL_MEDIUM -gt 0 || $TOTAL_LOW -gt 0 ]] && [[ -f "detailed-vulns.md" && -s "detailed-vulns.md" && $(wc -l < detailed-vulns.md) -gt 2 ]]; then
           echo "" >> docs/security-reports.md
           echo "---" >> docs/security-reports.md
           echo "" >> docs/security-reports.md
@@ -534,16 +534,13 @@ jobs:
           echo "" >> docs/security-reports.md
           echo "### Complete Vulnerability Details (Sorted by CVSS Score)" >> docs/security-reports.md
           echo "" >> docs/security-reports.md
-
-          if [[ -f "detailed-vulns.md" && -s "detailed-vulns.md" ]]; then
-            cat detailed-vulns.md >> docs/security-reports.md
-          else
-            echo "No vulnerabilities found." >> docs/security-reports.md
-          fi
-
+          cat detailed-vulns.md >> docs/security-reports.md
           echo "" >> docs/security-reports.md
-          echo "<sub><i>Last updated: $TIMESTAMP</i></sub>" >> docs/security-reports.md
         fi
+
+        # Add timestamp at the end of the file
+        echo "" >> docs/security-reports.md
+        echo "<sub><i>Last updated: $TIMESTAMP</i></sub>" >> docs/security-reports.md
 
         echo "Security reports documentation updated successfully!"
 
