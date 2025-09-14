@@ -164,7 +164,7 @@ sequenceDiagram
 
         Note over KS: Monitor starts background process
 
-        loop Continuous monitoring (every 10s)
+        loop Continuous monitoring every 10 seconds
             KS->>KS: Check storage usage
             KS->>KS: Calculate threshold exceeded?
 
@@ -420,7 +420,7 @@ sequenceDiagram
     else No-Cleanup Mode
         Note over KD: --no-cleanup flag set
 
-        opt File downloads requested
+        alt File downloads requested
             KD->>KD: Keep debug pods running
             KD->>K8s: Create discovery pods
             K8s->>DisP: Deploy discovery pods
