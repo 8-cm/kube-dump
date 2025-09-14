@@ -76,7 +76,7 @@ jobs:
           # Look for --image flag usage patterns
           grep -oP '(?<=--image[= ])[^\s"'\'']+' kube-dump.sh || true
           grep -oP '(?<=IMAGE=")[^"]+' kube-dump.sh || true
-          grep -oP "(?<=IMAGE=')[^']+' kube-dump.sh || true
+          grep -oP "(?<=IMAGE=')[^']+" kube-dump.sh || true
         } | grep -E '^[a-zA-Z0-9._-]+(/[a-zA-Z0-9._-]+)*(:[a-zA-Z0-9._-]+)?$' | sort -u > unique-images.txt
 
         # Ensure we have valid images
