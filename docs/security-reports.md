@@ -35,8 +35,14 @@ Security scan results will appear below when the automated workflows complete th
 **Low Severity:** 15  
 **Config Issues:** 0  
 **Filesystem Vulns:** 0  
-**Last Updated:** 2025-09-14 07:52:54 UTC  
-**Commit:** [`161edf0`](https://github.com/8-cm/kube-dump/commit/161edf0fa312e6daba6b1612e29bd8847efc8b71)  
+**Last Updated:** 2025-09-14 08:10:21 UTC  
+**Commit:** [`0aa149d`](https://github.com/8-cm/kube-dump/commit/0aa149da31d93d2aded6992ca8030590491f6bcd)  
+
+### Scanning Coverage
+- **🖼️ Container Images**: All images used in kube-dump.sh
+- **📋 SBOM Analysis**: Software Bill of Materials vulnerability checking
+- **📁 Filesystem**: Local files and configurations
+- **⚙️ Configuration**: Security misconfigurations
 
 ### Container Image Vulnerabilities
 
@@ -56,7 +62,89 @@ Security scan results will appear below when the automated workflows complete th
 |------|---------------|-------------------|
 | Count | 0 | 0 |
 
-### Vulnerability Details (Sorted by CVSS Score)
+### Remediation Steps
+1. **Update Images**: Use latest versions of container images with security patches
+2. **Review Dependencies**: Check for vulnerable packages in container images
+3. **Fix Configurations**: Address configuration issues identified by Trivy
+4. **Monitor Regularly**: Set up automated scanning for new vulnerabilities
+5. **SBOM Review**: Analyze Software Bill of Materials for supply chain security
+
+---
+*This section is automatically updated by the [Security Scanning workflow](.github/workflows/security-trivy.yml)*
+<!-- TRIVY-SECURITY-END -->
+
+
+
+---
+
+<!-- SHELLCHECK-RESULTS-START -->
+## 🔍 Code Quality - Shellcheck Analysis
+
+**Status:** ✅ PASSED  
+**Issues Found:** 0  
+**Last Updated:** 2025-09-14 08:08:15 UTC  
+**Commit:** [`11c3cc9`](https://github.com/8-cm/kube-dump/commit/11c3cc9578f56594e32c34ac4fd104c35a280eba)  
+
+🎉 **Excellent!** No shellcheck issues found. The script follows shell scripting best practices.
+
+---
+*This section is automatically updated by the [Shellcheck Analysis workflow](.github/workflows/shellcheck.yml)*
+<!-- SHELLCHECK-RESULTS-END -->
+
+
+
+
+---
+
+## Default Container Image Information
+
+### Container Images
+kube-dump uses the following default container image:
+- **nicolaka/netshoot:latest** - Default debug container image (not affiliated with kube-dump)
+- User-configurable with `--image` parameter to use alternative images
+
+### Image Disclaimer
+The default netshoot image is maintained by nicolaka and is not related to the authors of kube-dump. Users can specify alternative container images using the `--image` parameter based on their security requirements and organizational policies.
+
+### Pod Design Philosophy
+kube-dump creates short-lived debugging pods that are intended to be temporary. The pods are designed to:
+- Execute specific debugging tasks
+- Collect required data efficiently
+- Terminate automatically or on user command
+- Clean up resources after completion
+
+### Vulnerability Context
+The vulnerability reports below reflect the security status of the default nicolaka/netshoot image at the time of scanning. This information is provided to help users make informed decisions about:
+- Whether to use the default image or specify alternatives
+- Understanding potential security exposure during debugging sessions
+- Planning security reviews and compliance assessments
+
+Since debug pods are short-lived and run in controlled debugging scenarios, users should evaluate these findings in the context of their specific security requirements and operational constraints.
+
+## Vulnerability Disclosure
+
+If you discover a security vulnerability in kube-dump:
+
+1. **Do not** create a public GitHub issue
+2. Email security details to: [security-contact-email]
+3. Include steps to reproduce the vulnerability
+4. Allow reasonable time for response and remediation
+
+## Security Updates
+
+- Subscribe to repository releases for security updates
+- Monitor container image updates for nicolaka/netshoot
+- Review security scan results after each update
+- Test security controls in staging environments
+
+---
+
+*This page is automatically updated by the security scanning workflows. Last manual review: [Date]*
+---
+
+## 📊 Detailed Vulnerability Table
+
+### Complete Vulnerability Details (Sorted by CVSS Score)
 
 | Type | ID | Severity | Score | Package | Installed | Fixed In | Description |
 |------|----|-----------|---------|---------|-----------|-----------|-----------------------|
@@ -696,86 +784,4 @@ Security scan results will appear below when the automated workflows complete th
 | Image | `CVE-2025-6170` | LOW | 2.5 | `libxml2` | `2.13.8-r0` | `2.13.9-r0` | A flaw was found in the interactive shell of the xmllint command-line tool, used for parsing XML files. When a user inputs an overly long command, the program does not check the input size properly, which can cause it to crash. This issue might allow attackers to run harmful code in rare configurations without modern protections. |
 | Image | `CVE-2025-6170` | LOW | 2.5 | `libxml2` | `2.13.8-r0` | `2.13.9-r0` | A flaw was found in the interactive shell of the xmllint command-line tool, used for parsing XML files. When a user inputs an overly long command, the program does not check the input size properly, which can cause it to crash. This issue might allow attackers to run harmful code in rare configurations without modern protections. |
 
-### Remediation Steps
-1. **Update Images**: Use latest versions of container images with security patches
-2. **Review Dependencies**: Check for vulnerable packages in container images
-3. **Fix Configurations**: Address configuration issues identified by Trivy
-4. **Monitor Regularly**: Set up automated scanning for new vulnerabilities
-5. **SBOM Review**: Analyze Software Bill of Materials for supply chain security
-
-### Scanning Coverage
-- **🖼️ Container Images**: All images used in kube-dump.sh
-- **📋 SBOM Analysis**: Software Bill of Materials vulnerability checking
-- **📁 Filesystem**: Local files and configurations
-- **⚙️ Configuration**: Security misconfigurations
-
----
-*This section is automatically updated by the [Security Scanning workflow](.github/workflows/security-trivy.yml)*
-<!-- TRIVY-SECURITY-END -->
-
-
----
-
-<!-- SHELLCHECK-RESULTS-START -->
-## 🔍 Code Quality - Shellcheck Analysis
-
-**Status:** ✅ PASSED  
-**Issues Found:** 0  
-**Last Updated:** 2025-09-14 08:08:15 UTC  
-**Commit:** [`11c3cc9`](https://github.com/8-cm/kube-dump/commit/11c3cc9578f56594e32c34ac4fd104c35a280eba)  
-
-🎉 **Excellent!** No shellcheck issues found. The script follows shell scripting best practices.
-
----
-*This section is automatically updated by the [Shellcheck Analysis workflow](.github/workflows/shellcheck.yml)*
-<!-- SHELLCHECK-RESULTS-END -->
-
-
-
-
----
-
-## Default Container Image Information
-
-### Container Images
-kube-dump uses the following default container image:
-- **nicolaka/netshoot:latest** - Default debug container image (not affiliated with kube-dump)
-- User-configurable with `--image` parameter to use alternative images
-
-### Image Disclaimer
-The default netshoot image is maintained by nicolaka and is not related to the authors of kube-dump. Users can specify alternative container images using the `--image` parameter based on their security requirements and organizational policies.
-
-### Pod Design Philosophy
-kube-dump creates short-lived debugging pods that are intended to be temporary. The pods are designed to:
-- Execute specific debugging tasks
-- Collect required data efficiently
-- Terminate automatically or on user command
-- Clean up resources after completion
-
-### Vulnerability Context
-The vulnerability reports below reflect the security status of the default nicolaka/netshoot image at the time of scanning. This information is provided to help users make informed decisions about:
-- Whether to use the default image or specify alternatives
-- Understanding potential security exposure during debugging sessions
-- Planning security reviews and compliance assessments
-
-Since debug pods are short-lived and run in controlled debugging scenarios, users should evaluate these findings in the context of their specific security requirements and operational constraints.
-
-## Vulnerability Disclosure
-
-If you discover a security vulnerability in kube-dump:
-
-1. **Do not** create a public GitHub issue
-2. Email security details to: [security-contact-email]
-3. Include steps to reproduce the vulnerability
-4. Allow reasonable time for response and remediation
-
-## Security Updates
-
-- Subscribe to repository releases for security updates
-- Monitor container image updates for nicolaka/netshoot
-- Review security scan results after each update
-- Test security controls in staging environments
-
----
-
-*This page is automatically updated by the security scanning workflows. Last manual review: [Date]*
+*Last updated: 2025-09-14 08:10:21 UTC*
