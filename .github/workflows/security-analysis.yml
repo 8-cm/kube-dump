@@ -366,14 +366,22 @@ jobs:
         fi
 
         # Generate detailed vulnerability table
-        echo "| Type | ID | Severity | Score | Package | Installed | Fixed In | Description |" > detailed-vulns.md
-        echo "|------|----|-----------|---------|---------|-----------|-----------|-----------------------|" >> detailed-vulns.md
+        echo "| Image | Type | ID | Severity | Score | Package | Installed | Fixed In | Description |" > detailed-vulns.md
+        echo "|-------|------|----|-----------|---------|---------|-----------|-----------|-----------------------|" >> detailed-vulns.md
 
         # Process vulnerability details from all scans
         if ls artifacts/trivy-scan-*/trivy-*.json 1> /dev/null 2>&1; then
           for json_file in artifacts/trivy-scan-*/trivy-*.json; do
             if [[ -f "$json_file" ]]; then
-              jq -r '
+              # Extract image name from the JSON file path or content
+              IMAGE_NAME=$(basename "$json_file" | sed 's/^trivy-//' | sed 's/\.json$//' | sed 's/-/:/g')
+
+              # If we can't extract from filename, try from JSON metadata
+              if [[ -z "$IMAGE_NAME" || "$IMAGE_NAME" == "json" ]]; then
+                IMAGE_NAME=$(jq -r '.ArtifactName // "unknown"' "$json_file" 2>/dev/null || echo "unknown")
+              fi
+
+              jq -r --arg image "$IMAGE_NAME" '
                 def severity_score(s):
                   if s == "CRITICAL" then 4
                   elif s == "HIGH" then 3
@@ -383,7 +391,7 @@ jobs:
                 [.Results[]?.Vulnerabilities[]? | select(.Severity != null)] |
                 sort_by(-severity_score(.Severity), -.CVSS.nvd.V3Score // 0) |
                 .[] |
-                "| Image | " + (.VulnerabilityID // "N/A") + " | " +
+                "| `" + $image + "` | " + (.VulnerabilityID // "N/A") + " | " + (.VulnerabilityID // "N/A") + " | " +
                 (.Severity // "UNKNOWN") + " | " +
                 ((.CVSS.nvd.V3Score // 0) | tostring) + " | `" +
                 (.PkgName // "N/A") + "` | `" + (.InstalledVersion // "N/A") + "` | `" +
@@ -396,7 +404,7 @@ jobs:
 
         # If no vulnerabilities found, add a placeholder
         if [[ $(wc -l < detailed-vulns.md) -eq 2 ]]; then
-          echo "| - | No vulnerabilities found | - | - | - | - | - | All scanned images are clean |" >> detailed-vulns.md
+          echo "| - | - | No vulnerabilities found | - | - | - | - | - | All scanned images are clean |" >> detailed-vulns.md
         fi
 
     - name: Update README with security dashboard
