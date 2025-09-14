@@ -404,7 +404,7 @@ jobs:
 
         # If no vulnerabilities found, add a placeholder
         if [[ $(wc -l < detailed-vulns.md) -eq 2 ]]; then
-          echo "| - | - | No vulnerabilities found | - | - | - | - | - | All scanned images are clean |" >> detailed-vulns.md
+          echo "| - | - | - | No vulnerabilities found | - | - | - | - | All scanned images are clean |" >> detailed-vulns.md
         fi
 
     - name: Update README with security dashboard
@@ -545,7 +545,7 @@ jobs:
           fi
 
           echo "" >> docs/security-reports.md
-          echo "*Last updated: $TIMESTAMP*" >> docs/security-reports.md
+          echo "<sub><i>Last updated: $TIMESTAMP</i></sub>" >> docs/security-reports.md
         fi
 
         echo "Security reports documentation updated successfully!"
