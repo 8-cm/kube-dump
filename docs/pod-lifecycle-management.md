@@ -265,7 +265,6 @@ sequenceDiagram
                 K8s->>KS: Confirm deletion
                 KS->>KS: Log kill success
                 KS->>KS: Monitor pod exits
-                break
             end
         end
     end

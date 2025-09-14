@@ -222,7 +222,6 @@ sequenceDiagram
             KM->>KM: Wait for pod deletion completion
             KM->>KM: Log successful kill
             KM->>KM: Monitor script exits
-            break
         else Within limits
             KM->>KM: ✅ Within limits
             KM->>KM: Sleep 10 seconds
