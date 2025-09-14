@@ -113,7 +113,7 @@ usage() {
   echo "  $0 -l app=web --include-nodes -E 'ss -tuln'"
   echo ""
   echo "  # Use custom container image for all debug pods:"
-  echo "  $0 -l app=web --image alpine/network-tools"
+  echo "  $0 -l app=web --image alpine:latest"
   echo ""
   echo "Note: Script automatically selects first container from each pod for PID discovery."
   echo "All containers in a pod share the same network namespace."
@@ -2620,7 +2620,7 @@ cleanup_discovery_pods() {
 
   if [[ ${#DISCOVERY_POD_NAMES[@]} -gt 0 ]]; then
     format_message "🧹 Cleaning up discovery pods..."
-    
+
     # Download logs from each discovery pod before deletion (only if -o is specified)
     if [[ -n "$OUTPUT_DIR" ]]; then
       for discovery_pod in "${DISCOVERY_POD_NAMES[@]}"; do
@@ -2639,14 +2639,14 @@ cleanup_discovery_pods() {
         fi
       done
     fi
-    
+
     # Now delete all discovery pods
     $KUBE_CLI delete pods "${DISCOVERY_POD_NAMES[@]}" -n "${debug_ns}" --ignore-not-found >/dev/null 2>&1
   fi
 }
 
 # -------------------------------------------------------------------------------
-# Function: build_discovery_script  
+# Function: build_discovery_script
 # -------------------------------------------------------------------------------
 # Description:
 #   Generates a complete bash script for execution within discovery pods to continuously
@@ -2666,11 +2666,11 @@ cleanup_discovery_pods() {
 #   - Includes error handling and CRI socket configuration
 # -------------------------------------------------------------------------------
 build_discovery_script() {
-  local pod_name="$1" 
+  local pod_name="$1"
   local container_name="$2"
   local node_name="$3"
   local discovery_pod_name="$4"
-  
+
   cat <<DISCOVERY_SCRIPT
 #!/bin/bash
 set -e
@@ -2712,36 +2712,36 @@ echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Searching for target pod: $pod_name" >&2
 while true; do
   # Get current timestamp
   timestamp="\$(date '+%Y-%m-%d %H:%M:%S')"
-  
+
   # Try to find the pod and get its container PID
   pod_id=\$(crictl pods --name "$pod_name" -q 2>/dev/null | head -1)
   if [[ -z "\$pod_id" ]]; then
-    echo "[\$timestamp] ERROR: Pod $pod_name not found" 
+    echo "[\$timestamp] ERROR: Pod $pod_name not found"
     sleep 1
     continue
   fi
-  
+
   container_id=\$(crictl ps --pod "\$pod_id" --name "$container_name" -q 2>/dev/null | head -1)
   if [[ -z "\$container_id" ]]; then
     echo "[\$timestamp] ERROR: Container $container_name not found in pod $pod_name"
-    sleep 1  
+    sleep 1
     continue
   fi
-  
+
   container_pid=\$(crictl inspect "\$container_id" 2>/dev/null | jq -r '.info.pid // .status.pid // empty' 2>/dev/null)
   if [[ -z "\$container_pid" || "\$container_pid" == "null" ]]; then
     echo "[\$timestamp] ERROR: Unable to get PID for container $container_name"
     sleep 1
     continue
   fi
-  
+
   # Execute the select command in the target container namespace
   if [[ -n "\${ENCODED_SELECT_COMMAND:-}" ]]; then
     select_cmd=\$(echo "\$ENCODED_SELECT_COMMAND" | base64 -d 2>/dev/null || echo "")
     if [[ -n "\$select_cmd" ]]; then
       # Apply placeholder substitution
       select_cmd="\${select_cmd//\${PLACEHOLDER_CHAR:-\%}/\$discovery_pod_name}"
-      
+
       # Execute command in container namespace and capture output
       if result=\$(nsenter -t "\$container_pid" -n -p -m -u -i bash -c "\$select_cmd" 2>/dev/null); then
         if [[ -n "\$result" ]]; then
@@ -2759,7 +2759,7 @@ while true; do
   else
     echo "[\$timestamp] ERROR: No select command configured"
   fi
-  
+
   sleep 1
 done
 DISCOVERY_SCRIPT
@@ -2769,7 +2769,7 @@ DISCOVERY_SCRIPT
 # Function: build_node_discovery_script
 # -------------------------------------------------------------------------------
 # Description:
-#   Generates a complete bash script for execution within node discovery pods to 
+#   Generates a complete bash script for execution within node discovery pods to
 #   continuously monitor and output file discovery results from node filesystem.
 #   This function creates a self-contained script that executes file discovery
 #   commands every second on the host node and outputs timestamped results.
@@ -2786,7 +2786,7 @@ DISCOVERY_SCRIPT
 build_node_discovery_script() {
   local node_name="$1"
   local discovery_pod_name="$2"
-  
+
   cat <<NODE_DISCOVERY_SCRIPT
 #!/bin/bash
 set -e
@@ -2796,14 +2796,14 @@ echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Node discovery pod $discovery_pod_name sta
 while true; do
   # Get current timestamp
   timestamp="\$(date '+%Y-%m-%d %H:%M:%S')"
-  
+
   # Execute the node select command on host filesystem
   if [[ -n "\${ENCODED_NODE_SELECT_COMMAND:-}" ]]; then
     select_cmd=\$(echo "\$ENCODED_NODE_SELECT_COMMAND" | base64 -d 2>/dev/null || echo "")
     if [[ -n "\$select_cmd" ]]; then
       # Apply placeholder substitution
       select_cmd="\${select_cmd//\${PLACEHOLDER_CHAR:-\%}/\$discovery_pod_name}"
-      
+
       # Execute command on host filesystem and capture output
       if result=\$(cd /host && bash -c "\$select_cmd" 2>/dev/null); then
         if [[ -n "\$result" ]]; then
@@ -2821,13 +2821,13 @@ while true; do
   else
     echo "[\$timestamp] ERROR: No node select command configured"
   fi
-  
+
   sleep 1
 done
 NODE_DISCOVERY_SCRIPT
 }
 
-# -------------------------------------------------------------------------------  
+# -------------------------------------------------------------------------------
 # Function: create_discovery_pod
 # -------------------------------------------------------------------------------
 # Description:
@@ -2891,7 +2891,7 @@ $(build_discovery_script "$pod_name" "$container_name" "$node_name" "$discovery_
     env:
     - name: CRI_RUNTIME
       value: "${CRI_RUNTIME}"
-    - name: CRI_SOCKET  
+    - name: CRI_SOCKET
       value: "${CRI_SOCKET}"
     - name: ENCODED_SELECT_COMMAND
       value: "${ENCODED_SELECT_COMMAND}"
@@ -3430,7 +3430,7 @@ cleanup_kill_switch_monitor_pods() {
 
   if [[ ${#KILL_SWITCH_MONITOR_PODS[@]} -gt 0 ]]; then
     format_message "🧹 Cleaning up kill switch monitor pods..."
-    
+
     # Download logs from each kill switch monitor pod before deletion (only if -o is specified)
     if [[ -n "$OUTPUT_DIR" ]]; then
       for monitor_pod in "${KILL_SWITCH_MONITOR_PODS[@]}"; do
@@ -3449,7 +3449,7 @@ cleanup_kill_switch_monitor_pods() {
         fi
       done
     fi
-    
+
     # Now delete all kill switch monitor pods
     $KUBE_CLI delete pods "${KILL_SWITCH_MONITOR_PODS[@]}" -n "${debug_ns}" --ignore-not-found >/dev/null 2>&1
   fi
