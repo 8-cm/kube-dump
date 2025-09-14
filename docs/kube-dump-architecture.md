@@ -183,47 +183,61 @@ This comprehensive workflow ensures reliable, safe, and efficient debugging oper
 ## Key Components & Data Flows
 
 ```mermaid
-graph LR
-    %% Core Components
-    subgraph "Core Components"
-        CLI[kubectl/oc CLI]
-        Script[kube-dump.sh]
-        K8sCluster[Kubernetes Cluster]
+sequenceDiagram
+    participant Script as kube-dump.sh
+    participant CLI as kubectl/oc CLI
+    participant Cluster as Kubernetes Cluster
+    participant DebugPod as Debug Pods
+    participant KillMonitor as Kill Switch Monitor
+    participant DiscoveryPod as Discovery Pods
+    participant HostFS as Host Filesystem
+    participant LogFile as Session Log File
+    participant OutputDir as Output Directory
+
+    Note over Script: Component initialization and management
+
+    Script->>CLI: Use kubectl/oc for cluster operations
+    CLI->>Cluster: Manage pod lifecycle operations
+
+    Note over Script: Create and manage different pod types
+
+    Script->>CLI: Create debug pods
+    CLI->>Cluster: Deploy debug pods
+    Cluster-->>DebugPod: Debug pods created and running
+    DebugPod->>HostFS: Access host filesystem for debugging
+    HostFS-->>DebugPod: Provide system access and data
+
+    Script->>CLI: Create kill switch monitors
+    CLI->>Cluster: Deploy monitor pods
+    Cluster-->>KillMonitor: Monitor pods created and running
+    KillMonitor->>HostFS: Monitor storage usage
+    HostFS-->>KillMonitor: Storage metrics and status
+
+    alt Kill switch triggered
+        KillMonitor->>Script: Threshold exceeded notification
+        Script->>CLI: Terminate debug pods immediately
+        CLI->>DebugPod: kubectl delete pod debug-pod
+        DebugPod-->>Cluster: Debug pods terminated
     end
-    
-    %% Pod Types
-    subgraph "Pod Types Created"
-        DebugPod[Debug Pods<br/>- Execute commands<br/>- Network capture<br/>- Custom commands]
-        KillMonitor[Kill Switch Monitors<br/>- Storage monitoring<br/>- Threshold checking<br/>- Auto-termination]
-        DiscoveryPod[Discovery Pods<br/>- File discovery<br/>- File download<br/>- Cleanup operations]
-    end
-    
-    %% Storage & Logging
-    subgraph "Storage & Logging"
-        LogFile[Session Log File<br/>kube-dump-YYYY-MM-DD_epoch.log]
-        OutputDir[Output Directory<br/>Downloaded files]
-        HostFS[Host Filesystem<br/>Monitored volumes]
-    end
-    
-    %% Data Flows
-    Script -->|Creates & Manages| DebugPod
-    Script -->|Creates & Monitors| KillMonitor
-    Script -->|Creates for Downloads| DiscoveryPod
-    
-    DebugPod -->|Accesses| HostFS
-    KillMonitor -->|Monitors| HostFS
-    DiscoveryPod -->|Downloads from| HostFS
-    
-    Script -->|Writes to| LogFile
-    DiscoveryPod -->|Downloads to| OutputDir
-    
-    DebugPod -.->|Terminated by| KillMonitor
-    
-    CLI -->|Manages| K8sCluster
-    Script -->|Uses| CLI
-    K8sCluster -->|Hosts| DebugPod
-    K8sCluster -->|Hosts| KillMonitor
-    K8sCluster -->|Hosts| DiscoveryPod
+
+    Script->>CLI: Create discovery pods for file operations
+    CLI->>Cluster: Deploy discovery pods
+    Cluster-->>DiscoveryPod: Discovery pods created and running
+    DiscoveryPod->>HostFS: Access files for download
+    HostFS-->>DiscoveryPod: File content and metadata
+    DiscoveryPod->>OutputDir: Download files to output directory
+    OutputDir-->>Script: Files successfully downloaded
+
+    Note over Script: Session logging and management
+
+    Script->>LogFile: Write session activities and commands
+    LogFile-->>Script: Log entries recorded
+
+    Note over Script: Cleanup and termination
+
+    Script->>CLI: Cleanup all created pods
+    CLI->>Cluster: Delete debug, monitor, and discovery pods
+    Cluster-->>Script: All pods terminated and cleaned up
 ```
 
 ### Components Process Description
