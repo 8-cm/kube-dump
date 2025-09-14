@@ -1,6 +1,29 @@
-# Kill Switch Monitoring Architecture
+# Kill Switch Architecture
 
-## Kill Switch Architecture Overview
+## Table of Contents
+
+1. [Kill Switch Architecture Detail](#kill-switch-architecture-detail)
+   - [System Architecture Overview](#system-architecture-overview)
+   - [Component Integration Framework](#component-integration-framework)
+   - [Protection Mechanisms](#protection-mechanisms)
+2. [Kill Switch Monitoring Script Logic](#kill-switch-monitoring-script-logic)
+   - [Monitoring Algorithm Architecture](#monitoring-algorithm-architecture)
+   - [Threshold Calculation Systems](#threshold-calculation-systems)
+   - [Decision Engine Implementation](#decision-engine-implementation)
+3. [Storage Threshold Calculation Examples](#storage-threshold-calculation-examples)
+   - [Calculation Methodologies](#calculation-methodologies)
+   - [Implementation Strategies](#implementation-strategies)
+   - [Performance Optimization](#performance-optimization)
+4. [Kill Switch Configuration Examples](#kill-switch-configuration-examples)
+   - [Configuration Patterns](#configuration-patterns)
+   - [Best Practices](#best-practices)
+   - [Troubleshooting Guide](#troubleshooting-guide)
+5. [Safety and Recovery Mechanisms](#safety-and-recovery-mechanisms)
+   - [Fail-Safe Design](#fail-safe-design)
+   - [Recovery Strategies](#recovery-strategies)
+   - [Monitoring and Alerting](#monitoring-and-alerting)
+
+## Kill Switch Architecture Detail
 
 This sequence diagram illustrates the kill switch monitoring architecture deployed across a Kubernetes cluster. It shows how the kube-dump controller creates and manages debug pods alongside their corresponding kill switch monitor pods, which continuously monitor storage usage and can terminate debug pods when thresholds are exceeded.
 
@@ -114,6 +137,46 @@ sequenceDiagram
     Note over KD,Arrays: Kill switch monitors active and ready
 ```
 
+### System Architecture Overview
+
+#### **Multi-Layered Protection Framework**
+
+The kill switch architecture implements a comprehensive multi-layered protection system designed to prevent resource exhaustion during debugging operations. This sophisticated framework operates on multiple levels: cluster-wide coordination, node-level monitoring, and pod-specific protection mechanisms.
+
+#### **Component Integration Framework**
+
+**1. Controller Layer Architecture**
+- **Kube-dump Controller**: Central orchestration component managing debug pod lifecycle and kill switch deployment
+- **Resource Discovery**: Intelligent identification of target nodes and debug pod placement strategies
+- **Monitor Pod Coordination**: Systematic deployment of kill switch monitors aligned with debug pod placement
+- **State Management**: Comprehensive tracking of all protection components across the cluster
+
+**2. Node-Level Monitor Architecture**
+- **Dedicated Monitor Pods**: Specialized lightweight containers running on each target node
+- **Host Integration**: Direct host filesystem and process access for accurate resource monitoring
+- **Isolation Strategy**: Separate monitor pods prevent resource conflicts with debug operations
+- **Communication Channels**: Secure communication with Kubernetes API for protective actions
+
+**3. Storage Protection Framework**
+- **Dual Threshold Support**: Both absolute (GB) and relative (percentage) threshold configurations
+- **Volume-Specific Monitoring**: Targeted monitoring of specific filesystem paths and volumes
+- **Real-time Calculation**: Continuous storage usage calculation with configurable intervals
+- **Predictive Analysis**: Optional trend analysis for proactive protection
+
+### Protection Mechanisms
+
+#### **Automatic Response Systems**
+- **Threshold Violation Detection**: Immediate detection of storage threshold breaches
+- **Graduated Response**: Configurable response levels from warnings to immediate termination
+- **Pod Selection Logic**: Intelligent selection of debug pods for termination based on resource usage
+- **Cleanup Coordination**: Automatic cleanup of terminated debug pods and associated resources
+
+#### **Safety and Reliability Features**
+- **Monitor Redundancy**: Optional redundant monitor deployment for critical environments
+- **Fail-Safe Design**: Default-safe behavior when monitor pods encounter errors
+- **Recovery Mechanisms**: Automatic recovery from monitor pod failures with state preservation
+- **Audit Trail**: Comprehensive logging of all protection actions for post-incident analysis
+
 ## Kill Switch Monitoring Script Logic
 
 This sequence diagram shows the internal logic of the kill switch monitoring script running inside each monitor pod. It demonstrates the continuous monitoring loop, threshold calculations, decision-making process, and the kill action execution when storage limits are exceeded.
@@ -160,7 +223,6 @@ sequenceDiagram
             KM->>KM: Log successful kill
             KM->>KM: Monitor script exits
             break
-
         else Within limits
             KM->>KM: ✅ Within limits
             KM->>KM: Sleep 10 seconds

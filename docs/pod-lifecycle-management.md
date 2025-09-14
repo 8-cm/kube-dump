@@ -1,5 +1,36 @@
 # Pod Lifecycle Management
 
+## Table of Contents
+
+1. [Complete Pod Lifecycle Overview](#complete-pod-lifecycle-overview)
+   - [Comprehensive Analysis and Architecture](#comprehensive-analysis-and-architecture)
+   - [System Integration Patterns](#system-integration-patterns)
+   - [Resource Management Strategy](#resource-management-strategy)
+2. [Debug Pod Creation and Management](#debug-pod-creation-and-management)
+   - [Pod Creation Architecture](#pod-creation-architecture)
+   - [Deployment Strategies](#deployment-strategies)
+   - [Resource Allocation Patterns](#resource-allocation-patterns)
+3. [Kill Switch Monitor Pod Lifecycle](#kill-switch-monitor-pod-lifecycle)
+   - [Protection System Architecture](#protection-system-architecture)
+   - [Monitoring Algorithms](#monitoring-algorithms)
+   - [Automatic Response Mechanisms](#automatic-response-mechanisms)
+4. [Discovery Pod Lifecycle (File Downloads)](#discovery-pod-lifecycle-file-downloads)
+   - [File Operation Architecture](#file-operation-architecture)
+   - [Download Strategies](#download-strategies)
+   - [Error Handling and Recovery](#error-handling-and-recovery)
+5. [Pod State Transitions](#pod-state-transitions)
+   - [State Management System](#state-management-system)
+   - [Transition Triggers](#transition-triggers)
+   - [Lifecycle Events](#lifecycle-events)
+6. [Pod Resource Management](#pod-resource-management)
+   - [Resource Tracking Architecture](#resource-tracking-architecture)
+   - [Memory Management](#memory-management)
+   - [Cleanup Coordination](#cleanup-coordination)
+7. [Pod Cleanup Strategies](#pod-cleanup-strategies)
+   - [Cleanup Decision Matrix](#cleanup-decision-matrix)
+   - [Strategy Implementation](#strategy-implementation)
+   - [Recovery Mechanisms](#recovery-mechanisms)
+
 ## Complete Pod Lifecycle Overview
 
 This sequence diagram shows the complete lifecycle of kube-dump operations, from initialization through cleanup. It illustrates the interactions between the user, the kube-dump script, debug pods, kill switch monitors, and discovery pods throughout the entire debugging session.
@@ -73,6 +104,60 @@ sequenceDiagram
         KD->>U: End - pods still running
     end
 ```
+
+### Comprehensive Analysis and Architecture
+
+#### **Pod Lifecycle Orchestration Framework**
+
+The complete pod lifecycle management in kube-dump represents a sophisticated orchestration system that coordinates multiple pod types with distinct purposes while maintaining operational safety and resource efficiency. This framework manages three primary pod categories: debug pods, kill switch monitor pods, and discovery pods, each with specialized roles in the debugging ecosystem.
+
+#### **Multi-Pod Coordination Strategy**
+
+**1. Debug Pod Coordination**
+- **Primary Function**: Execute debugging commands within target environments
+- **Lifecycle Span**: From initialization through manual or automatic cleanup
+- **Resource Characteristics**: Privileged access, namespace sharing, volume mounting
+- **Coordination Points**: Synchronized with kill switch monitors for protection
+
+**2. Kill Switch Monitor Coordination**
+- **Primary Function**: Continuous monitoring and protection against resource exhaustion
+- **Lifecycle Span**: Parallel to debug pods with automatic termination capability
+- **Resource Characteristics**: Lightweight monitoring containers with kubectl access
+- **Coordination Points**: Real-time communication with debug pods for protective actions
+
+**3. Discovery Pod Coordination**
+- **Primary Function**: File discovery, selection, and download operations
+- **Lifecycle Span**: Post-debug phase or parallel execution in no-cleanup mode
+- **Resource Characteristics**: File system access, download capabilities, retry mechanisms
+- **Coordination Points**: Sequential execution after debug completion or parallel operation
+
+### System Integration Patterns
+
+#### **Kubernetes API Integration**
+- **Resource Creation Patterns**: Batch creation of related pod resources with dependency management
+- **State Synchronization**: Real-time monitoring of pod states across all categories
+- **Event Handling**: Comprehensive event handling for pod lifecycle events
+- **Error Recovery**: Automatic recovery mechanisms for failed pod operations
+
+#### **Container Runtime Integration**
+- **CRI Compatibility**: Seamless integration with containerd, CRI-O, and Docker runtimes
+- **Namespace Management**: Sophisticated namespace sharing and isolation strategies
+- **Volume Coordination**: Complex volume mounting strategies for different pod types
+- **Security Context Management**: Dynamic security context configuration based on pod purpose
+
+### Resource Management Strategy
+
+#### **Resource Allocation Patterns**
+- **Memory Management**: Intelligent memory allocation based on pod type and expected workload
+- **CPU Scheduling**: Optimized CPU resource allocation with priority-based scheduling
+- **Storage Coordination**: Efficient storage allocation and cleanup coordination
+- **Network Resource Management**: Careful network resource allocation to avoid conflicts
+
+#### **Cleanup Coordination Mechanisms**
+- **Dependency-Aware Cleanup**: Ensures proper cleanup order respecting pod dependencies
+- **Failure Recovery**: Robust cleanup mechanisms even in failure scenarios
+- **Resource Leak Prevention**: Comprehensive tracking and cleanup of all allocated resources
+- **Orphan Resource Detection**: Automatic detection and cleanup of orphaned resources
 
 ## Debug Pod Creation and Management
 
@@ -157,7 +242,7 @@ sequenceDiagram
     KD->>KD: Kill switch configured
 
     loop For each debug pod
-        KD->>K8s: Create monitor pod (ks-{node}-{hash})
+        KD->>K8s: Create monitor pod (ks-node-hash)
         K8s->>KS: Deploy monitor pod
         KS->>KS: Install bc calculator
         KS->>KS: Initialize storage monitoring loop
