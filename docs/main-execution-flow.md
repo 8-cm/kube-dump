@@ -13,94 +13,109 @@ This document provides detailed explanations of the main execution phases in kub
 
 ## Complete Main Execution Flow with All Phases
 
+This comprehensive sequence diagram illustrates the complete execution lifecycle of kube-dump from startup through completion. It shows all major phases including initialization, target selection, debug pod creation, kill switch configuration, user interaction, cleanup operations, and file download processing.
+
 ```mermaid
-graph TD
-    A[Start: kube-dump.sh] --> B[Initialize Variables]
-    B --> C[Detect Kube CLI<br/>oc or kubectl]
-    C --> D[Parse Arguments]
-    D --> E{Arguments<br/>provided?}
-    E -->|No| F[Show Usage & Exit]
-    E -->|Yes| G[Validate Arguments]
-    G --> H[Show Configuration Summary]
-    H --> I[Setup Log File if -o specified]
-    I --> J[Validate Requirements]
-    J --> K[PHASE 1: Target Selection & Debug Pod Creation]
-    
-    K --> L{Execution Mode?}
-    L -->|pod| M[Pod-based Mode]
-    L -->|node| N[Node-based Mode]
-    L -->|mixed| O[Mixed Mode]
-    
-    M --> P[Select Target Pods]
-    P --> Q[Prepare Target Pods]
-    Q --> R[Create Debug Pods for Pod Targets]
-    
-    N --> S[Select Target Nodes]
-    S --> T[Create Debug Pods for Node Targets]
-    
-    O --> U[Handle Pod Targets]
-    U --> V[Handle Node Targets]
-    V --> W[Create Debug Pods for Both]
-    
-    R --> X[Wait for Debug Pods Ready]
-    T --> X
-    W --> X
-    
-    X --> Y{Kill Switch<br/>Configured?}
-    Y -->|Yes| Z[Create Kill Switch Monitor Pods]
-    Y -->|No| AA[Skip Kill Switch]
-    Z --> BB[Start Background Kill Switch Monitoring]
-    AA --> CC[PHASE 2: Debug Pods Running - Monitor Output]
-    BB --> CC
-    
-    CC --> DD[Show Monitoring Commands]
-    DD --> EE{No Cleanup<br/>Flag Set?}
-    
-    EE -->|Yes| FF[PHASE 3: No-Cleanup Mode]
-    FF --> GG{File Download<br/>Requested?}
-    GG -->|Yes| HH[PHASE 4: File Discovery & Download]
-    GG -->|No| II[Keep Debug Pods Running]
-    
-    EE -->|No| JJ[PHASE 3: Wait for User Input]
-    JJ --> KK[Press Enter to Continue]
-    KK --> LL[Stop Kill Switch Monitoring]
-    LL --> MM[PHASE 4: Cleanup Debug Pods]
-    MM --> NN[Delete Debug Pods]
-    NN --> OO[Cleanup Kill Switch Monitor Pods]
-    OO --> PP{File Download<br/>Requested?}
-    PP -->|Yes| QQ[PHASE 5: File Discovery & Download]
-    PP -->|No| RR[Complete - All Operations Done]
-    
-    HH --> SS[Create File Discovery Pods]
-    QQ --> SS
-    SS --> TT[Handle File Downloads]
-    TT --> UU[Download Files with Retry Logic]
-    UU --> VV[Cleanup Successful Discovery Pods]
-    VV --> WW[Keep Failed Pods for Inspection]
-    
-    WW --> XX[Session Complete]
-    RR --> XX
-    II --> YY[Debug Pods Still Running]
-    XX --> ZZ[End]
-    YY --> ZZ
-    F --> ZZ
-    
-    style A fill:#e1f5fe
-    style K fill:#f3e5f5
-    style CC fill:#e8f5e8
-    style JJ fill:#fff3e0
-    style MM fill:#ffebee
-    style QQ fill:#e0f2f1
-    style ZZ fill:#fce4ec
-    
-    classDef phaseStyle fill:#f9f9f9,stroke:#333,stroke-width:2px,color:#333
-    classDef decisionStyle fill:#fff2cc,stroke:#d6b656,stroke-width:2px
-    classDef actionStyle fill:#d5e8d4,stroke:#82b366,stroke-width:2px
-    classDef errorStyle fill:#f8cecc,stroke:#b85450,stroke-width:2px
-    
-    class K,CC,JJ,MM,QQ phaseStyle
-    class E,L,Y,EE,GG,PP decisionStyle
-    class A,ZZ errorStyle
+sequenceDiagram
+    participant User as User
+    participant KD as kube-dump.sh
+    participant CLI as Kubernetes CLI
+    participant K8s as Kubernetes API
+    participant DP as Debug Pods
+    participant KS as Kill Switch Monitors
+    participant FD as File Discovery
+
+    Note over User,FD: Complete Main Execution Flow - All Phases
+
+    User->>KD: Execute kube-dump.sh with arguments
+    KD->>KD: Initialize variables and detect CLI (oc/kubectl)
+    KD->>KD: Parse and validate arguments
+
+    alt No arguments provided
+        KD->>User: Show usage and exit
+    else Arguments provided
+        KD->>KD: Show configuration summary
+        KD->>KD: Setup log file (if -o specified)
+        KD->>KD: Validate requirements
+
+        Note over KD,DP: PHASE 1: Target Selection & Debug Pod Creation
+
+        alt Execution Mode: pod
+            KD->>CLI: Select target pods by label
+            CLI->>K8s: List pods matching selector
+            KD->>K8s: Create debug pods for pod targets
+            K8s->>DP: Deploy pod-targeted debug pods
+
+        else Execution Mode: node
+            KD->>CLI: Select target nodes by label
+            CLI->>K8s: List nodes matching selector
+            KD->>K8s: Create debug pods for node targets
+            K8s->>DP: Deploy node-targeted debug pods
+
+        else Execution Mode: mixed
+            KD->>KD: Handle both pod and node targets
+            KD->>K8s: Create debug pods for both types
+            K8s->>DP: Deploy mixed debug pods
+        end
+
+        KD->>DP: Wait for all debug pods ready
+        DP->>KD: All pods running
+
+        alt Kill switch configured
+            KD->>K8s: Create kill switch monitor pods
+            K8s->>KS: Deploy monitor pods
+            KS->>KS: Start background monitoring
+        else No kill switch
+            KD->>KD: Skip kill switch setup
+        end
+
+        Note over KD,FD: PHASE 2: Debug Pods Running - Monitor Output
+
+        KD->>DP: Debug pods execute commands
+        KD->>User: Show monitoring commands for real-time observation
+
+        alt No-cleanup flag set
+            Note over KD,FD: PHASE 3: No-Cleanup Mode
+            alt File download requested
+                Note over KD,FD: PHASE 4: File Discovery & Download
+                KD->>K8s: Create file discovery pods
+                K8s->>FD: Deploy discovery pods
+                FD->>FD: Handle file downloads with retry
+                KD->>K8s: Cleanup successful discovery pods
+                KD->>User: Keep failed pods for inspection
+            else No file download
+                KD->>User: Keep debug pods running
+            end
+
+        else Standard cleanup mode
+            Note over KD,FD: PHASE 3: Wait for User Input
+            KD->>User: Press Enter to continue
+            User->>KD: User input received
+            KD->>KS: Stop kill switch monitoring
+            KS->>KS: Terminate monitoring
+
+            Note over KD,FD: PHASE 4: Cleanup Debug Pods
+            KD->>K8s: Delete debug pods
+            K8s->>DP: Terminate debug pods
+            KD->>K8s: Cleanup kill switch monitor pods
+            K8s->>KS: Terminate monitor pods
+
+            alt File download requested
+                Note over KD,FD: PHASE 5: File Discovery & Download
+                KD->>K8s: Create file discovery pods
+                K8s->>FD: Deploy discovery pods
+                FD->>FD: Download files with retry logic
+                KD->>K8s: Cleanup successful discovery pods
+                KD->>User: Keep failed pods for inspection
+                KD->>User: Session complete
+            else No file download
+                KD->>User: Complete - all operations done
+            end
+        end
+    end
+
+    KD->>User: End execution
+    Note over User,FD: All phases completed successfully
 ```
 
 ### Main Execution Process Description
@@ -182,58 +197,100 @@ This comprehensive workflow provides multiple decision points, error handling me
 
 ## Execution Mode Decision Flow
 
+This sequence diagram demonstrates how kube-dump analyzes command-line arguments to determine the appropriate execution mode. It shows the decision-making process that leads to pod-targeted, node-targeted, or mixed-mode operations based on the presence of pod and node label selectors.
+
 ```mermaid
-graph TD
-    A[Parse Arguments] --> B{NODE_LABEL<br/>specified?}
-    B -->|Yes| C{POD_LABEL<br/>specified?}
-    B -->|No| D{POD_LABEL<br/>specified?}
-    
-    C -->|Yes| E[Mixed Mode:<br/>Both pods and nodes]
-    C -->|No| F[Node Mode:<br/>Node targets only]
-    
-    D -->|Yes| G[Pod Mode:<br/>Pod targets only]
-    D -->|No| H[Default:<br/>dumpme=yes label]
-    
-    E --> I[EXECUTION_MODE = mixed]
-    F --> J[EXECUTION_MODE = node]
-    G --> K[EXECUTION_MODE = pod]
-    H --> K
-    
-    style E fill:#e1f5fe
-    style F fill:#f3e5f5
-    style G fill:#e8f5e8
-    style H fill:#fff3e0
+sequenceDiagram
+    participant User as User Arguments
+    participant KD as kube-dump.sh
+    participant Parser as Argument Parser
+    participant Mode as Execution Mode
+
+    Note over User,Mode: Execution Mode Decision Process
+
+    User->>KD: Provide command-line arguments
+    KD->>Parser: Parse arguments
+    Parser->>Parser: Extract NODE_LABEL (-L flag)
+    Parser->>Parser: Extract POD_LABEL (-l flag)
+
+    Parser->>KD: Check NODE_LABEL specified?
+
+    alt NODE_LABEL specified
+        KD->>KD: Check POD_LABEL specified?
+
+        alt Both NODE_LABEL and POD_LABEL specified
+            KD->>Mode: Set EXECUTION_MODE = mixed
+            Mode->>KD: Mixed Mode - Both pods and nodes targeted
+        else Only NODE_LABEL specified
+            KD->>Mode: Set EXECUTION_MODE = node
+            Mode->>KD: Node Mode - Node targets only
+        end
+
+    else NODE_LABEL not specified
+        KD->>KD: Check POD_LABEL specified?
+
+        alt POD_LABEL specified
+            KD->>Mode: Set EXECUTION_MODE = pod
+            Mode->>KD: Pod Mode - Pod targets only
+        else No labels specified
+            KD->>Mode: Set EXECUTION_MODE = pod (default: dumpme=yes)
+            Mode->>KD: Default Pod Mode - Use default label selector
+        end
+    end
+
+    KD->>User: Execution mode determined and ready for target selection
+    Note over User,Mode: Mode decision completed - proceeding with selected execution path
 ```
 
 ## Configuration Summary Display
 
+This sequence diagram shows how kube-dump generates and presents a comprehensive configuration summary to users before execution begins. It demonstrates the systematic gathering and display of all configuration parameters across different functional areas.
+
 ```mermaid
-graph LR
-    A[Show Configuration] --> B[📋 Configuration Summary]
-    B --> C[Execution Mode]
-    B --> D[Kubernetes CLI]
-    B --> E[Pod Selection]
-    B --> F[Node Selection]
-    B --> G[Commands]
-    B --> H[Container Settings]
-    B --> I[File Operations]
-    B --> J[Kill Switch]
-    B --> K[Options]
-    
-    E --> E1[Label Selector<br/>Namespace]
-    F --> F1[Node Label<br/>Include Nodes Flag]
-    G --> G1[Pod Command<br/>Node Command]
-    H --> H1[Image<br/>CRI Runtime<br/>CRI Socket<br/>Install Deps]
-    I --> I1[Pod File Command<br/>Node File Command<br/>Output Directory<br/>Placeholder Character]
-    J --> J1[Absolute Threshold<br/>Relative Threshold<br/>Pod Volume<br/>Node Volume]
-    K --> K1[No Cleanup<br/>No Glyphs]
-    
-    style B fill:#e1f5fe
-    style E fill:#f3e5f5
-    style F fill:#e8f5e8
-    style G fill:#fff3e0
-    style H fill:#ffebee
-    style I fill:#e0f2f1
-    style J fill:#fce4ec
-    style K fill:#f0f4c3
+sequenceDiagram
+    participant KD as kube-dump.sh
+    participant Config as Configuration System
+    participant Display as Display Formatter
+    participant User as User
+
+    Note over KD,User: Configuration Summary Generation
+
+    KD->>Config: Request configuration summary
+    Config->>Config: Gather execution mode information
+    Config->>Config: Collect Kubernetes CLI settings
+    Config->>Config: Compile pod selection parameters
+    Config->>Config: Compile node selection parameters
+    Config->>Config: Gather command configurations
+    Config->>Config: Collect container settings
+    Config->>Config: Gather file operation settings
+    Config->>Config: Collect kill switch parameters
+    Config->>Config: Gather additional options
+
+    Config->>Display: Format configuration summary
+    Display->>Display: Create header (📋 Configuration Summary)
+
+    par Configuration Categories
+        Display->>Display: Format Execution Mode display
+    and
+        Display->>Display: Format Kubernetes CLI information
+    and
+        Display->>Display: Format Pod Selection (Label Selector, Namespace)
+    and
+        Display->>Display: Format Node Selection (Node Label, Include Nodes Flag)
+    and
+        Display->>Display: Format Commands (Pod Command, Node Command)
+    and
+        Display->>Display: Format Container Settings (Image, CRI Runtime, CRI Socket, Install Deps)
+    and
+        Display->>Display: Format File Operations (Pod File Command, Node File Command, Output Directory, Placeholder Character)
+    and
+        Display->>Display: Format Kill Switch (Absolute Threshold, Relative Threshold, Pod Volume, Node Volume)
+    and
+        Display->>Display: Format Options (No Cleanup, No Glyphs)
+    end
+
+    Display->>User: Present complete configuration summary
+    User->>KD: Acknowledge configuration (proceed with execution)
+
+    Note over KD,User: Configuration summary displayed - execution ready to proceed
 ```

@@ -5,14 +5,13 @@
 #   Unified security analysis workflow combining Trivy vulnerability scanning
 #   and ShellCheck code quality analysis. This consolidated approach prevents
 #   race conditions between separate workflows and provides comprehensive
-#   security coverage in a single pipeline execution.
+#   security coverage with parallel execution and proper artifact management.
 #
 # Workflow Components:
+#   - Parallel execution with multiple jobs for performance
 #   - Container image vulnerability scanning with CVSS score prioritization
-#   - SBOM generation and supply chain security analysis
-#   - Filesystem security scanning for local vulnerabilities
-#   - Configuration security scanning for misconfigurations
 #   - Shell script quality analysis using ShellCheck static analysis
+#   - Artifact-based result sharing between jobs
 #   - Unified documentation updates for both README.md and security-reports.md
 #   - Coordinated pull request comments with complete security findings
 #
@@ -26,13 +25,6 @@
 #   - contents: write (for README.md and security-reports.md updates)
 #   - security-events: write (for security event reporting)
 #   - pull-requests: write (for PR comment creation)
-#
-# Output Artifacts:
-#   - Vulnerability scan results in JSON format
-#   - SBOM files in SPDX-JSON format
-#   - ShellCheck analysis results and structured reports
-#   - Updated README.md with unified security status dashboard
-#   - Updated docs/security-reports.md with comprehensive analysis results
 # ===============================================================================
 
 name: Comprehensive Security Analysis
@@ -60,93 +52,96 @@ permissions:
 
 jobs:
   # ===============================================================================
-  # Job: comprehensive-security-analysis
+  # Job: extract-images
   # ===============================================================================
-  # Description:
-  #   Performs unified security analysis combining Trivy vulnerability scanning
-  #   and ShellCheck code quality analysis in a single coordinated workflow.
-  #   This approach eliminates race conditions and provides comprehensive
-  #   security coverage with unified reporting and documentation updates.
-  #
-  # Analysis Coverage:
-  #   - Container image vulnerability scanning with CVSS prioritization
-  #   - Software Bill of Materials (SBOM) analysis for supply chain security
-  #   - Filesystem security scanning for local vulnerabilities and misconfigurations
-  #   - Shell script static analysis with coding standards compliance
-  #   - Unified security status reporting and documentation updates
-  #
-  # Processing Pipeline:
-  #   1. Extract container images from kube-dump.sh script
-  #   2. Execute parallel Trivy scans for all discovered images
-  #   3. Perform ShellCheck static analysis on shell scripts
-  #   4. Generate comprehensive security reports and summaries
-  #   5. Update both README.md security dashboard and detailed reports
-  #   6. Commit changes and create PR comments when applicable
-  # ===============================================================================
-  comprehensive-security-analysis:
-    name: Comprehensive Security Analysis
+  extract-images:
+    name: Extract Container Images
     runs-on: ubuntu-latest
-
+    outputs:
+      images: ${{ steps.extract.outputs.images }}
+      count: ${{ steps.extract.outputs.count }}
     steps:
-    # ---------------------------------------------------------------------------
-    # Step: Checkout Repository with Token Access
-    # ---------------------------------------------------------------------------
     - name: Checkout code
       uses: actions/checkout@v4
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
 
-    # ---------------------------------------------------------------------------
-    # Step: Install Required Tools
-    # ---------------------------------------------------------------------------
-    - name: Install security analysis tools
+    - name: Extract container images from script
+      id: extract
       run: |
-        # Install ShellCheck
+        echo "Extracting container images from kube-dump.sh..."
+
+        # Extract image references with better parsing
+        {
+          # Default netshoot image
+          echo "nicolaka/netshoot:latest"
+          # Look for --image flag usage patterns
+          grep -oP '(?<=--image[= ])[^\s"'\'']+' kube-dump.sh || true
+          grep -oP '(?<=IMAGE=")[^"]+' kube-dump.sh || true
+          grep -oP "(?<=IMAGE=')[^']+' kube-dump.sh || true
+        } | grep -E '^[a-zA-Z0-9._-]+(/[a-zA-Z0-9._-]+)*(:[a-zA-Z0-9._-]+)?$' | sort -u > unique-images.txt
+
+        # Ensure we have valid images
+        if [[ ! -s unique-images.txt ]]; then
+          echo "nicolaka/netshoot:latest" > unique-images.txt
+        fi
+
+        IMAGES=$(cat unique-images.txt | jq -R -s -c 'split("\n") | map(select(length > 0))')
+        COUNT=$(cat unique-images.txt | wc -l)
+
+        echo "Found container images:"
+        cat unique-images.txt | sed 's/^/  - /'
+
+        echo "images=$IMAGES" >> $GITHUB_OUTPUT
+        echo "count=$COUNT" >> $GITHUB_OUTPUT
+
+  # ===============================================================================
+  # Job: shellcheck-analysis
+  # ===============================================================================
+  shellcheck-analysis:
+    name: ShellCheck Code Quality Analysis
+    runs-on: ubuntu-latest
+    outputs:
+      status: ${{ steps.shellcheck.outputs.status }}
+      issues: ${{ steps.shellcheck.outputs.issues }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install ShellCheck
+      run: |
         sudo apt-get update
         sudo apt-get install -y shellcheck
-
-        # Verify installations
         shellcheck --version
-        docker --version
 
-    # ---------------------------------------------------------------------------
-    # Step: Execute ShellCheck Analysis
-    # ---------------------------------------------------------------------------
-    - name: Run shellcheck analysis
+    - name: Run ShellCheck analysis
+      id: shellcheck
       run: |
         echo "Running ShellCheck analysis on kube-dump.sh..."
 
-        # Create results directory
         mkdir -p results
 
-        # Run shellcheck and capture results
         if shellcheck -f gcc kube-dump.sh > results/shellcheck-raw.txt 2>&1; then
           echo "✅ No shellcheck issues found"
-          echo "SHELLCHECK_STATUS=✅ PASSED" >> $GITHUB_ENV
-          echo "SHELLCHECK_ISSUES=0" >> $GITHUB_ENV
+          echo "status=✅ PASSED" >> $GITHUB_OUTPUT
+          echo "issues=0" >> $GITHUB_OUTPUT
           echo "" > results/shellcheck-table.md
         else
           echo "⚠️ Shellcheck issues found"
-          echo "SHELLCHECK_STATUS=⚠️ ISSUES FOUND" >> $GITHUB_ENV
+          echo "status=⚠️ ISSUES FOUND" >> $GITHUB_OUTPUT
 
-          # Count issues
           ISSUE_COUNT=$(wc -l < results/shellcheck-raw.txt || echo "0")
-          echo "SHELLCHECK_ISSUES=$ISSUE_COUNT" >> $GITHUB_ENV
+          echo "issues=$ISSUE_COUNT" >> $GITHUB_OUTPUT
 
           # Convert to markdown table
           echo "| File | Line | Column | Level | Code | Message |" > results/shellcheck-table.md
           echo "|------|------|--------|-------|------|---------|" >> results/shellcheck-table.md
 
-          # Parse shellcheck output and create table rows
           while IFS= read -r line; do
             if [[ -n "$line" ]]; then
-              # Extract components
               file=$(echo "$line" | cut -d':' -f1 | sed 's|.*/||')
               line_num=$(echo "$line" | cut -d':' -f2)
               col_num=$(echo "$line" | cut -d':' -f3)
               level=$(echo "$line" | cut -d':' -f4 | sed 's/^ *//')
 
-              # Extract code and message
               rest=$(echo "$line" | cut -d':' -f5- | sed 's/^ *//')
               if [[ "$rest" =~ \[SC[0-9]+\] ]]; then
                 code=$(echo "$rest" | grep -o '\[SC[0-9]*\]' | head -1)
@@ -156,7 +151,6 @@ jobs:
                 message="$rest"
               fi
 
-              # Clean up level
               case "$level" in
                 *error*) level="🔴 error" ;;
                 *warning*) level="⚠️ warning" ;;
@@ -166,50 +160,109 @@ jobs:
                 *) level="❓ $level" ;;
               esac
 
-              # Add table row
               echo "| \`$file\` | $line_num | $col_num | $level | \`$code\` | $message |" >> results/shellcheck-table.md
             fi
           done < results/shellcheck-raw.txt
         fi
 
-        echo "ShellCheck analysis complete"
+    - name: Upload ShellCheck results
+      uses: actions/upload-artifact@v4
+      with:
+        name: shellcheck-results
+        path: results/
 
-    # ---------------------------------------------------------------------------
-    # Step: Extract Container Images from Script
-    # ---------------------------------------------------------------------------
-    - name: Extract container images from script
-      id: extract
+  # ===============================================================================
+  # Job: trivy-scan
+  # ===============================================================================
+  trivy-scan:
+    name: Trivy Security Scan
+    runs-on: ubuntu-latest
+    needs: extract-images
+    if: needs.extract-images.outputs.count > 0
+    strategy:
+      matrix:
+        image: ${{ fromJSON(needs.extract-images.outputs.images) }}
+      fail-fast: false
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Sanitize image name for artifacts
+      id: sanitize
       run: |
-        echo "Extracting container images from kube-dump.sh..."
+        IMAGE="${{ matrix.image }}"
+        SAFE_IMAGE=$(echo "$IMAGE" | sed 's/[^a-zA-Z0-9]/-/g')
+        echo "image=$IMAGE" >> $GITHUB_OUTPUT
+        echo "safe_image=$SAFE_IMAGE" >> $GITHUB_OUTPUT
 
-        # Extract all image references and create unique list
-        {
-          # Look for --image flag usage and default images
-          grep -o 'nicolaka/netshoot[^"]*' kube-dump.sh || echo "nicolaka/netshoot:latest"
-          grep -oP '(?<=--image[= ])[^\s"]+' kube-dump.sh || true
-          grep -oP '(?<=IMAGE=")[^"]+' kube-dump.sh || true
-        } | sort -u > unique-images.txt
+    - name: Run Trivy scan
+      run: |
+        IMAGE="${{ steps.sanitize.outputs.image }}"
+        SAFE_IMAGE="${{ steps.sanitize.outputs.safe_image }}"
 
-        # Ensure we have at least the default image
-        if [[ ! -s unique-images.txt ]]; then
-          echo "nicolaka/netshoot:latest" > unique-images.txt
+        echo "Scanning image: $IMAGE"
+
+        mkdir -p scan-results
+
+        if docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+           -v $(pwd):/workspace \
+           aquasec/trivy image --format json --output /workspace/trivy-$SAFE_IMAGE.json $IMAGE; then
+
+          if [[ -f "trivy-$SAFE_IMAGE.json" ]]; then
+            CRITICAL=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' "trivy-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
+            HIGH=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' "trivy-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
+            MEDIUM=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "MEDIUM")] | length' "trivy-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
+            LOW=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "LOW")] | length' "trivy-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
+            UNKNOWN=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "UNKNOWN")] | length' "trivy-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
+
+            echo "Results for $IMAGE: C:$CRITICAL H:$HIGH M:$MEDIUM L:$LOW U:$UNKNOWN"
+
+            # Save results
+            echo "IMAGE=$IMAGE" > scan-results/results.env
+            echo "CRITICAL=$CRITICAL" >> scan-results/results.env
+            echo "HIGH=$HIGH" >> scan-results/results.env
+            echo "MEDIUM=$MEDIUM" >> scan-results/results.env
+            echo "LOW=$LOW" >> scan-results/results.env
+            echo "UNKNOWN=$UNKNOWN" >> scan-results/results.env
+
+            mv "trivy-$SAFE_IMAGE.json" "scan-results/"
+          fi
+        else
+          echo "Trivy scan failed for $IMAGE"
+          echo "IMAGE=$IMAGE" > scan-results/results.env
+          echo "ERROR=Scan failed" >> scan-results/results.env
         fi
 
-        IMAGES=$(cat unique-images.txt | jq -R -s -c 'split("\n")[:-1]')
-        COUNT=$(cat unique-images.txt | wc -l)
+    - name: Upload scan results
+      uses: actions/upload-artifact@v4
+      with:
+        name: trivy-scan-${{ steps.sanitize.outputs.safe_image }}
+        path: scan-results/
 
-        echo "Found container images:"
-        cat unique-images.txt | sed 's/^/  - /'
+  # ===============================================================================
+  # Job: generate-reports
+  # ===============================================================================
+  generate-reports:
+    name: Generate Security Reports
+    runs-on: ubuntu-latest
+    needs: [extract-images, shellcheck-analysis, trivy-scan]
+    if: always()
 
-        echo "images=$IMAGES" >> $GITHUB_OUTPUT
-        echo "count=$COUNT" >> $GITHUB_OUTPUT
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
 
-    # ---------------------------------------------------------------------------
-    # Step: Run Trivy Security Scans
-    # ---------------------------------------------------------------------------
-    - name: Run trivy security scans
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts/
+
+    - name: Process scan results
       run: |
-        echo "Running Trivy security scans for all discovered images..."
+        echo "Processing all scan results..."
 
         # Initialize counters
         TOTAL_CRITICAL=0
@@ -218,65 +271,25 @@ jobs:
         TOTAL_LOW=0
         TOTAL_UNKNOWN=0
 
-        # Create scan results directory
-        mkdir -p scan-results
+        # Process Trivy results
+        mkdir -p consolidated-results
 
-        # Process each image
-        echo '${{ steps.extract.outputs.images }}' | jq -r '.[]' | while read -r image; do
-          if [[ -n "$image" ]]; then
-            echo "Scanning image: $image"
-            SAFE_IMAGE=$(echo "$image" | sed 's/[^a-zA-Z0-9]/-/g')
-
-            # Run Trivy scan
-            if docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-               -v $(pwd):/workspace \
-               aquasec/trivy image --format json --output /workspace/trivy-$SAFE_IMAGE.json $image; then
-
-              # Process results
-              if [[ -f "trivy-$SAFE_IMAGE.json" ]]; then
-                CRITICAL=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' "trivy-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
-                HIGH=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' "trivy-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
-                MEDIUM=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "MEDIUM")] | length' "trivy-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
-                LOW=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "LOW")] | length' "trivy-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
-                UNKNOWN=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "UNKNOWN")] | length' "trivy-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
-
-                echo "Results for $image: C:$CRITICAL H:$HIGH M:$MEDIUM L:$LOW U:$UNKNOWN"
-
-                # Save individual results
-                mkdir -p scan-results/image-$SAFE_IMAGE
-                echo "IMAGE=$image" > scan-results/image-$SAFE_IMAGE/results.env
-                echo "CRITICAL=$CRITICAL" >> scan-results/image-$SAFE_IMAGE/results.env
-                echo "HIGH=$HIGH" >> scan-results/image-$SAFE_IMAGE/results.env
-                echo "MEDIUM=$MEDIUM" >> scan-results/image-$SAFE_IMAGE/results.env
-                echo "LOW=$LOW" >> scan-results/image-$SAFE_IMAGE/results.env
-                echo "UNKNOWN=$UNKNOWN" >> scan-results/image-$SAFE_IMAGE/results.env
-
-                mv "trivy-$SAFE_IMAGE.json" "scan-results/image-$SAFE_IMAGE/"
+        if ls artifacts/trivy-scan-*/results.env 1> /dev/null 2>&1; then
+          for result_file in artifacts/trivy-scan-*/results.env; do
+            if [[ -f "$result_file" ]]; then
+              echo "Processing $result_file"
+              source "$result_file"
+              if [[ -z "$ERROR" ]]; then
+                TOTAL_CRITICAL=$((TOTAL_CRITICAL + ${CRITICAL:-0}))
+                TOTAL_HIGH=$((TOTAL_HIGH + ${HIGH:-0}))
+                TOTAL_MEDIUM=$((TOTAL_MEDIUM + ${MEDIUM:-0}))
+                TOTAL_LOW=$((TOTAL_LOW + ${LOW:-0}))
+                TOTAL_UNKNOWN=$((TOTAL_UNKNOWN + ${UNKNOWN:-0}))
               fi
-            else
-              echo "Trivy scan failed for $image"
-              mkdir -p scan-results/image-$SAFE_IMAGE
-              echo "IMAGE=$image" > scan-results/image-$SAFE_IMAGE/results.env
-              echo "ERROR=Scan failed" >> scan-results/image-$SAFE_IMAGE/results.env
+              unset IMAGE CRITICAL HIGH MEDIUM LOW UNKNOWN ERROR
             fi
-          fi
-        done
-
-        # Aggregate results
-        echo "Aggregating scan results..."
-        for result_dir in scan-results/image-*; do
-          if [[ -d "$result_dir" && -f "$result_dir/results.env" ]]; then
-            source "$result_dir/results.env"
-            if [[ -z "$ERROR" ]]; then
-              TOTAL_CRITICAL=$((TOTAL_CRITICAL + ${CRITICAL:-0}))
-              TOTAL_HIGH=$((TOTAL_HIGH + ${HIGH:-0}))
-              TOTAL_MEDIUM=$((TOTAL_MEDIUM + ${MEDIUM:-0}))
-              TOTAL_LOW=$((TOTAL_LOW + ${LOW:-0}))
-              TOTAL_UNKNOWN=$((TOTAL_UNKNOWN + ${UNKNOWN:-0}))
-            fi
-            unset IMAGE CRITICAL HIGH MEDIUM LOW UNKNOWN ERROR
-          fi
-        done
+          done
+        fi
 
         # Determine overall security status
         if [[ $TOTAL_CRITICAL -gt 0 ]]; then
@@ -291,23 +304,17 @@ jobs:
           SECURITY_STATUS="✅ NO ISSUES FOUND"
         fi
 
-        # Export results to environment
+        # Export results
         echo "SECURITY_STATUS=$SECURITY_STATUS" >> $GITHUB_ENV
         echo "TOTAL_CRITICAL=$TOTAL_CRITICAL" >> $GITHUB_ENV
         echo "TOTAL_HIGH=$TOTAL_HIGH" >> $GITHUB_ENV
         echo "TOTAL_MEDIUM=$TOTAL_MEDIUM" >> $GITHUB_ENV
         echo "TOTAL_LOW=$TOTAL_LOW" >> $GITHUB_ENV
-        echo "TOTAL_UNKNOWN=$TOTAL_UNKNOWN" >> $GITHUB_ENV
-
-        # Get timestamp
+        echo "SHELLCHECK_STATUS=${{ needs.shellcheck-analysis.outputs.status }}" >> $GITHUB_ENV
+        echo "SHELLCHECK_ISSUES=${{ needs.shellcheck-analysis.outputs.issues }}" >> $GITHUB_ENV
         echo "TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_ENV
 
-        echo "Trivy security analysis complete"
-
-    # ---------------------------------------------------------------------------
-    # Step: Generate Comprehensive Security Reports
-    # ---------------------------------------------------------------------------
-    - name: Generate security reports
+    - name: Generate comprehensive reports
       run: |
         echo "Generating comprehensive security reports..."
 
@@ -315,27 +322,28 @@ jobs:
         echo "| Image | Critical | High | Medium | Low | Total |" > image-summary.md
         echo "|-------|----------|------|--------|-----|-------|" >> image-summary.md
 
-        for result_dir in scan-results/image-*; do
-          if [[ -d "$result_dir" && -f "$result_dir/results.env" ]]; then
-            source "$result_dir/results.env"
-            if [[ -n "$ERROR" ]]; then
-              echo "| \`$IMAGE\` | ❌ Error | - | - | - | Scan Failed |" >> image-summary.md
-            else
-              TOTAL=$((${CRITICAL:-0} + ${HIGH:-0} + ${MEDIUM:-0} + ${LOW:-0}))
-              echo "| \`$IMAGE\` | 🔴 ${CRITICAL:-0} | 🟠 ${HIGH:-0} | 🟡 ${MEDIUM:-0} | 🔵 ${LOW:-0} | $TOTAL |" >> image-summary.md
+        if ls artifacts/trivy-scan-*/results.env 1> /dev/null 2>&1; then
+          for result_file in artifacts/trivy-scan-*/results.env; do
+            if [[ -f "$result_file" ]]; then
+              source "$result_file"
+              if [[ -n "$ERROR" ]]; then
+                echo "| \`$IMAGE\` | ❌ Error | - | - | - | Scan Failed |" >> image-summary.md
+              else
+                TOTAL=$((${CRITICAL:-0} + ${HIGH:-0} + ${MEDIUM:-0} + ${LOW:-0}))
+                echo "| \`$IMAGE\` | 🔴 ${CRITICAL:-0} | 🟠 ${HIGH:-0} | 🟡 ${MEDIUM:-0} | 🔵 ${LOW:-0} | $TOTAL |" >> image-summary.md
+              fi
+              unset IMAGE CRITICAL HIGH MEDIUM LOW ERROR
             fi
-            unset IMAGE CRITICAL HIGH MEDIUM LOW ERROR
-          fi
-        done
+          done
+        fi
 
         # Generate detailed vulnerability table
         echo "| Type | ID | Severity | Score | Package | Installed | Fixed In | Description |" > detailed-vulns.md
         echo "|------|----|-----------|---------|---------|-----------|-----------|-----------------------|" >> detailed-vulns.md
 
         # Process vulnerability details from all scans
-        for result_dir in scan-results/image-*; do
-          if [[ -d "$result_dir" && -f "$result_dir/trivy-"*".json" ]]; then
-            json_file=$(find "$result_dir" -name "trivy-*.json" | head -1)
+        if ls artifacts/trivy-scan-*/trivy-*.json 1> /dev/null 2>&1; then
+          for json_file in artifacts/trivy-scan-*/trivy-*.json; do
             if [[ -f "$json_file" ]]; then
               jq -r '
                 def severity_score(s):
@@ -355,19 +363,14 @@ jobs:
                 ((.Description // .Title // "No description available") | gsub("\n"; " ")) + " |"
               ' "$json_file" >> detailed-vulns.md 2>/dev/null || true
             fi
-          fi
-        done
+          done
+        fi
 
         # If no vulnerabilities found, add a placeholder
         if [[ $(wc -l < detailed-vulns.md) -eq 2 ]]; then
           echo "| - | No vulnerabilities found | - | - | - | - | - | All scanned images are clean |" >> detailed-vulns.md
         fi
 
-        echo "Security reports generated successfully"
-
-    # ---------------------------------------------------------------------------
-    # Step: Update README with Security Dashboard
-    # ---------------------------------------------------------------------------
     - name: Update README with security dashboard
       run: |
         echo "Updating README.md with unified security dashboard..."
@@ -403,9 +406,6 @@ jobs:
 
         echo "README.md security dashboard updated successfully!"
 
-    # ---------------------------------------------------------------------------
-    # Step: Update Security Reports Documentation
-    # ---------------------------------------------------------------------------
     - name: Update security reports documentation
       run: |
         echo "Updating docs/security-reports.md with comprehensive analysis results..."
@@ -453,15 +453,8 @@ jobs:
           echo "<!-- TRIVY-SECURITY-END -->"
           echo ""
 
-          # Find and preserve shellcheck section or create it
-          if grep -q "<!-- SHELLCHECK-RESULTS-START -->" docs/security-reports.md.bak; then
-            # Extract existing shellcheck section and update it
-            sed -n '/<!-- SHELLCHECK-RESULTS-START -->/,/<!-- SHELLCHECK-RESULTS-END -->/p' docs/security-reports.md.bak | sed '1d;$d'
-            echo "<!-- SHELLCHECK-RESULTS-START -->"
-          else
-            echo "<!-- SHELLCHECK-RESULTS-START -->"
-          fi
-
+          # Add shellcheck section
+          echo "<!-- SHELLCHECK-RESULTS-START -->"
           echo "## 🔍 Code Quality - Shellcheck Analysis"
           echo ""
           echo "**Status:** $SHELLCHECK_STATUS  "
@@ -475,7 +468,9 @@ jobs:
           else
             echo "### Issues Found"
             echo ""
-            cat results/shellcheck-table.md
+            if [[ -f "artifacts/shellcheck-results/shellcheck-table.md" ]]; then
+              cat artifacts/shellcheck-results/shellcheck-table.md
+            fi
             echo ""
             echo "### How to Fix"
             echo "1. Review the shellcheck findings above"
@@ -519,9 +514,6 @@ jobs:
 
         echo "Security reports documentation updated successfully!"
 
-    # ---------------------------------------------------------------------------
-    # Step: Commit and Push Documentation Updates
-    # ---------------------------------------------------------------------------
     - name: Commit and push changes
       run: |
         git config --local user.email "action@github.com"
@@ -563,9 +555,6 @@ jobs:
           echo "✅ Documentation updated with comprehensive security analysis results"
         fi
 
-    # ---------------------------------------------------------------------------
-    # Step: Create Pull Request Comment
-    # ---------------------------------------------------------------------------
     - name: Create PR comment (if applicable)
       if: github.event_name == 'pull_request'
       uses: actions/github-script@v7

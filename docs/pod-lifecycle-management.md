@@ -2,263 +2,443 @@
 
 ## Complete Pod Lifecycle Overview
 
+This sequence diagram shows the complete lifecycle of kube-dump operations, from initialization through cleanup. It illustrates the interactions between the user, the kube-dump script, debug pods, kill switch monitors, and discovery pods throughout the entire debugging session.
+
 ```mermaid
-graph TD
-    A[Kube-dump Start] --> B[Create Debug Pods]
-    B --> C[Create Kill Switch Monitor Pods]
-    C --> D[Debug Pods Running]
-    D --> E[Background Kill Switch Monitoring]
-    E --> F{User Action or<br/>Kill Switch Triggered?}
-    
-    F -->|User presses Enter| G[Manual Cleanup Path]
-    F -->|Kill switch triggered| H[Automatic Kill Path]
-    F -->|No-cleanup mode| I[Keep Pods Running Path]
-    
-    G --> J[Stop Kill Switch Monitoring]
-    J --> K[Delete Debug Pods]
-    K --> L[Delete Kill Switch Monitors]
-    L --> M{File Downloads<br/>Requested?}
-    
-    H --> N[Kill Switch Deletes Debug Pod]
-    N --> O[Monitor Pod Exits]
-    O --> P[Manual Cleanup of Monitors]
-    
-    I --> Q{File Downloads<br/>Requested?}
-    Q -->|Yes| R[Create Discovery Pods]
-    Q -->|No| S[End - Pods Still Running]
-    
-    M -->|Yes| R
-    M -->|No| T[Complete - All Cleaned]
-    
-    R --> U[Discovery Pods Running]
-    U --> V[Download Files]
-    V --> W[Delete Successful Discovery Pods]
-    W --> X[Keep Failed Discovery Pods]
-    X --> Y[Complete]
-    
-    style A fill:#e1f5fe
-    style F fill:#fff2cc
-    style N fill:#f8cecc
-    style T fill:#e8f5e8
-    style Y fill:#e8f5e8
-    style S fill:#fff3e0
+sequenceDiagram
+    participant U as User
+    participant KD as kube-dump.sh
+    participant K8s as Kubernetes API
+    participant DP as Debug Pods
+    participant KS as Kill Switch Monitors
+    participant DisP as Discovery Pods
+
+    Note over U,DisP: Pod Lifecycle Management - Complete Flow
+
+    U->>KD: Execute kube-dump command
+    KD->>K8s: Create debug pods
+    K8s->>DP: Deploy debug pods to nodes
+
+    KD->>K8s: Create kill switch monitor pods
+    K8s->>KS: Deploy monitor pods
+
+    DP->>KD: Debug pods ready
+    KS->>KD: Monitor pods ready
+
+    Note over DP,KS: Background Operations Active
+
+    par Debug Pod Execution
+        DP->>DP: Execute debug commands
+    and Kill Switch Monitoring
+        KS->>KS: Monitor storage thresholds
+    end
+
+    alt Manual Cleanup (User Input)
+        U->>KD: Press Enter to stop
+        KD->>KS: Stop kill switch monitoring
+        KD->>K8s: Delete debug pods
+        K8s->>DP: Terminate debug pods
+        KD->>K8s: Delete monitor pods
+        K8s->>KS: Terminate monitor pods
+
+        opt File Downloads Requested
+            KD->>K8s: Create discovery pods
+            K8s->>DisP: Deploy discovery pods
+            DisP->>DisP: Download files
+            KD->>K8s: Delete successful discovery pods
+            KD->>K8s: Keep failed discovery pods
+        end
+
+        KD->>U: Complete - all cleaned
+
+    else Kill Switch Triggered
+        KS->>K8s: Delete debug pod (threshold exceeded)
+        K8s->>DP: Terminate debug pod
+        KS->>KS: Monitor pod exits
+        KD->>K8s: Manual cleanup of monitors
+        K8s->>KS: Terminate monitor pods
+        KD->>U: Kill switch cleanup complete
+
+    else No-Cleanup Mode
+        KD->>U: Debug pods kept running
+
+        opt File Downloads Requested
+            KD->>K8s: Create discovery pods
+            K8s->>DisP: Deploy discovery pods
+            DisP->>DisP: Download files
+            KD->>K8s: Delete successful discovery pods
+            KD->>K8s: Keep failed discovery pods
+        end
+
+        KD->>U: End - pods still running
+    end
 ```
 
 ## Debug Pod Creation and Management
 
+This sequence diagram demonstrates how kube-dump creates and manages debug pods based on execution mode (pod-targeted, node-targeted, or mixed). It shows the interaction between the kube-dump script, Kubernetes API, and target resources during debug pod initialization.
+
 ```mermaid
-graph TD
-    A[Debug Pod Creation Request] --> B{Execution Mode?}
-    B -->|pod| C[Create Pod-targeted Debug Pods]
-    B -->|node| D[Create Node-targeted Debug Pods]
-    B -->|mixed| E[Create Both Types]
-    
-    C --> F[For Each Target Pod]
-    F --> G[Get Pod Details:<br/>name, container, node, namespace]
-    G --> H[Create Debug Pod Name:<br/>debug-{epoch}-{node}-{hash}]
-    H --> I[Apply Debug Pod Manifest]
-    I --> J[Pod Spec for Pod-targeting:<br/>- Image: DEBUG_IMAGE<br/>- Target PID namespace<br/>- Network namespace shared<br/>- Privileged: true]
-    
-    D --> K[For Each Target Node]
-    K --> L[Get Node Name]
-    L --> M[Create Node Debug Pod Name:<br/>node-debug-{epoch}-{node}]
-    M --> N[Apply Node Debug Manifest]
-    N --> O[Pod Spec for Node-targeting:<br/>- Image: DEBUG_IMAGE<br/>- Host networking: true<br/>- Host PID: true<br/>- Privileged: true]
-    
-    J --> P[Set Command with Placeholder Substitution]
-    O --> P
-    P --> Q[Add to DEBUG_POD_NAMES array]
-    Q --> R[Wait for Pod Ready]
-    R --> S{All Pods<br/>Ready?}
-    S -->|No| T[Continue Waiting]
-    S -->|Yes| U[Debug Pods Active]
-    
-    style B fill:#fff2cc
-    style S fill:#fff2cc
-    style I fill:#d5e8d4
-    style N fill:#d5e8d4
-    style U fill:#e8f5e8
+sequenceDiagram
+    participant KD as kube-dump.sh
+    participant K8s as Kubernetes API
+    participant TP as Target Pods
+    participant TN as Target Nodes
+    participant DP as Debug Pods
+
+    Note over KD,DP: Debug Pod Creation Process
+
+    KD->>KD: Analyze execution mode
+
+    alt Pod-targeted Mode
+        KD->>K8s: List target pods by selector
+        K8s->>TP: Retrieve pod details
+        TP->>KD: Return pod info (name, container, node, namespace)
+
+        loop For each target pod
+            KD->>KD: Generate debug pod name (debug-{epoch}-{node}-{hash})
+            KD->>K8s: Create pod manifest
+            Note right of KD: Pod Spec:<br/>- Image: DEBUG_IMAGE<br/>- Target PID namespace<br/>- Network namespace shared<br/>- Privileged: true
+            KD->>K8s: Apply debug pod manifest
+            K8s->>DP: Deploy pod to target node
+            KD->>KD: Add to DEBUG_POD_NAMES array
+        end
+
+    else Node-targeted Mode
+        KD->>K8s: List target nodes by selector
+        K8s->>TN: Retrieve node details
+        TN->>KD: Return node info (name)
+
+        loop For each target node
+            KD->>KD: Generate debug pod name (node-debug-{epoch}-{node})
+            KD->>K8s: Create node debug manifest
+            Note right of KD: Node Pod Spec:<br/>- Image: DEBUG_IMAGE<br/>- Host networking: true<br/>- Host PID: true<br/>- Privileged: true
+            KD->>K8s: Apply node debug manifest
+            K8s->>DP: Deploy pod to node
+            KD->>KD: Add to DEBUG_POD_NAMES array
+        end
+
+    else Mixed Mode
+        Note over KD,DP: Execute both pod and node flows
+        KD->>KD: Create both pod-targeted and node-targeted debug pods
+    end
+
+    KD->>KD: Apply placeholder substitution to commands
+
+    loop Wait for all pods
+        KD->>K8s: Check pod readiness
+        K8s->>DP: Query pod status
+        DP->>KD: Report pod status
+
+        alt Pods not ready
+            KD->>KD: Continue waiting
+        else All pods ready
+            KD->>KD: Debug pods active
+        end
+    end
+
+    DP->>KD: All debug pods ready for execution
 ```
 
 ## Kill Switch Monitor Pod Lifecycle
 
+This sequence diagram illustrates the kill switch monitoring system that protects against resource exhaustion. It shows how monitor pods continuously check storage thresholds and automatically terminate debug pods when limits are exceeded, ensuring system stability during debugging operations.
+
 ```mermaid
-graph TD
-    A[Kill Switch Configured] --> B[For Each Debug Pod]
-    B --> C[Create Monitor Pod:<br/>ks-{node}-{hash}]
-    C --> D[Monitor Pod Starts]
-    D --> E[Install bc Calculator]
-    E --> F[Start Storage Monitoring Loop]
-    
-    F --> G[Check Storage Every 10s]
-    G --> H{Threshold<br/>Exceeded?}
-    H -->|No| I[Continue Monitoring]
-    H -->|Yes| J[Execute Kill Command]
-    
-    I --> G
-    J --> K[kubectl delete pod DEBUG_POD]
-    K --> L[Wait for Pod Deletion]
-    L --> M[Log Kill Success]
-    M --> N[Monitor Pod Exits]
-    
-    N --> O[Background Monitoring Detects Exit]
-    O --> P[Clean up Monitor Pod Entry]
-    
-    style H fill:#fff2cc
-    style J fill:#f8cecc
-    style K fill:#ffebee
-    style N fill:#e8f5e8
+sequenceDiagram
+    participant KD as kube-dump.sh
+    participant K8s as Kubernetes API
+    participant KS as Kill Switch Monitor
+    participant DP as Debug Pod
+    participant BM as Background Monitor
+
+    Note over KD,BM: Kill Switch Protection System
+
+    KD->>KD: Kill switch configured
+
+    loop For each debug pod
+        KD->>K8s: Create monitor pod (ks-{node}-{hash})
+        K8s->>KS: Deploy monitor pod
+        KS->>KS: Install bc calculator
+        KS->>KS: Initialize storage monitoring loop
+
+        Note over KS: Monitor starts background process
+
+        loop Continuous monitoring (every 10s)
+            KS->>KS: Check storage usage
+            KS->>KS: Calculate threshold exceeded?
+
+            alt Threshold not exceeded
+                KS->>KS: Continue monitoring
+                Note right of KS: Normal operation
+
+            else Threshold exceeded
+                Note over KS,DP: KILL SWITCH ACTIVATED
+                KS->>K8s: Execute kill command
+                K8s->>DP: Delete debug pod
+                DP->>K8s: Pod terminating
+                K8s->>KS: Confirm deletion
+                KS->>KS: Log kill success
+                KS->>KS: Monitor pod exits
+                break
+            end
+        end
+    end
+
+    par Background monitoring
+        BM->>BM: Detect monitor pod exits
+        BM->>KD: Report monitor pod status
+        KD->>KD: Clean up monitor pod entries
+    end
+
+    Note over KD,BM: Automatic cleanup complete
 ```
 
 ## Discovery Pod Lifecycle (File Downloads)
 
+This sequence diagram shows the file download process using discovery pods. It demonstrates how kube-dump creates specialized pods for file operations, executes file selection commands, downloads files with retry logic, and manages pod cleanup based on operation success.
+
 ```mermaid
-graph TD
-    A[File Download Phase] --> B[Create Discovery Pods]
-    B --> C{Pod Type?}
-    C -->|Pod discovery| D[Create fd-{epoch}-{node}-{hash}]
-    C -->|Node discovery| E[Create nfd-{epoch}-{node}]
-    
-    D --> F[Pod Discovery Spec:<br/>- Same node as original debug pod<br/>- Host networking and PID<br/>- Privileged access<br/>- Mount /host read-write]
-    
-    E --> G[Node Discovery Spec:<br/>- Target node<br/>- Host networking and PID<br/>- Privileged access<br/>- Mount /host read-write]
-    
-    F --> H[Discovery Pod Active]
-    G --> H
-    H --> I[Execute File Selection Commands]
-    I --> J[Download Files with Retry]
-    J --> K[Remove Downloaded Files from Node]
-    K --> L{Download<br/>Successful?}
-    
-    L -->|Yes| M[Add to successful_pods array]
-    L -->|No| N[Add to failed_pods array]
-    
-    M --> O[Pod Marked for Deletion]
-    N --> P[Pod Kept for Inspection]
-    
-    O --> Q[kubectl delete successful pods]
-    P --> R[Display Failed Pods Info]
-    
-    Q --> S[Discovery Phase Complete]
-    R --> S
-    
-    style C fill:#fff2cc
-    style L fill:#fff2cc
-    style M fill:#e8f5e8
-    style N fill:#f8cecc
-    style S fill:#e1f5fe
+sequenceDiagram
+    participant KD as kube-dump.sh
+    participant K8s as Kubernetes API
+    participant DisP as Discovery Pod
+    participant FS as File System
+    participant LocalFS as Local Storage
+
+    Note over KD,LocalFS: File Download Operations
+
+    KD->>KD: File download phase initiated
+
+    alt Pod Discovery Mode
+        loop For each original debug pod
+            KD->>K8s: Create fd-{epoch}-{node}-{hash}
+            Note right of KD: Pod Discovery Spec:<br/>- Same node as debug pod<br/>- Host networking and PID<br/>- Privileged access<br/>- Mount /host read-write
+            K8s->>DisP: Deploy pod discovery pod
+        end
+
+    else Node Discovery Mode
+        loop For each target node
+            KD->>K8s: Create nfd-{epoch}-{node}
+            Note right of KD: Node Discovery Spec:<br/>- Target node<br/>- Host networking and PID<br/>- Privileged access<br/>- Mount /host read-write
+            K8s->>DisP: Deploy node discovery pod
+        end
+    end
+
+    DisP->>KD: Discovery pods active
+
+    loop For each discovery pod
+        KD->>DisP: Execute file selection commands
+        DisP->>FS: Search for files (placeholder substitution)
+        FS->>DisP: Return file list
+
+        loop For each file found
+            DisP->>DisP: Download file with retry (max 3 attempts)
+
+            alt Download successful
+                DisP->>LocalFS: Save file locally
+                DisP->>FS: Remove file from node
+                DisP->>KD: Download success
+                KD->>KD: Add to successful_pods array
+
+            else Download failed (after retries)
+                DisP->>KD: Download failed
+                KD->>KD: Add to failed_pods array
+            end
+        end
+
+        alt Pod had successful downloads
+            KD->>KD: Mark pod for deletion
+            KD->>K8s: Delete successful discovery pod
+            K8s->>DisP: Terminate pod
+
+        else Pod had failures
+            KD->>KD: Keep pod for inspection
+            Note right of KD: Failed pods remain<br/>for debugging
+        end
+    end
+
+    KD->>KD: Discovery phase complete
+    Note over KD: Failed pods display info for manual inspection
 ```
 
 ## Pod State Transitions
 
+This sequence diagram illustrates the various state transitions that pods undergo during their lifecycle in the kube-dump system. It shows how pods progress from creation through execution to termination, including the different triggers for state changes.
+
 ```mermaid
-stateDiagram-v2
-    [*] --> Pending: Pod created
-    Pending --> ContainerCreating: Scheduled to node
-    ContainerCreating --> Running: Container started
-    Running --> Running: Normal operation
-    
-    Running --> Terminating: Manual cleanup
-    Running --> Terminating: Kill switch triggered
-    Running --> Terminating: No-cleanup timeout
-    
-    Terminating --> [*]: Pod deleted
-    
-    Running --> Failed: Container crash
-    Failed --> [*]: Pod garbage collected
-    
-    note right of Running: Debug pods execute commands\nKill switch monitors storage\nDiscovery pods handle downloads
-    
-    note right of Terminating: Graceful shutdown\nFile cleanup\nResource release
+sequenceDiagram
+    participant K8s as Kubernetes Scheduler
+    participant Node as Kubernetes Node
+    participant Pod as Pod Instance
+    participant KD as kube-dump.sh
+    participant KS as Kill Switch
+
+    Note over K8s,KS: Pod State Lifecycle Transitions
+
+    K8s->>Pod: Create pod
+    Note right of Pod: State: Pending
+
+    K8s->>Node: Schedule pod to node
+    Node->>Pod: Start scheduling
+    Note right of Pod: State: ContainerCreating
+
+    Node->>Pod: Container image pulled & started
+    Note right of Pod: State: Running
+
+    par Normal Operations
+        Pod->>Pod: Execute debug commands
+        Pod->>Pod: Monitor storage (kill switch pods)
+        Pod->>Pod: Handle file downloads (discovery pods)
+    end
+
+    alt Manual Cleanup Trigger
+        KD->>Pod: Request termination
+        Note right of Pod: User pressed Enter
+        Pod->>Pod: State: Terminating
+        Pod->>K8s: Graceful shutdown
+        Pod->>Pod: File cleanup & resource release
+        K8s->>Pod: Pod deleted
+        Note right of Pod: State: [Terminated]
+
+    else Kill Switch Trigger
+        KS->>Pod: Force termination
+        Note right of Pod: Storage threshold exceeded
+        Pod->>Pod: State: Terminating
+        Pod->>K8s: Graceful shutdown
+        Pod->>Pod: File cleanup & resource release
+        K8s->>Pod: Pod deleted
+        Note right of Pod: State: [Terminated]
+
+    else No-cleanup Timeout
+        KD->>Pod: Timeout termination
+        Note right of Pod: Timeout reached
+        Pod->>Pod: State: Terminating
+        Pod->>K8s: Graceful shutdown
+        K8s->>Pod: Pod deleted
+        Note right of Pod: State: [Terminated]
+
+    else Container Crash
+        Pod->>Pod: Container failure
+        Note right of Pod: State: Failed
+        K8s->>Pod: Garbage collection
+        Note right of Pod: State: [Terminated]
+    end
+
+    Note over K8s,KS: Pod lifecycle complete
 ```
 
 ## Pod Resource Management
 
+This sequence diagram demonstrates how kube-dump manages pod resources through internal arrays and data structures. It shows the lifecycle of resource tracking from creation through cleanup, including the interaction between different operation types and pod states.
+
 ```mermaid
-graph LR
-    subgraph "Resource Arrays"
-        A[DEBUG_POD_NAMES[]]
-        B[KILL_SWITCH_MONITOR_PODS[]]
-        C[DISCOVERY_POD_NAMES[]]
-        D[DISCOVERY_POD_INFO[]]
+sequenceDiagram
+    participant KD as kube-dump.sh
+    participant Arrays as Resource Arrays
+    participant Ops as Operations Engine
+    participant PS as Pod States
+
+    Note over KD,PS: Resource Management System
+
+    KD->>Arrays: Initialize resource arrays
+    Note right of Arrays: DEBUG_POD_NAMES[]<br/>KILL_SWITCH_MONITOR_PODS[]<br/>DISCOVERY_POD_NAMES[]<br/>DISCOVERY_POD_INFO[]
+
+    par Pod Creation Operations
+        Ops->>Arrays: Add to DEBUG_POD_NAMES[]
+        Ops->>Arrays: Add to KILL_SWITCH_MONITOR_PODS[]
+        Ops->>Arrays: Add to DISCOVERY_POD_NAMES[]
+        Ops->>Arrays: Add to DISCOVERY_POD_INFO[]
     end
-    
-    subgraph "Operations"
-        E[Create Pods] --> A
-        E --> B
-        E --> C
-        E --> D
-        
-        F[Monitor Pods] --> A
-        F --> B
-        
-        G[Cleanup Pods] --> A
-        G --> B
-        G --> C
-        
-        H[File Operations] --> C
-        H --> D
+
+    Arrays->>PS: Update pod states
+    Note right of PS: Active Debug Pods<br/>Active Monitor Pods<br/>Active Discovery Pods<br/>Failed Discovery Pods
+
+    par Monitoring Operations
+        Ops->>Arrays: Query DEBUG_POD_NAMES[]
+        Arrays->>PS: Report Active Debug Pods
+        Ops->>Arrays: Query KILL_SWITCH_MONITOR_PODS[]
+        Arrays->>PS: Report Active Monitor Pods
     end
-    
-    subgraph "Pod States"
-        I[Active Debug Pods]
-        J[Active Monitor Pods]
-        K[Active Discovery Pods]
-        L[Failed Discovery Pods]
+
+    par File Operations
+        Ops->>Arrays: Access DISCOVERY_POD_NAMES[]
+        Arrays->>PS: Report Active Discovery Pods
+        Ops->>Arrays: Access DISCOVERY_POD_INFO[]
+        Arrays->>PS: Report Failed Discovery Pods
     end
-    
-    A -.-> I
-    B -.-> J
-    C -.-> K
-    D -.-> L
-    
-    style A fill:#e8f5e8
-    style B fill:#fff3e0
-    style C fill:#e0f2f1
-    style D fill:#f3e5f5
-    style I fill:#d5e8d4
-    style J fill:#fff2cc
-    style K fill:#b39ddb
-    style L fill:#f8cecc
+
+    par Cleanup Operations
+        Ops->>Arrays: Remove from DEBUG_POD_NAMES[]
+        Arrays->>PS: Update Active Debug Pods
+        Ops->>Arrays: Remove from KILL_SWITCH_MONITOR_PODS[]
+        Arrays->>PS: Update Active Monitor Pods
+        Ops->>Arrays: Remove from DISCOVERY_POD_NAMES[]
+        Arrays->>PS: Update Active Discovery Pods
+    end
+
+    PS->>KD: Resource management complete
+    Note over KD,PS: All pod resources tracked and managed
 ```
 
 ## Pod Cleanup Strategies
 
+This sequence diagram illustrates the various cleanup strategies available in kube-dump based on different termination scenarios. It shows how the system handles manual cleanup, no-cleanup mode, and kill switch activation, including the conditional file download operations.
+
 ```mermaid
-graph TD
-    A[Cleanup Phase] --> B{Cleanup Type?}
-    B -->|Manual cleanup| C[User pressed Enter]
-    B -->|No cleanup| D[--no-cleanup flag set]
-    B -->|Kill switch| E[Threshold exceeded]
-    
-    C --> F[Stop kill switch monitoring]
-    F --> G[Delete debug pods array]
-    G --> H[Delete monitor pods array]
-    H --> I{File downloads<br/>requested?}
-    
-    D --> J{File downloads<br/>requested?}
-    J -->|Yes| K[Keep debug pods running]
-    J -->|No| L[End - All pods kept]
-    
-    E --> M[Individual pod killed]
-    M --> N[Monitor pod exits]
-    N --> O[Remove from monitor array]
-    
-    I -->|Yes| P[Create discovery pods]
-    I -->|No| Q[Complete cleanup]
-    
-    K --> P
-    P --> R[Download files]
-    R --> S[Delete successful discovery pods]
-    S --> T[Keep failed discovery pods]
-    T --> U[Partial cleanup complete]
-    
-    style B fill:#fff2cc
-    style I fill:#fff2cc
-    style J fill:#fff2cc
-    style G fill:#ffebee
-    style H fill:#ffebee
-    style M fill:#f8cecc
-    style Q fill:#e8f5e8
-    style U fill:#fff3e0
+sequenceDiagram
+    participant U as User
+    participant KD as kube-dump.sh
+    participant K8s as Kubernetes API
+    participant DP as Debug Pods
+    participant KS as Kill Switch Monitors
+    participant DisP as Discovery Pods
+
+    Note over U,DisP: Cleanup Strategy Selection
+
+    KD->>KD: Determine cleanup type
+
+    alt Manual Cleanup
+        U->>KD: Press Enter to stop
+        KD->>KS: Stop kill switch monitoring
+        KD->>K8s: Delete debug pods array
+        K8s->>DP: Terminate all debug pods
+        KD->>K8s: Delete monitor pods array
+        K8s->>KS: Terminate all monitor pods
+
+        opt File downloads requested
+            KD->>K8s: Create discovery pods
+            K8s->>DisP: Deploy discovery pods
+            DisP->>DisP: Download files
+            KD->>K8s: Delete successful discovery pods
+            K8s->>DisP: Terminate successful pods
+            Note right of KD: Keep failed pods for inspection
+        end
+
+        KD->>U: Complete cleanup
+
+    else No-Cleanup Mode
+        Note over KD: --no-cleanup flag set
+
+        opt File downloads requested
+            KD->>KD: Keep debug pods running
+            KD->>K8s: Create discovery pods
+            K8s->>DisP: Deploy discovery pods
+            DisP->>DisP: Download files
+            KD->>K8s: Delete successful discovery pods
+            K8s->>DisP: Terminate successful pods
+            KD->>U: Partial cleanup complete (debug pods kept)
+        else No file downloads
+            KD->>U: End - all pods kept running
+        end
+
+    else Kill Switch Activation
+        KS->>K8s: Individual pod killed (threshold exceeded)
+        K8s->>DP: Terminate specific debug pod
+        KS->>KS: Monitor pod exits
+        KD->>KD: Remove from monitor array
+        KD->>U: Kill switch cleanup for specific pod
+    end
+
+    Note over U,DisP: Cleanup strategy completed
 ```

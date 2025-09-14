@@ -1,184 +1,118 @@
 # Kube-Dump Script Workflow Diagram
 
+This comprehensive sequence diagram illustrates the complete kube-dump.sh script workflow from startup through completion. It demonstrates the interaction between the user, script components, Kubernetes API, and various processes throughout all execution phases including initialization, validation, target discovery, debug pod creation, monitoring, cleanup, and file operations.
+
 ```mermaid
-flowchart TD
-    %% Styling definitions
-    classDef initProcess fill:#E1F5FE,stroke:#0288D1,stroke-width:3px,color:#000
-    classDef validationProcess fill:#F3E5F5,stroke:#7B1FA2,stroke-width:3px,color:#000
-    classDef discoveryProcess fill:#E8F5E8,stroke:#388E3C,stroke-width:3px,color:#000
-    classDef debugPodProcess fill:#FFF3E0,stroke:#F57C00,stroke-width:3px,color:#000
-    classDef executionProcess fill:#FFEBEE,stroke:#D32F2F,stroke-width:3px,color:#000
-    classDef fileProcess fill:#F1F8E9,stroke:#689F38,stroke-width:3px,color:#000
-    classDef cleanupProcess fill:#FCE4EC,stroke:#C2185B,stroke-width:3px,color:#000
-    classDef decision fill:#FFF8E1,stroke:#FFA000,stroke-width:2px,color:#000
-    classDef dataStore fill:#E0F2F1,stroke:#00695C,stroke-width:2px,color:#000
-    classDef terminal fill:#ECEFF1,stroke:#37474F,stroke-width:2px,color:#000
-    classDef error fill:#FFCDD2,stroke:#D32F2F,stroke-width:2px,color:#000
+sequenceDiagram
+    participant User as User
+    participant KD as kube-dump.sh
+    participant CLI as Kubernetes CLI
+    participant K8s as Kubernetes API
+    participant CRI as CRI Runtime
+    participant DP as Debug Pods
+    participant Discovery as Discovery Pods
+    participant DS as Data Stores
 
-    %% Main Flow Start
-    START([🚀 Start kube-dump.sh]):::terminal
-    
-    %% PHASE 1: Initialization
-    INIT[🔧 Initialize Variables<br/>• Default labels, commands, arrays<br/>• CRI runtime settings<br/>• Placeholder characters]:::initProcess
-    
-    DETECT[🔍 Detect Kube CLI<br/>• Check for 'oc' or 'kubectl'<br/>• Set KUBE_CLI variable]:::initProcess
-    
-    PARSE[📋 Parse Arguments<br/>• Process all CLI flags<br/>• Validate option values<br/>• Set execution parameters]:::initProcess
-    
-    %% Argument validation decision
-    NO_ARGS{No arguments<br/>provided?}:::decision
-    USAGE[📖 Show Usage & Exit]:::terminal
-    
-    %% PHASE 2: Validation
-    VALIDATE[✅ Validate Arguments<br/>• Check required parameters<br/>• Validate enum values<br/>• Set execution mode]:::validationProcess
-    
-    MODE_CHECK{Execution Mode?}:::decision
-    
-    CLUSTER_VAL[🔐 Validate Cluster Access<br/>• Check pod creation permissions<br/>• Verify cluster connectivity]:::validationProcess
-    
-    %% PHASE 3: Target Discovery
-    POD_SELECT[📦 Select Target Pods<br/>• Query by label selector<br/>• Get pod info: name:containers:node<br/>• Filter running pods]:::discoveryProcess
-    
-    NODE_SELECT[🖥️ Select Target Nodes<br/>• Query by node label selector<br/>• Build node list<br/>• Handle --include-nodes flag]:::discoveryProcess
-    
-    PREPARE_PODS[🎯 Prepare Target Pods<br/>• Verify pod status (Running)<br/>• Select first container for PID<br/>• Build TARGET_PODS array]:::discoveryProcess
-    
-    %% PHASE 4: Debug Pod Creation
-    POD_DEBUG[🚀 Create Pod Debug Pods<br/>• Generate unique pod names<br/>• Create privileged netshoot pods<br/>• Mount host filesystem<br/>• Inject debug script]:::debugPodProcess
-    
-    NODE_DEBUG[🚀 Create Node Debug Pods<br/>• Generate unique pod names<br/>• Use host networking + PID<br/>• Create privileged containers<br/>• Mount host root]:::debugPodProcess
-    
-    WAIT_READY[⏳ Wait for Debug Pods Ready<br/>• Check pod phase = Running<br/>• Track failed pods<br/>• Timeout after 60s]:::debugPodProcess
-    
-    %% PHASE 5: Execution Monitoring
-    MONITOR[📊 Monitor Execution<br/>• Show kubectl logs commands<br/>• Display manual cleanup commands<br/>• Wait for user input]:::executionProcess
-    
-    %% PHASE 6: Cleanup Decision
-    NO_CLEANUP_FLAG{--no-cleanup<br/>flag set?}:::decision
-    
-    USER_INPUT[⏸️ Wait for User Input<br/>• Press Enter to cleanup<br/>• Ctrl+C to keep running]:::executionProcess
-    
-    %% PHASE 7: Cleanup
-    CLEANUP_DEBUG[🧹 Cleanup Debug Pods<br/>• Delete all debug pods<br/>• Ignore not found errors]:::cleanupProcess
-    
-    %% PHASE 8: File Operations
-    FILE_DOWNLOAD_CHECK{File download<br/>requested?}:::decision
-    
-    CREATE_DISCOVERY[🔍 Create Discovery Pods<br/>• Generate unique names<br/>• Use Ubuntu image + tail -f<br/>• Mount host filesystem<br/>• Privileged access]:::fileProcess
-    
-    WAIT_DISCOVERY[⏳ Wait Discovery Pods Ready<br/>• Check Running status<br/>• Timeout after 120s]:::fileProcess
-    
-    DOWNLOAD_FILES[📥 Download Files<br/>• Execute select commands<br/>• Apply placeholder substitution<br/>• Copy files with kubectl cp<br/>• Clean up downloaded files]:::fileProcess
-    
-    CLEANUP_DISCOVERY[🧹 Cleanup Discovery Pods<br/>• Delete successful pods<br/>• Keep failed pods for inspection]:::fileProcess
-    
-    %% Terminal states
-    COMPLETE[🎉 Complete!<br/>All operations finished]:::terminal
-    NO_CLEANUP_COMPLETE[🔧 Debug pods still running<br/>Use kubectl logs to monitor]:::terminal
-    ERROR[❌ Error Exit]:::error
-    
-    %% Data stores
-    POD_NAMES[(POD_NAMES[]<br/>Pod discovery results)]:::dataStore
-    NODE_NAMES[(NODE_NAMES[]<br/>Node discovery results)]:::dataStore
-    TARGET_PODS[(TARGET_PODS[]<br/>Pod:container:node)]:::dataStore
-    TARGET_NODES[(TARGET_NODES[]<br/>Node names)]:::dataStore
-    DEBUG_POD_NAMES[(DEBUG_POD_NAMES[]<br/>Created debug pods)]:::dataStore
-    DISCOVERY_POD_INFO[(DISCOVERY_POD_INFO[]<br/>Discovery pod metadata)]:::dataStore
-    
-    %% CRI Configuration Subprocess
-    CRI_CONFIG[⚙️ CRI Configuration<br/>• Configure crictl socket<br/>• Handle containerd/crio/docker<br/>• Install dependencies if needed]:::initProcess
-    
-    %% Debug Script Generation
-    POD_SCRIPT[📜 Generate Pod Debug Script<br/>• Find container PID via CRI<br/>• Use nsenter for network namespace<br/>• Execute command with placeholder substitution<br/>• Handle custom vs default commands]:::debugPodProcess
-    
-    NODE_SCRIPT[📜 Generate Node Debug Script<br/>• Execute directly on host<br/>• Apply placeholder substitution<br/>• Install CRI deps if requested]:::debugPodProcess
+    Note over User,DS: Kube-Dump Complete Script Workflow
 
-    %% Main flow connections
-    START --> INIT
-    INIT --> DETECT
-    DETECT --> PARSE
-    PARSE --> NO_ARGS
-    NO_ARGS -->|Yes| USAGE
-    NO_ARGS -->|No| VALIDATE
-    VALIDATE --> MODE_CHECK
-    MODE_CHECK -->|Pod Mode| POD_SELECT
-    MODE_CHECK -->|Node Mode| NODE_SELECT
-    MODE_CHECK -->|Mixed Mode| POD_SELECT
-    MODE_CHECK -->|Mixed Mode| NODE_SELECT
-    
-    %% Validation phase
-    VALIDATE --> CLUSTER_VAL
-    CLUSTER_VAL -->|Failed| ERROR
-    
-    %% Pod discovery flow
-    POD_SELECT --> POD_NAMES
-    POD_NAMES --> PREPARE_PODS
-    PREPARE_PODS --> TARGET_PODS
-    TARGET_PODS --> POD_DEBUG
-    
-    %% Node discovery flow  
-    NODE_SELECT --> NODE_NAMES
-    NODE_NAMES --> TARGET_NODES
-    TARGET_NODES --> NODE_DEBUG
-    
-    %% Debug pod creation
-    POD_DEBUG --> POD_SCRIPT
-    POD_SCRIPT --> CRI_CONFIG
-    NODE_DEBUG --> NODE_SCRIPT
-    
-    CRI_CONFIG --> DEBUG_POD_NAMES
-    POD_DEBUG --> DEBUG_POD_NAMES
-    NODE_DEBUG --> DEBUG_POD_NAMES
-    DEBUG_POD_NAMES --> WAIT_READY
-    
-    WAIT_READY -->|Success| MONITOR
-    WAIT_READY -->|Failed| ERROR
-    
-    %% Execution monitoring
-    MONITOR --> NO_CLEANUP_FLAG
-    NO_CLEANUP_FLAG -->|Yes| FILE_DOWNLOAD_CHECK
-    NO_CLEANUP_FLAG -->|No| USER_INPUT
-    USER_INPUT --> CLEANUP_DEBUG
-    CLEANUP_DEBUG --> FILE_DOWNLOAD_CHECK
-    
-    %% File operations
-    FILE_DOWNLOAD_CHECK -->|No| COMPLETE
-    FILE_DOWNLOAD_CHECK -->|Yes| CREATE_DISCOVERY
-    CREATE_DISCOVERY --> DISCOVERY_POD_INFO
-    DISCOVERY_POD_INFO --> WAIT_DISCOVERY
-    WAIT_DISCOVERY -->|Success| DOWNLOAD_FILES
-    WAIT_DISCOVERY -->|Failed| ERROR
-    DOWNLOAD_FILES --> CLEANUP_DISCOVERY
-    CLEANUP_DISCOVERY --> COMPLETE
-    
-    %% No cleanup path
-    FILE_DOWNLOAD_CHECK -->|Yes + No Cleanup| CREATE_DISCOVERY
-    CLEANUP_DISCOVERY -->|No Cleanup Mode| NO_CLEANUP_COMPLETE
-    FILE_DOWNLOAD_CHECK -->|No + No Cleanup| NO_CLEANUP_COMPLETE
+    User->>KD: 🚀 Start kube-dump.sh with arguments
 
-    %% Error handling
-    POD_SELECT -->|Failed| ERROR
-    NODE_SELECT -->|Failed| ERROR
-    PREPARE_PODS -->|Failed| ERROR
-    POD_DEBUG -->|Failed| ERROR
-    NODE_DEBUG -->|Failed| ERROR
-    CREATE_DISCOVERY -->|Failed| ERROR
+    Note over KD,DS: PHASE 1: Initialization
 
-    %% Legend Section
-    subgraph LEGEND [" 📋 LEGEND "]
-        direction TB
-        L1[🔧 Initialization Process]:::initProcess
-        L2[✅ Validation Process]:::validationProcess  
-        L3[🔍 Discovery Process]:::discoveryProcess
-        L4[🚀 Debug Pod Process]:::debugPodProcess
-        L5[📊 Execution Process]:::executionProcess
-        L6[📥 File Operations]:::fileProcess
-        L7[🧹 Cleanup Process]:::cleanupProcess
-        L8{Decision Point}:::decision
-        L9[(Data Store)]:::dataStore
-        L10([Terminal State]):::terminal
-        L11[❌ Error State]:::error
+    KD->>KD: 🔧 Initialize variables (labels, commands, arrays, CRI settings)
+    KD->>CLI: 🔍 Detect Kubernetes CLI (oc or kubectl)
+    CLI->>KD: Return detected CLI tool
+    KD->>KD: 📋 Parse and validate arguments
+
+    alt No arguments provided
+        KD->>User: 📖 Show usage and exit
+    else Arguments provided
+        Note over KD,DS: PHASE 2: Validation
+        KD->>KD: ✅ Validate arguments and set execution mode
+        KD->>K8s: 🔐 Validate cluster access and permissions
+        K8s->>KD: Confirm cluster connectivity
+
+        Note over KD,DS: PHASE 3: Target Discovery
+
+        alt Pod Mode
+            KD->>CLI: 📦 Select target pods by label selector
+            CLI->>K8s: Query pods matching selector
+            K8s->>DS: Store POD_NAMES[] results
+            KD->>DS: 🎯 Prepare target pods (verify Running status, build TARGET_PODS[])
+
+        else Node Mode
+            KD->>CLI: 🖥️ Select target nodes by label selector
+            CLI->>K8s: Query nodes matching selector
+            K8s->>DS: Store NODE_NAMES[] results
+            KD->>DS: Build TARGET_NODES[] array
+
+        else Mixed Mode
+            KD->>CLI: Handle both pod and node selection
+            CLI->>K8s: Query both pods and nodes
+            K8s->>DS: Store both POD_NAMES[] and NODE_NAMES[]
+        end
+
+        Note over KD,DS: PHASE 4: Debug Pod Creation
+
+        alt Pod Debug Creation
+            KD->>K8s: 🚀 Create pod debug pods (privileged netshoot containers)
+            KD->>CRI: ⚙️ Configure CRI runtime (containerd/crio/docker)
+            KD->>KD: 📜 Generate pod debug scripts with nsenter
+            K8s->>DP: Deploy debug pods with host filesystem mounts
+
+        else Node Debug Creation
+            KD->>K8s: 🚀 Create node debug pods (host networking + PID)
+            KD->>KD: 📜 Generate node debug scripts
+            K8s->>DP: Deploy node debug pods with host access
+        end
+
+        KD->>DS: Store DEBUG_POD_NAMES[] array
+        KD->>DP: ⏳ Wait for debug pods ready (timeout 60s)
+        DP->>KD: All pods running and ready
+
+        Note over KD,DS: PHASE 5: Execution Monitoring
+
+        KD->>DP: Start debug command execution
+        KD->>User: 📊 Show monitoring commands and manual cleanup instructions
+
+        Note over KD,DS: PHASE 6: Cleanup Decision
+
+        alt --no-cleanup flag set
+            alt File download requested
+                Note over KD,DS: PHASE 8: File Operations (No Cleanup Mode)
+                KD->>K8s: 🔍 Create discovery pods (Ubuntu + tail -f)
+                K8s->>Discovery: Deploy discovery pods with host filesystem access
+                KD->>DS: Store DISCOVERY_POD_INFO[] metadata
+                KD->>Discovery: ⏳ Wait for discovery pods ready (timeout 120s)
+                Discovery->>Discovery: 📥 Execute file selection and download with retry
+                KD->>K8s: 🧹 Cleanup successful discovery pods only
+                KD->>User: 🔧 Debug pods still running - use kubectl logs to monitor
+            else No file download
+                KD->>User: 🔧 Debug pods still running - use kubectl logs to monitor
+            end
+
+        else Standard cleanup mode
+            KD->>User: ⏸️ Wait for user input (Press Enter to cleanup)
+            User->>KD: User presses Enter
+
+            Note over KD,DS: PHASE 7: Cleanup
+            KD->>K8s: 🧹 Delete all debug pods (ignore not found errors)
+            K8s->>DP: Terminate debug pods
+
+            alt File download requested
+                Note over KD,DS: PHASE 8: File Operations
+                KD->>K8s: 🔍 Create discovery pods
+                K8s->>Discovery: Deploy discovery pods
+                Discovery->>Discovery: 📥 Download files with placeholder substitution
+                KD->>K8s: 🧹 Delete successful discovery pods, keep failed for inspection
+                KD->>User: 🎉 Complete - all operations finished
+            else No file download
+                KD->>User: 🎉 Complete - all operations finished
+            end
+        end
     end
+
+    Note over User,DS: Script execution completed successfully
 ```
 
 ## Key Features Visualized:
