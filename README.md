@@ -59,14 +59,15 @@ git clone <repository-url> && cd kube-dump && chmod +x kube-dump.sh
 
 | Component | Status | Last Updated |
 |-----------|--------|--------------|
-| **Container Security** |  | Automated |
-| **Code Quality** | ✅ PASSED | Automated |
+| **Container Security** | 🔴 CRITICAL ISSUES FOUND | 2025-09-14 07:52:54 UTC |
+| **Code Quality** | ✅ Passing | 2025-09-14 07:52:54 UTC |
 
-**Vulnerability Summary:** Automated security scanning in progress
+**Vulnerability Summary:** Critical: 14, High: 110, Medium: 137, Low: 15
 
 📋 [View Detailed Security Reports](docs/security-reports.md) for complete vulnerability analysis and recommendations.
 
 <!-- SECURITY-DASHBOARD-END -->
+
 
 ---
 
