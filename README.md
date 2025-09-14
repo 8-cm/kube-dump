@@ -53,6 +53,21 @@ git clone <repository-url> && cd kube-dump && chmod +x kube-dump.sh
 - 🐛 [Issues](https://github.com/your-org/kube-dump/issues) - Bug reports and feature requests
 - 💡 [Discussions](https://github.com/your-org/kube-dump/discussions) - Questions and community
 
+<!-- SECURITY-DASHBOARD-START -->
+
+## 🛡️ Security Status
+
+| Component | Status | Last Updated |
+|-----------|--------|--------------|
+| **Container Security** | 🔄 Scanning | Automated |
+| **Code Quality** | 🔄 Analyzing | Automated |
+
+**Vulnerability Summary:** Automated security scanning in progress
+
+📋 [View Detailed Security Reports](docs/security-reports.md) for complete vulnerability analysis and recommendations.
+
+<!-- SECURITY-DASHBOARD-END -->
+
 ---
 
 **Quick tip**: Use `./kube-dump.sh -h` to see all available options and examples.

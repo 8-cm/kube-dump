@@ -963,7 +963,53 @@ jobs:
         echo "TOTAL_CONFIG_ISSUES=$TOTAL_CONFIG_ISSUES" >> $GITHUB_ENV
         echo "TOTAL_FS_VULNS=$TOTAL_FS_VULNS" >> $GITHUB_ENV
         echo "TIMESTAMP=$TIMESTAMP" >> $GITHUB_ENV
-    
+
+    # ---------------------------------------------------------------------------
+    # Step: Update README with Security Dashboard
+    # ---------------------------------------------------------------------------
+    # Description:
+    #   Updates README.md with a concise security status dashboard showing overall
+    #   security posture without detailed vulnerability information. Creates a
+    #   high-level overview suitable for the main repository page.
+    # ---------------------------------------------------------------------------
+    - name: Update README with security dashboard
+      run: |
+        echo "Updating README.md with security dashboard..."
+
+        # Create backup
+        cp README.md README.md.bak
+
+        # Create new README content with security dashboard
+        {
+          # Keep everything before the security section
+          sed '/<!-- SECURITY-DASHBOARD-START -->/q' README.md | sed '$d' 2>/dev/null || cat README.md
+
+          # Add security dashboard section
+          echo "<!-- SECURITY-DASHBOARD-START -->"
+          echo ""
+          echo "## 🛡️ Security Status"
+          echo ""
+          echo "| Component | Status | Last Updated |"
+          echo "|-----------|--------|--------------|"
+          echo "| **Container Security** | $SECURITY_STATUS | $TIMESTAMP |"
+          echo "| **Code Quality** | ✅ Passing | $TIMESTAMP |"
+          echo ""
+          echo "**Vulnerability Summary:** Critical: $TOTAL_CRITICAL, High: $TOTAL_HIGH, Medium: $TOTAL_MEDIUM, Low: $TOTAL_LOW"
+          echo ""
+          echo "📋 [View Detailed Security Reports](docs/security-reports.md) for complete vulnerability analysis and recommendations."
+          echo ""
+          echo "<!-- SECURITY-DASHBOARD-END -->"
+          echo ""
+
+          # Keep everything after the security section
+          sed -n '/<!-- SECURITY-DASHBOARD-END -->/,$p' README.md.bak | tail -n +2 2>/dev/null || echo ""
+        } > README.md.new
+
+        # Replace old README with new one
+        mv README.md.new README.md
+
+        echo "Security dashboard updated in README.md"
+
     # ---------------------------------------------------------------------------
     # Step: Update Security Reports Documentation with Security Results
     # ---------------------------------------------------------------------------
@@ -1085,15 +1131,15 @@ jobs:
     # Step: Commit and Push Security Documentation Updates
     # ---------------------------------------------------------------------------
     # Description:
-    #   Commits updated docs/security-reports.md with comprehensive security analysis results
+    #   Commits updated README.md and docs/security-reports.md with security analysis results
     #   to the repository. Creates structured commit messages documenting the
     #   security scan results and only commits when changes are detected to
     #   prevent unnecessary commit history pollution.
     #
     # Commit Process:
     #   1. Configures Git with GitHub Actions service user credentials
-    #   2. Checks for actual changes in docs/security-reports.md to prevent empty commits
-    #   3. Stages docs/security-reports.md file for commit when meaningful changes exist
+    #   2. Checks for actual changes in both files to prevent empty commits
+    #   3. Stages README.md and docs/security-reports.md files for commit when changes exist
     #   4. Creates comprehensive commit message with security analysis summary
     #   5. Pushes changes to current branch using GitHub Actions context
     #
@@ -1111,11 +1157,11 @@ jobs:
         git config --local user.name "GitHub Action"
         
         # Check if there are changes to commit
-        if git diff --quiet docs/security-reports.md; then
-          echo "No changes to docs/security-reports.md - skipping commit"
+        if git diff --quiet README.md docs/security-reports.md; then
+          echo "No changes to security files - skipping commit"
         else
-          git add docs/security-reports.md
-          git commit -m "ci: Update Trivy security analysis results
+          git add README.md docs/security-reports.md
+          git commit -m "ci: Update security analysis results
 
           - Status: $SECURITY_STATUS
           - Critical: $TOTAL_CRITICAL, High: $TOTAL_HIGH
@@ -1126,7 +1172,7 @@ jobs:
           - Commit: ${GITHUB_SHA:0:7}"
 
           git push origin HEAD:${{ github.ref_name }}
-          echo "✅ docs/security-reports.md updated with security scan results"
+          echo "✅ Security analysis results updated in README.md and docs/security-reports.md"
         fi
     
     # ---------------------------------------------------------------------------

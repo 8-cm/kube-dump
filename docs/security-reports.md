@@ -51,97 +51,30 @@ Security scan results will appear below when the automated workflows complete th
 
 ---
 
-## Manual Security Review
+## Default Container Image Information
 
 ### Container Images
-kube-dump uses the following container images:
-- **nicolaka/netshoot:latest** - Default debug container image
-- User-configurable with `--image` parameter
+kube-dump uses the following default container image:
+- **nicolaka/netshoot:latest** - Default debug container image (not affiliated with kube-dump)
+- User-configurable with `--image` parameter to use alternative images
 
-### Privilege Requirements
-kube-dump requires elevated privileges to:
-- Create privileged pods with host access
-- Mount host filesystems for file operations
-- Access container runtime sockets for namespace operations
-- Execute commands in pod network namespaces
+### Image Disclaimer
+The default netshoot image is maintained by nicolaka and is not related to the authors of kube-dump. Users can specify alternative container images using the `--image` parameter based on their security requirements and organizational policies.
 
-### Security Best Practices
+### Pod Design Philosophy
+kube-dump creates short-lived debugging pods that are intended to be temporary. The pods are designed to:
+- Execute specific debugging tasks
+- Collect required data efficiently
+- Terminate automatically or on user command
+- Clean up resources after completion
 
-#### RBAC Configuration
-Implement least-privilege RBAC:
-```yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: kube-dump-user
-rules:
-- apiGroups: [""]
-  resources: ["pods", "pods/log", "pods/exec"]
-  verbs: ["create", "delete", "get", "list", "watch"]
-- apiGroups: [""]
-  resources: ["nodes"]
-  verbs: ["get", "list"]
-```
+### Vulnerability Context
+The vulnerability reports below reflect the security status of the default nicolaka/netshoot image at the time of scanning. This information is provided to help users make informed decisions about:
+- Whether to use the default image or specify alternatives
+- Understanding potential security exposure during debugging sessions
+- Planning security reviews and compliance assessments
 
-#### Network Policies
-Consider implementing network policies to restrict debug pod communications:
-```yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: kube-dump-debug-pods
-spec:
-  podSelector:
-    matchLabels:
-      app: kube-dump-debug
-  policyTypes:
-  - Ingress
-  - Egress
-  egress:
-  - {} # Allow all egress for debugging
-```
-
-#### Resource Limits
-Apply resource limits to debug pods to prevent resource exhaustion:
-```bash
-# Example with resource constraints
-./kube-dump.sh -l app=web --resource-limits "cpu=500m,memory=512Mi"
-```
-
-### Security Considerations
-
-#### Data Exposure
-- Debug pods have privileged access to host systems
-- Network captures may contain sensitive data
-- Downloaded files should be handled securely
-- Log files may contain authentication tokens or secrets
-
-#### Access Control
-- Limit kube-dump usage to authorized personnel
-- Use namespaced RBAC where possible
-- Monitor debug pod creation and execution
-- Implement session logging and audit trails
-
-#### Kill Switch Protection
-Always use kill switches in production environments:
-```bash
-# Recommended for production use
-./kube-dump.sh -l app=prod --kill-switch-abs 1GB --kill-switch-rel 10
-```
-
-## Compliance & Auditing
-
-### SOC 2 Considerations
-- All debug operations are logged when using `-o` flag
-- Kill switches provide automatic termination controls
-- RBAC integration supports access control requirements
-- Pod lifecycle management ensures resource cleanup
-
-### GDPR & Data Privacy
-- Network captures may contain personal data
-- File downloads should be reviewed for sensitive content
-- Session logs contain execution details and timestamps
-- Implement data retention policies for debug outputs
+Since debug pods are short-lived and run in controlled debugging scenarios, users should evaluate these findings in the context of their specific security requirements and operational constraints.
 
 ## Vulnerability Disclosure
 

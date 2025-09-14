@@ -291,18 +291,76 @@ jobs:
         git diff docs/security-reports.md.bak docs/security-reports.md || echo "No git diff available"
     
     # ---------------------------------------------------------------------------
-    # Step: Commit and Push Documentation Updates
-    # ---------------------------------------------------------------------------  
+    # Step: Update README with Security Dashboard
+    # ---------------------------------------------------------------------------
     # Description:
-    #   Commits the updated docs/security-reports.md file to the repository with structured
+    #   Updates the README.md security dashboard section with current shellcheck
+    #   analysis status. This maintains a concise security overview in the main
+    #   project README while preserving detailed results in security-reports.md.
+    #
+    # Dashboard Update Process:
+    #   1. Creates backup of existing README.md for safety
+    #   2. Preserves content before security dashboard section
+    #   3. Updates Code Quality status with current shellcheck results
+    #   4. Preserves content after security dashboard section
+    #   5. Maintains structured table format for consistent presentation
+    # ---------------------------------------------------------------------------
+    - name: Update README with security dashboard
+      run: |
+        echo "Updating README.md with security dashboard..."
+
+        # Create backup
+        cp README.md README.md.bak
+
+        # Create new README content with security dashboard
+        {
+          # Keep everything before the security dashboard
+          sed '/<!-- SECURITY-DASHBOARD-START -->/q' README.md | sed '$d' 2>/dev/null || cat README.md
+          echo "<!-- SECURITY-DASHBOARD-START -->"
+          echo ""
+          echo "## 🛡️ Security Status"
+          echo ""
+          echo "| Component | Status | Last Updated |"
+          echo "|-----------|--------|--------------|"
+
+          # Get container security status from security-reports.md if it exists
+          if grep -q "Container Security" docs/security-reports.md 2>/dev/null; then
+            CONTAINER_STATUS=$(grep -A 10 "Container Security" docs/security-reports.md | grep "Status:" | head -1 | sed 's/.*Status: *//' | sed 's/ .*//' || echo "🔄 Scanning")
+          else
+            CONTAINER_STATUS="🔄 Scanning"
+          fi
+
+          echo "| **Container Security** | $CONTAINER_STATUS | Automated |"
+          echo "| **Code Quality** | $SHELLCHECK_STATUS | Automated |"
+          echo ""
+          echo "**Vulnerability Summary:** Automated security scanning in progress"
+          echo ""
+          echo "📋 [View Detailed Security Reports](docs/security-reports.md) for complete vulnerability analysis and recommendations."
+          echo ""
+          echo "<!-- SECURITY-DASHBOARD-END -->"
+
+          # Keep everything after the security dashboard
+          sed -n '/<!-- SECURITY-DASHBOARD-END -->/,$p' README.md.bak | tail -n +2 2>/dev/null || echo ""
+        } > README.md.new
+
+        # Replace old README with new one
+        mv README.md.new README.md
+
+        echo "README.md security dashboard updated successfully!"
+
+    # ---------------------------------------------------------------------------
+    # Step: Commit and Push Documentation Updates
+    # ---------------------------------------------------------------------------
+    # Description:
+    #   Commits the updated docs/security-reports.md and README.md files to the repository with structured
     #   commit messages documenting the shellcheck analysis results. This step
     #   only commits when changes are detected, preventing unnecessary commits
     #   when analysis results remain unchanged.
     #
     # Commit Process:
     #   1. Configures Git with GitHub Actions user credentials
-    #   2. Checks for changes in docs/security-reports.md to prevent empty commits
-    #   3. Stages docs/security-reports.md file for commit when changes exist
+    #   2. Checks for changes in both documentation files to prevent empty commits
+    #   3. Stages both docs/security-reports.md and README.md files when changes exist
     #   4. Creates structured commit message with analysis summary
     #   5. Pushes changes to the current branch using GitHub Actions context
     #
@@ -316,21 +374,37 @@ jobs:
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
-        
+
         # Check if there are changes to commit
-        if git diff --quiet docs/security-reports.md; then
-          echo "No changes to docs/security-reports.md - skipping commit"
+        CHANGES_DETECTED=false
+
+        if ! git diff --quiet docs/security-reports.md; then
+          echo "Changes detected in docs/security-reports.md"
+          CHANGES_DETECTED=true
+        fi
+
+        if ! git diff --quiet README.md; then
+          echo "Changes detected in README.md"
+          CHANGES_DETECTED=true
+        fi
+
+        if [ "$CHANGES_DETECTED" = false ]; then
+          echo "No changes to documentation files - skipping commit"
         else
-          git add docs/security-reports.md
+          git add docs/security-reports.md README.md
           git commit -m "ci: Update shellcheck analysis results
 
           - Status: $SHELLCHECK_STATUS
           - Issues: $ISSUE_COUNT
           - Timestamp: $TIMESTAMP
-          - Commit: ${GITHUB_SHA:0:7}"
+          - Commit: ${GITHUB_SHA:0:7}
+
+          Updated files:
+          - docs/security-reports.md (detailed shellcheck results)
+          - README.md (security dashboard status)"
 
           git push origin HEAD:${{ github.ref_name }}
-          echo "✅ docs/security-reports.md updated with shellcheck results"
+          echo "✅ Documentation updated with shellcheck results"
         fi
     
     # ---------------------------------------------------------------------------
