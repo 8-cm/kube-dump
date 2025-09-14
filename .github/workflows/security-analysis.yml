@@ -224,29 +224,29 @@ jobs:
           echo "Results for $IMAGE: C:$CRITICAL H:$HIGH M:$MEDIUM L:$LOW U:$UNKNOWN"
 
           # Create clean results.env file
-          cat > scan-results/results.env << EOF
-IMAGE=$IMAGE
-CRITICAL=$CRITICAL
-HIGH=$HIGH
-MEDIUM=$MEDIUM
-LOW=$LOW
-UNKNOWN=$UNKNOWN
-EOF
+          {
+            echo "IMAGE=$IMAGE"
+            echo "CRITICAL=$CRITICAL"
+            echo "HIGH=$HIGH"
+            echo "MEDIUM=$MEDIUM"
+            echo "LOW=$LOW"
+            echo "UNKNOWN=$UNKNOWN"
+          } > scan-results/results.env
 
           mv "trivy-$SAFE_IMAGE.json" "scan-results/" 2>/dev/null || true
         else
           echo "Trivy scan failed for $IMAGE"
 
           # Create clean error results.env file
-          cat > scan-results/results.env << EOF
-IMAGE=$IMAGE
-ERROR=Scan failed
-CRITICAL=0
-HIGH=0
-MEDIUM=0
-LOW=0
-UNKNOWN=0
-EOF
+          {
+            echo "IMAGE=$IMAGE"
+            echo "ERROR=Scan failed"
+            echo "CRITICAL=0"
+            echo "HIGH=0"
+            echo "MEDIUM=0"
+            echo "LOW=0"
+            echo "UNKNOWN=0"
+          } > scan-results/results.env
         fi
 
     - name: Upload scan results
