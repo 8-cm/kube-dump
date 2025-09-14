@@ -205,33 +205,48 @@ jobs:
 
         mkdir -p scan-results
 
+        # Run Trivy scan with proper error isolation
+        SCAN_SUCCESS=false
         if docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
            -v $(pwd):/workspace \
-           aquasec/trivy image --format json --output /workspace/trivy-$SAFE_IMAGE.json $IMAGE; then
+           aquasec/trivy image --format json --output /workspace/trivy-$SAFE_IMAGE.json $IMAGE 2>/dev/null; then
+          SCAN_SUCCESS=true
+        fi
 
-          if [[ -f "trivy-$SAFE_IMAGE.json" ]]; then
-            CRITICAL=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' "trivy-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
-            HIGH=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' "trivy-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
-            MEDIUM=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "MEDIUM")] | length' "trivy-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
-            LOW=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "LOW")] | length' "trivy-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
-            UNKNOWN=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "UNKNOWN")] | length' "trivy-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
+        if [[ "$SCAN_SUCCESS" == "true" && -f "trivy-$SAFE_IMAGE.json" ]]; then
+          # Parse JSON results safely
+          CRITICAL=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' "trivy-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
+          HIGH=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' "trivy-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
+          MEDIUM=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "MEDIUM")] | length' "trivy-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
+          LOW=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "LOW")] | length' "trivy-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
+          UNKNOWN=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "UNKNOWN")] | length' "trivy-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
 
-            echo "Results for $IMAGE: C:$CRITICAL H:$HIGH M:$MEDIUM L:$LOW U:$UNKNOWN"
+          echo "Results for $IMAGE: C:$CRITICAL H:$HIGH M:$MEDIUM L:$LOW U:$UNKNOWN"
 
-            # Save results
-            echo "IMAGE=$IMAGE" > scan-results/results.env
-            echo "CRITICAL=$CRITICAL" >> scan-results/results.env
-            echo "HIGH=$HIGH" >> scan-results/results.env
-            echo "MEDIUM=$MEDIUM" >> scan-results/results.env
-            echo "LOW=$LOW" >> scan-results/results.env
-            echo "UNKNOWN=$UNKNOWN" >> scan-results/results.env
+          # Create clean results.env file
+          cat > scan-results/results.env << EOF
+IMAGE=$IMAGE
+CRITICAL=$CRITICAL
+HIGH=$HIGH
+MEDIUM=$MEDIUM
+LOW=$LOW
+UNKNOWN=$UNKNOWN
+EOF
 
-            mv "trivy-$SAFE_IMAGE.json" "scan-results/"
-          fi
+          mv "trivy-$SAFE_IMAGE.json" "scan-results/" 2>/dev/null || true
         else
           echo "Trivy scan failed for $IMAGE"
-          echo "IMAGE=$IMAGE" > scan-results/results.env
-          echo "ERROR=Scan failed" >> scan-results/results.env
+
+          # Create clean error results.env file
+          cat > scan-results/results.env << EOF
+IMAGE=$IMAGE
+ERROR=Scan failed
+CRITICAL=0
+HIGH=0
+MEDIUM=0
+LOW=0
+UNKNOWN=0
+EOF
         fi
 
     - name: Upload scan results
@@ -276,16 +291,25 @@ jobs:
 
         if ls artifacts/trivy-scan-*/results.env 1> /dev/null 2>&1; then
           for result_file in artifacts/trivy-scan-*/results.env; do
-            if [[ -f "$result_file" ]]; then
+            if [[ -f "$result_file" && -s "$result_file" ]]; then
               echo "Processing $result_file"
-              source "$result_file"
-              if [[ -z "$ERROR" ]]; then
-                TOTAL_CRITICAL=$((TOTAL_CRITICAL + ${CRITICAL:-0}))
-                TOTAL_HIGH=$((TOTAL_HIGH + ${HIGH:-0}))
-                TOTAL_MEDIUM=$((TOTAL_MEDIUM + ${MEDIUM:-0}))
-                TOTAL_LOW=$((TOTAL_LOW + ${LOW:-0}))
-                TOTAL_UNKNOWN=$((TOTAL_UNKNOWN + ${UNKNOWN:-0}))
+
+              # Safely source the results file with error checking
+              if source "$result_file" 2>/dev/null; then
+                if [[ -z "$ERROR" ]]; then
+                  TOTAL_CRITICAL=$((TOTAL_CRITICAL + ${CRITICAL:-0}))
+                  TOTAL_HIGH=$((TOTAL_HIGH + ${HIGH:-0}))
+                  TOTAL_MEDIUM=$((TOTAL_MEDIUM + ${MEDIUM:-0}))
+                  TOTAL_LOW=$((TOTAL_LOW + ${LOW:-0}))
+                  TOTAL_UNKNOWN=$((TOTAL_UNKNOWN + ${UNKNOWN:-0}))
+                else
+                  echo "Scan error detected for image: $IMAGE - $ERROR"
+                fi
+              else
+                echo "Warning: Failed to process $result_file - file may be corrupted"
               fi
+
+              # Clean up variables
               unset IMAGE CRITICAL HIGH MEDIUM LOW UNKNOWN ERROR
             fi
           done
@@ -324,13 +348,17 @@ jobs:
 
         if ls artifacts/trivy-scan-*/results.env 1> /dev/null 2>&1; then
           for result_file in artifacts/trivy-scan-*/results.env; do
-            if [[ -f "$result_file" ]]; then
-              source "$result_file"
-              if [[ -n "$ERROR" ]]; then
-                echo "| \`$IMAGE\` | ❌ Error | - | - | - | Scan Failed |" >> image-summary.md
+            if [[ -f "$result_file" && -s "$result_file" ]]; then
+              # Safely source the results file with error checking
+              if source "$result_file" 2>/dev/null; then
+                if [[ -n "$ERROR" ]]; then
+                  echo "| \`$IMAGE\` | ❌ Error | - | - | - | Scan Failed |" >> image-summary.md
+                else
+                  TOTAL=$((${CRITICAL:-0} + ${HIGH:-0} + ${MEDIUM:-0} + ${LOW:-0}))
+                  echo "| \`$IMAGE\` | 🔴 ${CRITICAL:-0} | 🟠 ${HIGH:-0} | 🟡 ${MEDIUM:-0} | 🔵 ${LOW:-0} | $TOTAL |" >> image-summary.md
+                fi
               else
-                TOTAL=$((${CRITICAL:-0} + ${HIGH:-0} + ${MEDIUM:-0} + ${LOW:-0}))
-                echo "| \`$IMAGE\` | 🔴 ${CRITICAL:-0} | 🟠 ${HIGH:-0} | 🟡 ${MEDIUM:-0} | 🔵 ${LOW:-0} | $TOTAL |" >> image-summary.md
+                echo "| \`corrupted-file\` | ❌ Error | - | - | - | File corrupted |" >> image-summary.md
               fi
               unset IMAGE CRITICAL HIGH MEDIUM LOW ERROR
             fi
