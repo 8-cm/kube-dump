@@ -17,112 +17,91 @@ This comprehensive documentation provides detailed explanations of kube-dump's a
 ## Complete Architecture & Workflow
 
 ```mermaid
-flowchart TD
-    %% User Input & Configuration
-    Start([User Starts kube-dump.sh]) --> Init[Initialize Variables]
-    Init --> ParseArgs[Parse Command Arguments]
-    
-    %% Configuration Decision Points
-    ParseArgs --> LogCheck{"Output Directory Specified?"}
-    LogCheck -->|Yes| CreateLog[Create Log File<br/>kube-dump-YYYY-MM-DD_epoch.log]
-    LogCheck -->|No| ExecModeCheck
-    CreateLog --> ExecModeCheck
-    
-    %% Execution Mode Selection
-    ExecModeCheck{Execution Mode?}
-    ExecModeCheck -->|Pod Mode| PodFlow[Pod Execution Flow]
-    ExecModeCheck -->|Node Mode| NodeFlow[Node Execution Flow]
-    ExecModeCheck -->|Mixed Mode| MixedFlow[Mixed Execution Flow]
-    
-    %% Pod Flow
-    PodFlow --> FindPods[Find Pods by Label<br/>using kubectl/oc]
-    FindPods --> PrepPods[Prepare Target Pods<br/>validate running state]
-    PrepPods --> CreatePodDebug[Create Debug Pods<br/>for Pod Targets]
-    
-    %% Node Flow
-    NodeFlow --> FindNodes[Find Nodes by Label<br/>using kubectl/oc]
-    FindNodes --> CreateNodeDebug[Create Debug Pods<br/>for Node Targets]
-    
-    %% Mixed Flow
-    MixedFlow --> MixedPods[Process Pod Targets]
-    MixedPods --> MixedNodes[Process Node Targets]
-    MixedNodes --> MixedCreate[Create Debug Pods<br/>for Both Types]
-    
-    %% Consolidation
-    CreatePodDebug --> WaitReady
-    CreateNodeDebug --> WaitReady
-    MixedCreate --> WaitReady
-    
-    %% Kill Switch Decision
-    WaitReady[Wait for Debug Pods Ready] --> KillSwitchCheck{Kill Switch<br/>Configured?}
-    
-    %% Kill Switch Flow
-    KillSwitchCheck -->|Yes| CreateKillMonitors[Create Kill Switch<br/>Monitor Pods]
-    KillSwitchCheck -->|No| MonitorPhase
-    
-    CreateKillMonitors --> KillSwitchType{Kill Switch Type?}
-    KillSwitchType -->|Absolute| AbsMonitor[Monitor Available Space<br/>vs Threshold]
-    KillSwitchType -->|Relative| RelMonitor[Monitor Free Space %<br/>vs Threshold]
-    
-    AbsMonitor --> StartBgMonitor[Start Background<br/>Kill Switch Monitoring]
-    RelMonitor --> StartBgMonitor
-    StartBgMonitor --> MonitorPhase
-    
-    %% Main Monitoring Phase
-    MonitorPhase[📊 Debug Pods Running<br/>Monitor Command Output] --> CleanupCheck{No-Cleanup<br/>Mode?}
-    
-    %% Kill Switch Background Process
-    StartBgMonitor -.-> KillMonitorLoop{Monitor Loop<br/>Check Every 5s}
-    KillMonitorLoop -.-> KillThresholdCheck{Threshold<br/>Exceeded?}
-    KillThresholdCheck -.->|Yes| KillDebugPods[🔴 Kill Debug Pods<br/>Clean Monitor Pods]
-    KillThresholdCheck -.->|No| KillMonitorLoop
-    KillDebugPods -.-> KillComplete[Kill Switch Complete]
-    
-    %% Cleanup Decision
-    CleanupCheck -->|No Cleanup Mode| NoCleanupFlow[Keep Debug Pods Running<br/>Show Monitor Commands]
-    CleanupCheck -->|Normal| UserWait[Wait for User Input<br/>Press Enter to cleanup]
-    
-    UserWait --> CleanupDebug[🧹 Cleanup Debug Pods]
-    CleanupDebug --> CleanupKillSwitches[🧹 Cleanup Kill Switch<br/>Monitor Pods]
-    
-    %% File Download Decision
-    CleanupKillSwitches --> FileDownloadCheck{File Download<br/>Requested?}
-    NoCleanupFlow --> FileDownloadCheck
-    
-    FileDownloadCheck -->|Yes| CreateDiscovery[Create File Discovery Pods]
-    FileDownloadCheck -->|No| Complete
-    
-    %% File Discovery & Download Flow
-    CreateDiscovery --> DiscoveryType{Discovery Type?}
-    DiscoveryType -->|Pod Files| PodDiscovery[Pod File Discovery<br/>Execute select command<br/>with placeholder substitution]
-    DiscoveryType -->|Node Files| NodeDiscovery[Node File Discovery<br/>Execute select command<br/>with placeholder substitution]
-    DiscoveryType -->|Both| BothDiscovery[Both Pod & Node<br/>Discovery]
-    
-    PodDiscovery --> ExecuteSelect[Execute Select Commands<br/>Get File Lists]
-    NodeDiscovery --> ExecuteSelect
-    BothDiscovery --> ExecuteSelect
-    
-    ExecuteSelect --> DownloadFiles[📥 Download Files<br/>to Output Directory]
-    DownloadFiles --> CleanupDiscovery[🧹 Cleanup Successful<br/>Discovery Pods]
-    CleanupDiscovery --> Complete
-    
-    %% Completion
-    Complete[🎉 Session Complete<br/>Close Log File if Created]
-    
-    %% Styling for different component types
-    classDef startEnd fill:#1e3a8a,stroke:#3b82f6,stroke-width:3px,color:#fff
-    classDef decision fill:#f59e0b,stroke:#d97706,stroke-width:2px,color:#000
-    classDef process fill:#059669,stroke:#10b981,stroke-width:2px,color:#fff
-    classDef killswitch fill:#dc2626,stroke:#ef4444,stroke-width:2px,color:#fff
-    classDef monitor fill:#7c3aed,stroke:#a855f7,stroke-width:2px,color:#fff
-    classDef cleanup fill:#ea580c,stroke:#f97316,stroke-width:2px,color:#fff
-    
-    class Start,Complete startEnd
-    class LogCheck,ExecModeCheck,KillSwitchCheck,KillSwitchType,CleanupCheck,FileDownloadCheck,DiscoveryType decision
-    class Init,ParseArgs,FindPods,FindNodes,CreatePodDebug,CreateNodeDebug,WaitReady process
-    class CreateKillMonitors,AbsMonitor,RelMonitor,StartBgMonitor,KillDebugPods killswitch
-    class MonitorPhase,KillMonitorLoop,KillThresholdCheck monitor
-    class CleanupDebug,CleanupKillSwitches,CleanupDiscovery cleanup
+sequenceDiagram
+    participant User
+    participant Script as kube-dump.sh
+    participant Kubectl as kubectl/oc CLI
+    participant Cluster as Kubernetes Cluster
+    participant DebugPod as Debug Pods
+    participant KillMonitor as Kill Switch Monitor
+    participant LocalFS as Local Filesystem
+
+    User->>Script: ./kube-dump.sh -l app=nginx -o /tmp/debug --kill-switch-abs 1GB
+    Script->>Script: Initialize variables and parse arguments
+    Script->>LocalFS: Create log file kube-dump-YYYY-MM-DD_epoch.log
+
+    Note over Script: Determine execution mode (Pod/Node/Mixed)
+
+    Script->>Kubectl: Get pods with label app=nginx
+    Kubectl->>Cluster: kubectl get pods -l app=nginx -o json
+    Cluster-->>Kubectl: Return pod list
+    Kubectl-->>Script: Pod targets identified
+
+    Note over Script: Create debug pods for each target
+
+    Script->>Kubectl: Create debug pod for pod debugging
+    Kubectl->>Cluster: kubectl run debug-pod --image=nicolaka/netshoot
+    Cluster-->>DebugPod: Debug pod created
+    DebugPod-->>Script: Pod ready for debugging
+
+    alt Kill Switch Configured
+        Script->>Kubectl: Create kill switch monitor pod
+        Kubectl->>Cluster: kubectl run kill-monitor --image=nicolaka/netshoot
+        Cluster-->>KillMonitor: Monitor pod created
+
+        Note over KillMonitor: Background monitoring starts
+
+        loop Storage Monitoring
+            KillMonitor->>Cluster: df -B1 /monitored/volume
+            Cluster-->>KillMonitor: Available space: 2GB
+            Note over KillMonitor: Space OK, continue monitoring
+        end
+    end
+
+    Note over Script: Main debugging phase begins
+
+    Script->>DebugPod: Execute debugging commands (tcpdump, ss, etc.)
+    DebugPod->>Cluster: Capture network traffic and system data
+    Cluster-->>DebugPod: Debug data collected
+    DebugPod-->>Script: Debugging output available
+
+    Script->>Script: Display monitoring commands to user
+    Script-->>User: Debug pods running, press Enter to cleanup
+
+    User->>Script: Press Enter (continue with cleanup)
+
+    alt Kill Switch Triggered (Parallel)
+        Note over KillMonitor: Storage threshold exceeded!
+        KillMonitor->>Script: Exit with threshold violation
+        Script->>Kubectl: Terminate debug pods immediately
+        Kubectl->>DebugPod: kubectl delete pod debug-pod
+        DebugPod-->>Cluster: Debug pod terminated
+    else Normal Cleanup
+        Script->>Kubectl: Delete debug pods
+        Kubectl->>DebugPod: kubectl delete pod debug-pod
+        DebugPod-->>Cluster: Debug pod terminated
+
+        Script->>Kubectl: Delete kill switch monitor
+        Kubectl->>KillMonitor: kubectl delete pod kill-monitor
+        KillMonitor-->>Cluster: Monitor pod terminated
+    end
+
+    alt File Download Requested
+        Script->>Kubectl: Create file discovery pods
+        Kubectl->>Cluster: kubectl run discovery-pod
+        Cluster-->>Script: Discovery pods ready
+
+        Script->>Script: Execute file selection commands
+        Script->>Kubectl: kubectl cp pod:/path/file local-output/
+        Kubectl-->>LocalFS: Files downloaded to output directory
+        LocalFS-->>Script: Files saved locally
+
+        Script->>Kubectl: Delete discovery pods
+        Kubectl->>Cluster: kubectl delete pod discovery-pod
+    end
+
+    Script->>LocalFS: Close log file
+    Script-->>User: Session complete, files saved to /tmp/debug
 ```
 
 ### Architecture Process Description
@@ -358,35 +337,58 @@ This architecture ensures that debugging operations remain safe and controlled, 
 ## File Download Workflow Detail
 
 ```mermaid
-graph TB
-    StartDownload[File Download Phase] --> CreateDiscoveryPods[Create Discovery Pods]
-    
-    subgraph "Discovery Pod Creation"
-        CreateDiscoveryPods --> PodDiscoveryCreate[Pod Discovery Pods<br/>for -s commands]
-        CreateDiscoveryPods --> NodeDiscoveryCreate[Node Discovery Pods<br/>for -S commands]
+sequenceDiagram
+    participant User
+    participant Script as kube-dump.sh
+    participant PodDiscovery as Pod Discovery Pod
+    participant NodeDiscovery as Node Discovery Pod
+    participant TargetPod as Target Pod
+    participant HostFS as Host Filesystem
+    participant LocalFS as Local Filesystem
+
+    User->>Script: Request file download (-s find /tmp -name '*.log')
+    Script->>Script: Parse file selection commands
+
+    Note over Script: Create discovery pods for file operations
+
+    Script->>PodDiscovery: Create pod discovery pod
+    Script->>NodeDiscovery: Create node discovery pod
+
+    Note over PodDiscovery,NodeDiscovery: Wait for pods to reach Ready state
+
+    Script->>PodDiscovery: Execute file selection command<br/>find /tmp -name '*.log' | head -25
+    PodDiscovery->>TargetPod: Access pod filesystem context
+    TargetPod-->>PodDiscovery: Return file list: /tmp/app.log, /tmp/error.log
+    PodDiscovery-->>Script: File list with paths
+
+    Script->>NodeDiscovery: Execute file selection command<br/>find /var/log -name '*.log' | head -25
+    NodeDiscovery->>HostFS: Access host filesystem
+    HostFS-->>NodeDiscovery: Return file list: /var/log/syslog, /var/log/kern.log
+    NodeDiscovery-->>Script: File list with paths
+
+    Note over Script: Process discovered files for download
+
+    loop For each discovered file
+        Script->>PodDiscovery: kubectl cp pod:/tmp/app.log local-output/
+        PodDiscovery->>LocalFS: Transfer file content
+        LocalFS-->>Script: File downloaded successfully
+
+        Script->>PodDiscovery: rm /tmp/app.log (cleanup source)
+        PodDiscovery->>TargetPod: Remove downloaded file
+        TargetPod-->>PodDiscovery: File removed from source
     end
-    
-    PodDiscoveryCreate --> WaitDiscoveryReady[Wait for Discovery Pods Ready]
-    NodeDiscoveryCreate --> WaitDiscoveryReady
-    
-    WaitDiscoveryReady --> ExecuteCommands[Execute Select Commands<br/>with Placeholder Substitution]
-    
-    subgraph "File Discovery Process"
-        ExecuteCommands --> ParseFileList[Parse File Lists<br/>from Command Output]
-        ParseFileList --> DownloadLoop{For Each File}
-        DownloadLoop --> DownloadFile[kubectl cp namespace/pod:file local-output]
-        DownloadFile --> RemoveFromHost[Remove Downloaded File<br/>from Host Filesystem]
-        RemoveFromHost --> NextFile{More Files?}
-        NextFile -->|Yes| DownloadLoop
-        NextFile -->|No| CleanupSuccess[Cleanup Successful<br/>Discovery Pods]
-    end
-    
-    CleanupSuccess --> KeepFailedPods[Keep Failed Discovery Pods<br/>for Inspection]
-    KeepFailedPods --> DownloadComplete[File Download Complete]
-    
-    %% Error Handling
-    DownloadFile -->|Failed| TrackFailure[Track Failed Downloads]
-    TrackFailure --> NextFile
+
+    Script->>NodeDiscovery: kubectl cp pod:/var/log/syslog local-output/
+    NodeDiscovery->>LocalFS: Transfer file content
+    LocalFS-->>Script: File downloaded successfully
+
+    Note over Script: Download operations complete
+
+    Script->>PodDiscovery: kubectl delete pod (cleanup successful)
+    Script->>NodeDiscovery: kubectl delete pod (cleanup successful)
+
+    Note over Script: Keep failed discovery pods for inspection
+    Script-->>User: File download complete<br/>Files saved to local-output/
 ```
 
 ### File Download Process Description
