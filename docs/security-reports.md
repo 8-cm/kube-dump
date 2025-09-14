@@ -29,67 +29,44 @@ Security scan results will appear below when the automated workflows complete th
 ## 🛡️ Security Analysis - Trivy Scanning
 
 **Overall Status:** 🔴 CRITICAL ISSUES FOUND  
-**Critical Issues:** 14  
-**High Severity:** 110  
-**Medium Severity:** 137  
-**Low Severity:** 15  
-**Config Issues:** 0  
-**Filesystem Vulns:** 0  
-**Last Updated:** 2025-09-14 08:10:21 UTC  
-**Commit:** [`0aa149d`](https://github.com/8-cm/kube-dump/commit/0aa149da31d93d2aded6992ca8030590491f6bcd)  
-
-### Scanning Coverage
-- **🖼️ Container Images**: All images used in kube-dump.sh
-- **📋 SBOM Analysis**: Software Bill of Materials vulnerability checking
-- **📁 Filesystem**: Local files and configurations
-- **⚙️ Configuration**: Security misconfigurations
+**Critical Issues:** 28  
+**High Severity:** 220  
+**Medium Severity:** 274  
+**Low Severity:** 30  
+**Last Updated:** 2025-09-14 23:17:16 UTC  
+**Commit:** [`bff19fa`](https://github.com/8-cm/kube-dump/commit/bff19fa08dac76ac50e6543c906b26e2025ae355)  
 
 ### Container Image Vulnerabilities
 
 | Image | Critical | High | Medium | Low | Total |
 |-------|----------|------|--------|-----|-------|
-| `nicolaka/netshoot` | 🔴 14 | 🟠 110 | 🟡 137 | 🔵 15 | 281 |
-
-### SBOM Analysis Results
-
-| Image | Critical | High | Medium | Low | Total |
-|-------|----------|------|--------|-----|-------|
-| `nicolaka/netshoot` | 🔴 11 | 🟠 96 | 🟡 118 | 🔵 10 | 235 |
-
-### Filesystem Security Issues
-
-| Type | Config Issues | FS Vulnerabilities |
-|------|---------------|-------------------|
-| Count | 0 | 0 |
+| `alpine:latest` | 🔴 0 | 🟠 0 | 🟡 0 | 🔵 0 | 0 |
+| `nicolaka/netshoot:latest` | 🔴 14 | 🟠 110 | 🟡 137 | 🔵 15 | 276 |
+| `nicolaka/netshoot` | 🔴 14 | 🟠 110 | 🟡 137 | 🔵 15 | 276 |
 
 ### Remediation Steps
 1. **Update Images**: Use latest versions of container images with security patches
 2. **Review Dependencies**: Check for vulnerable packages in container images
-3. **Fix Configurations**: Address configuration issues identified by Trivy
-4. **Monitor Regularly**: Set up automated scanning for new vulnerabilities
-5. **SBOM Review**: Analyze Software Bill of Materials for supply chain security
+3. **Monitor Regularly**: Set up automated scanning for new vulnerabilities
 
 ---
-*This section is automatically updated by the [Security Scanning workflow](.github/workflows/security-trivy.yml)*
+*This section is automatically updated by the [Comprehensive Security Analysis workflow](.github/workflows/security-analysis.yml)*
 <!-- TRIVY-SECURITY-END -->
-
-
-
----
 
 <!-- SHELLCHECK-RESULTS-START -->
 ## 🔍 Code Quality - Shellcheck Analysis
 
 **Status:** ✅ PASSED  
 **Issues Found:** 0  
-**Last Updated:** 2025-09-14 08:11:13 UTC  
-**Commit:** [`619ab95`](https://github.com/8-cm/kube-dump/commit/619ab9583c226169251423ff353c2e527d8b8f8a)  
+**Last Updated:** 2025-09-14 23:17:16 UTC  
+**Commit:** [`bff19fa`](https://github.com/8-cm/kube-dump/commit/bff19fa08dac76ac50e6543c906b26e2025ae355)  
 
 🎉 **Excellent!** No shellcheck issues found. The script follows shell scripting best practices.
 
 ---
-*This section is automatically updated by the [Shellcheck Analysis workflow](.github/workflows/shellcheck.yml)*
+*This section is automatically updated by the [Comprehensive Security Analysis workflow](.github/workflows/security-analysis.yml)*
 <!-- SHELLCHECK-RESULTS-END -->
+
 
 
 
@@ -786,3 +763,5 @@ If you discover a security vulnerability in kube-dump:
 | `nicolaka/netshoot:latest` | CVE | `CVE-2025-6170` | LOW | 2.5 | `libxml2` | `2.13.8-r0` | `2.13.9-r0` | A flaw was found in the interactive shell of the xmllint command-line tool, used for parsing XML files. When a user inputs an overly long command, the program does not check the input size properly, which can cause it to crash. This issue might allow attackers to run harmful code in rare configurations without modern protections. |
 
 *Last updated: 2025-09-14 08:10:21 UTC*
+
+<sub><i>Last updated: 2025-09-14 23:17:16 UTC</i></sub>
