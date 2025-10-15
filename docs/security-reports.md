@@ -30,19 +30,19 @@ Security scan results will appear below when the automated workflows complete th
 
 **Overall Status:** 🔴 CRITICAL ISSUES FOUND  
 **Critical Issues:** 28  
-**High Severity:** 222  
-**Medium Severity:** 286  
-**Low Severity:** 30  
-**Last Updated:** 2025-10-01 03:12:01 UTC  
-**Commit:** [`50a3173`](https://github.com/8-cm/kube-dump/commit/50a31738074c50147d5392f3c6b18b8035ddbb65)  
+**High Severity:** 220  
+**Medium Severity:** 308  
+**Low Severity:** 36  
+**Last Updated:** 2025-10-15 03:05:10 UTC  
+**Commit:** [`f36b73b`](https://github.com/8-cm/kube-dump/commit/f36b73b06a83caa84a8c1103715cb4e20cc4792a)  
 
 ### Container Image Vulnerabilities
 
 | Image | Critical | High | Medium | Low | Total |
 |-------|----------|------|--------|-----|-------|
 | `alpine:latest` | 🔴 0 | 🟠 0 | 🟡 0 | 🔵 0 | 0 |
-| `nicolaka/netshoot:latest` | 🔴 14 | 🟠 111 | 🟡 143 | 🔵 15 | 283 |
-| `nicolaka/netshoot` | 🔴 14 | 🟠 111 | 🟡 143 | 🔵 15 | 283 |
+| `nicolaka/netshoot:latest` | 🔴 14 | 🟠 110 | 🟡 154 | 🔵 18 | 296 |
+| `nicolaka/netshoot` | 🔴 14 | 🟠 110 | 🟡 154 | 🔵 18 | 296 |
 
 ### Remediation Steps
 1. **Update Images**: Use latest versions of container images with security patches
@@ -58,14 +58,15 @@ Security scan results will appear below when the automated workflows complete th
 
 **Status:** ✅ PASSED  
 **Issues Found:** 0  
-**Last Updated:** 2025-10-01 03:12:01 UTC  
-**Commit:** [`50a3173`](https://github.com/8-cm/kube-dump/commit/50a31738074c50147d5392f3c6b18b8035ddbb65)  
+**Last Updated:** 2025-10-15 03:05:10 UTC  
+**Commit:** [`f36b73b`](https://github.com/8-cm/kube-dump/commit/f36b73b06a83caa84a8c1103715cb4e20cc4792a)  
 
 🎉 **Excellent!** No shellcheck issues found. The script follows shell scripting best practices.
 
 ---
 *This section is automatically updated by the [Comprehensive Security Analysis workflow](.github/workflows/security-analysis.yml)*
 <!-- SHELLCHECK-RESULTS-END -->
+
 
 
 
@@ -777,3 +778,5 @@ If you discover a security vulnerability in kube-dump:
 <sub><i>Last updated: 2025-09-29 03:04:58 UTC</i></sub>
 
 <sub><i>Last updated: 2025-10-01 03:12:01 UTC</i></sub>
+
+<sub><i>Last updated: 2025-10-15 03:05:10 UTC</i></sub>
