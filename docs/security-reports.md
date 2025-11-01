@@ -30,19 +30,19 @@ Security scan results will appear below when the automated workflows complete th
 
 **Overall Status:** 🔴 CRITICAL ISSUES FOUND  
 **Critical Issues:** 28  
-**High Severity:** 232  
-**Medium Severity:** 308  
+**High Severity:** 312  
+**Medium Severity:** 328  
 **Low Severity:** 36  
-**Last Updated:** 2025-10-29 03:16:25 UTC  
-**Commit:** [`c31be8a`](https://github.com/8-cm/kube-dump/commit/c31be8ad89e0c95467df1674350271059c087acd)  
+**Last Updated:** 2025-11-01 03:12:51 UTC  
+**Commit:** [`d977bae`](https://github.com/8-cm/kube-dump/commit/d977bae12d74f6d4c1d1ecf3a59168b47fb9057e)  
 
 ### Container Image Vulnerabilities
 
 | Image | Critical | High | Medium | Low | Total |
 |-------|----------|------|--------|-----|-------|
 | `alpine:latest` | 🔴 0 | 🟠 0 | 🟡 0 | 🔵 0 | 0 |
-| `nicolaka/netshoot:latest` | 🔴 14 | 🟠 116 | 🟡 154 | 🔵 18 | 302 |
-| `nicolaka/netshoot` | 🔴 14 | 🟠 116 | 🟡 154 | 🔵 18 | 302 |
+| `nicolaka/netshoot:latest` | 🔴 14 | 🟠 156 | 🟡 164 | 🔵 18 | 352 |
+| `nicolaka/netshoot` | 🔴 14 | 🟠 156 | 🟡 164 | 🔵 18 | 352 |
 
 ### Remediation Steps
 1. **Update Images**: Use latest versions of container images with security patches
@@ -58,14 +58,15 @@ Security scan results will appear below when the automated workflows complete th
 
 **Status:** ✅ PASSED  
 **Issues Found:** 0  
-**Last Updated:** 2025-10-29 03:16:25 UTC  
-**Commit:** [`c31be8a`](https://github.com/8-cm/kube-dump/commit/c31be8ad89e0c95467df1674350271059c087acd)  
+**Last Updated:** 2025-11-01 03:12:51 UTC  
+**Commit:** [`d977bae`](https://github.com/8-cm/kube-dump/commit/d977bae12d74f6d4c1d1ecf3a59168b47fb9057e)  
 
 🎉 **Excellent!** No shellcheck issues found. The script follows shell scripting best practices.
 
 ---
 *This section is automatically updated by the [Comprehensive Security Analysis workflow](.github/workflows/security-analysis.yml)*
 <!-- SHELLCHECK-RESULTS-END -->
+
 
 
 
@@ -783,3 +784,5 @@ If you discover a security vulnerability in kube-dump:
 <sub><i>Last updated: 2025-10-15 03:05:10 UTC</i></sub>
 
 <sub><i>Last updated: 2025-10-29 03:16:25 UTC</i></sub>
+
+<sub><i>Last updated: 2025-11-01 03:12:51 UTC</i></sub>
