@@ -3437,9 +3437,9 @@ detect_kubelet_eviction_threshold() {
   fi
 
   # Extract nodefs.available threshold
-  # Pattern: "nodefs.available":"10%" -> extract "10%"
+  # Pattern: "nodefs.available":"10%" or "10Mi" or "1Gi" etc -> extract the value
   local threshold
-  threshold=$(echo "$configz" | grep -oE '"nodefs\.available"\s*:\s*"[^"]+"' | grep -oE '[0-9.]+[%KMGTPEkmgtpei]+' | head -1)
+  threshold=$(echo "$configz" | grep -oE '"nodefs\.available"\s*:\s*"[^"]+"' | grep -oE '[0-9.]+[%KMGTPEkmgtpeiBb]+' | head -1)
 
   if [[ -z "$threshold" ]]; then
     return 1
