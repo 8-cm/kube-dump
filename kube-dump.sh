@@ -2562,7 +2562,12 @@ generate_exec_command() {
   if [[ -n "$CUSTOM_COMMAND" ]]; then
     echo "DECODED_CMD=\$(echo '${CAPTURE_COMMAND}' | base64 -d)"
     echo "FINAL_CMD=\$(echo \"\$DECODED_CMD\" | sed 's/${PLACEHOLDER_CHAR}/${debug_pod_hostname}/g')"
-    echo "exec nsenter -n -t \$PID /bin/bash -c \"\$FINAL_CMD ; tail -f /dev/null\""
+    cat <<'EXECEND'
+exec nsenter -n -t $PID /bin/bash <<'CMDEOF'
+$FINAL_CMD
+tail -f /dev/null
+CMDEOF
+EXECEND
   else
     local final_capture_cmd="${CAPTURE_COMMAND//${PLACEHOLDER_CHAR}/$debug_pod_hostname}"
     echo "exec nsenter -n -t \$PID ${final_capture_cmd}"
