@@ -177,7 +177,7 @@ initialize_variables() {
   OUTPUT_DIR=""  # Output directory for downloaded files from -o
   PLACEHOLDER_CHAR="%"  # Default placeholder character for hostname substitution
   DISCOVERY_POD_NAMES=()  # Array for file discovery pods
-  DISCOVERY_POD_INFO=()  # Array to track discovery pod info: "discovery_pod_name:node_name:type:original_debug_pod_name"
+  DISCOVERY_POD_INFO=()  # Array to track discovery pod info: "discovery_pod_name:node_name:type:target_name"
   POD_DEBUG_HOSTNAMES=()     # Array to store debug pod hostnames for pod targets
   NODE_DEBUG_HOSTNAMES=()    # Array to store debug pod hostnames for node targets
   EXECUTION_MODE="pod"  # pod or node execution mode
@@ -2931,7 +2931,7 @@ fi
     while IFS= read -r file_path; do
       if [[ -n "$file_path" ]]; then
         local output_file
-        output_file="$OUTPUT_DIR/${original_debug_pod_name}_$(basename "$file_path")"
+        output_file="$OUTPUT_DIR/${target_name}_$(basename "$file_path")"
 
         # Try download with up to 3 attempts (handles transient network/pod issues)
         local download_success=false
@@ -3274,7 +3274,7 @@ create_discovery_pod() {
   local node_name="$3"
   local discovery_pod_name="$4"
   local debug_ns="$5"
-  local original_debug_pod_name="${6:-$discovery_pod_name}"  # Original debug pod name for placeholder substitution
+  local target_name="${6:-$pod_name}"  # Target pod name for placeholder substitution
 
   # Create discovery pod using YAML manifest for file discovery
   run_kube_cmd "$discovery_pod_name" "apply" apply -f - <<EOF
@@ -3295,7 +3295,7 @@ spec:
     command: ["/bin/bash", "-c"]
     args:
     - |
-$(build_discovery_script "$pod_name" "$container_name" "$node_name" "$discovery_pod_name" "$original_debug_pod_name" | sed 's/^/      /')
+$(build_discovery_script "$pod_name" "$container_name" "$node_name" "$discovery_pod_name" "$target_name" | sed 's/^/      /')
     securityContext:
       privileged: true
     env:
@@ -3326,7 +3326,7 @@ create_node_discovery_pod() {
   local node_name="$1"
   local discovery_pod_name="$2"
   local debug_ns="$3"
-  local original_debug_pod_name="${4:-$discovery_pod_name}"  # Original debug pod name for placeholder substitution
+  local target_name="${4:-$node_name}"  # Target node name for placeholder substitution
 
   # Create node discovery pod using YAML manifest
   run_kube_cmd "$discovery_pod_name" "apply" apply -f - <<EOF
@@ -3347,7 +3347,7 @@ spec:
     command: ["/bin/bash", "-c"]
     args:
     - |
-$(build_node_discovery_script "$node_name" "$discovery_pod_name" "$original_debug_pod_name" | sed 's/^/      /')
+$(build_node_discovery_script "$node_name" "$discovery_pod_name" "$target_name" | sed 's/^/      /')
     securityContext:
       privileged: true
     env:
