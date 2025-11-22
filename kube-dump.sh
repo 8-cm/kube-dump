@@ -2189,26 +2189,16 @@ echo "  Debug Pod: ${debug_pod_name}" >&2
 echo "  Command: ${final_node_command}" >&2
 echo "======================================================================" >&2
 
-# Install CRI dependencies if requested
-if [[ "${INSTALL_DEPS}" == "true" ]]; then
-  echo "Installing CRI dependencies..." >&2
-
-  # Install crictl if needed (the only CRI-related dependency we need)
-  if ! command -v crictl >/dev/null 2>&1; then
-    echo "Installing crictl..." >&2
-    if command -v curl >/dev/null 2>&1; then
-      curl -L https://github.com/kubernetes-sigs/cri-tools/releases/download/v1.28.0/crictl-v1.28.0-linux-amd64.tar.gz | tar -C /usr/local/bin -xz 2>/dev/null && chmod +x /usr/local/bin/crictl || echo "Warning: Could not install crictl" >&2
-    elif command -v wget >/dev/null 2>&1; then
-      wget -qO- https://github.com/kubernetes-sigs/cri-tools/releases/download/v1.28.0/crictl-v1.28.0-linux-amd64.tar.gz | tar -C /usr/local/bin -xz 2>/dev/null && chmod +x /usr/local/bin/crictl || echo "Warning: Could not install crictl" >&2
-    else
-      echo "Warning: No download tool available for crictl" >&2
-    fi
+# Install crictl if needed
+if [[ "${INSTALL_DEPS}" == "true" ]] && ! command -v crictl >/dev/null 2>&1; then
+  echo "Installing crictl..." >&2
+  if command -v curl >/dev/null 2>&1; then
+    curl -sL https://github.com/kubernetes-sigs/cri-tools/releases/download/v1.28.0/crictl-v1.28.0-linux-amd64.tar.gz | tar -C /usr/local/bin -xz 2>/dev/null && chmod +x /usr/local/bin/crictl
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO- https://github.com/kubernetes-sigs/cri-tools/releases/download/v1.28.0/crictl-v1.28.0-linux-amd64.tar.gz | tar -C /usr/local/bin -xz 2>/dev/null && chmod +x /usr/local/bin/crictl
   fi
+  echo "CRI tools setup completed" >&2
 fi
-
-echo "======================================================================" >&2
-echo "Executing command on node: ${node_name}" >&2
-echo "======================================================================" >&2
 
 # Execute the node command directly
 ${final_node_command} ; tail -f /dev/null
@@ -3657,20 +3647,94 @@ parse_size_to_bytes() {
 KILL_SWITCH_ABS="${KILL_SWITCH_ABS}"
 KILL_SWITCH_REL="${KILL_SWITCH_REL}"
 CHECK_INTERVAL=1  # Check every 1 second
+VOLUME_PATH="${volume_path}"
 
+# Helper function to format bc output with leading zero
+format_bc_result() {
+  local result=\$1
+  local unit=\$2
+  if [[ "\$result" =~ ^\\. ]]; then
+    echo "0\${result}\${unit}"
+  else
+    echo "\${result}\${unit}"
+  fi
+}
+
+# Print initial configuration
+echo "======================================================================" >&2
+echo "Kill Switch Monitor - Target Pod: ${target_debug_pod}" >&2
+echo "======================================================================" >&2
+echo "Monitored Path: \$VOLUME_PATH" >&2
 if [[ -n "\$KILL_SWITCH_ABS" ]]; then
-  echo "Monitoring storage with absolute threshold: \$KILL_SWITCH_ABS" >&2
+  echo "Threshold Type: Absolute (\$KILL_SWITCH_ABS)" >&2
+  echo "Trigger: Available space < \$KILL_SWITCH_ABS" >&2
 elif [[ -n "\$KILL_SWITCH_REL" ]]; then
-  echo "Monitoring storage with relative threshold: \$KILL_SWITCH_REL" >&2
+  echo "Threshold Type: Relative (\$KILL_SWITCH_REL)" >&2
+  echo "Trigger: Free space % < \$KILL_SWITCH_REL" >&2
 else
-  echo "No kill switch thresholds configured - exiting" >&2
+  echo "ERROR: No kill switch thresholds configured" >&2
+  exit 1
+fi
+echo "Check Interval: \${CHECK_INTERVAL}s" >&2
+echo "======================================================================" >&2
+echo "" >&2
+
+# Find the filesystem mount point for the monitored path
+ORIGINAL_PATH="\$VOLUME_PATH"
+MOUNT_POINT=""
+FILESYSTEM=""
+
+# Try to find an existing parent directory to check
+CHECK_PATH="\$VOLUME_PATH"
+while [[ ! -d "\$CHECK_PATH" && "\$CHECK_PATH" != "/" && -n "\$CHECK_PATH" ]]; do
+  CHECK_PATH="\$(dirname "\$CHECK_PATH")"
+done
+
+# Get mount point information
+if [[ -d "\$CHECK_PATH" ]]; then
+  if df_check=\$(df "\$CHECK_PATH" 2>/dev/null); then
+    MOUNT_POINT=\$(echo "\$df_check" | tail -n 1 | awk '{print \$NF}')
+    FILESYSTEM=\$(echo "\$df_check" | tail -n 1 | awk '{print \$1}')
+
+    echo "Path Analysis:" >&2
+    echo "  Requested Path: \$ORIGINAL_PATH" >&2
+    if [[ "\$CHECK_PATH" != "\$ORIGINAL_PATH" ]]; then
+      echo "  Path Status: Does not exist (checking parent)" >&2
+      echo "  Checked Path: \$CHECK_PATH" >&2
+    else
+      echo "  Path Status: Exists" >&2
+    fi
+    echo "  Mount Point: \$MOUNT_POINT" >&2
+    echo "  Filesystem: \$FILESYSTEM" >&2
+    echo "" >&2
+
+    # Monitor the mount point
+    VOLUME_PATH="\$MOUNT_POINT"
+  else
+    echo "ERROR: Cannot determine filesystem mount for \$ORIGINAL_PATH" >&2
+    exit 1
+  fi
+else
+  echo "ERROR: Cannot find accessible directory for \$ORIGINAL_PATH" >&2
   exit 1
 fi
 
-VOLUME_PATH="${volume_path}"
+# Print table header
+if [[ -n "\$KILL_SWITCH_ABS" ]]; then
+  printf "%-19s | %-9s | %-9s | %-9s | %-6s | %-6s | %-9s | %-20s\n" \
+    "Timestamp" "Total" "Used" "Available" "Used%" "Free%" "Threshold" "Status" >&2
+  printf "%s\n" "-------------------+-----------+-----------+-----------+--------+--------+-----------+----------------------" >&2
+elif [[ -n "\$KILL_SWITCH_REL" ]]; then
+  printf "%-19s | %-9s | %-9s | %-9s | %-6s | %-6s | %-9s | %-20s\n" \
+    "Timestamp" "Total" "Used" "Available" "Used%" "Free%" "Threshold" "Status" >&2
+  printf "%s\n" "-------------------+-----------+-----------+-----------+--------+--------+-----------+----------------------" >&2
+fi
 
 while true; do
-  # Get filesystem stats for the specified volume path
+  # Get current timestamp
+  TIMESTAMP=\$(date '+%Y-%m-%d %H:%M:%S')
+
+  # Get filesystem stats in bytes for precise calculations
   if df_output=\$(df -B1 "\$VOLUME_PATH" 2>/dev/null); then
     stats_line=\$(echo "\$df_output" | tail -n 1)
     used_bytes=\$(echo "\$stats_line" | awk '{print \$3}')
@@ -3679,17 +3743,6 @@ while true; do
 
     # Convert bytes to human-readable format for logging
     if [[ -n "\$total_bytes" && "\$total_bytes" -gt 0 ]]; then
-      # Helper function to format bc output with leading zero
-      format_bc_result() {
-        local result=\$1
-        local unit=\$2
-        if [[ "\$result" =~ ^\\. ]]; then
-          echo "0\${result}\${unit}"
-        else
-          echo "\${result}\${unit}"
-        fi
-      }
-
       if [[ "\$total_bytes" -ge 1099511627776 ]]; then  # >= 1TB
         total_raw=\$(echo "scale=2; \$total_bytes / 1099511627776" | bc 2>/dev/null || echo "0")
         used_raw=\$(echo "scale=2; \$used_bytes / 1099511627776" | bc 2>/dev/null || echo "0")
@@ -3720,46 +3773,102 @@ while true; do
       # Calculate usage percentage
       if command -v bc >/dev/null 2>&1; then
         usage_percent_raw=\$(echo "scale=1; (\$used_bytes * 100) / \$total_bytes" | bc 2>/dev/null || echo "0.0")
+        free_percent_raw=\$(echo "scale=1; (\$available_bytes * 100) / \$total_bytes" | bc 2>/dev/null || echo "0.0")
         if [[ "\$usage_percent_raw" =~ ^\\. ]]; then
           usage_percent="0\${usage_percent_raw}"
         else
           usage_percent="\$usage_percent_raw"
         fi
-      else
-        usage_percent="0.0"
-      fi
-
-      echo "\$(date '+%Y-%m-%d %H:%M:%S') - Volume \$VOLUME_PATH: \${used_human} used of \${total_human} (\${usage_percent}% used, \${avail_human} available)" >&2
-    fi
-
-    # Check absolute threshold (available space falls below threshold)
-    if [[ -n "\$KILL_SWITCH_ABS" && -n "\$available_bytes" ]]; then
-      threshold_bytes=\$(parse_size_to_bytes "\$KILL_SWITCH_ABS")
-      if [[ -n "\$threshold_bytes" && "\$available_bytes" -lt "\$threshold_bytes" ]]; then
-        echo "KILL_SWITCH_TRIGGERED: Available space (\$available_bytes bytes) is below absolute threshold (\$KILL_SWITCH_ABS = \$threshold_bytes bytes)" >&2
-        exit 0  # Signal to kill the target pod
-      fi
-    fi
-
-    # Check relative threshold
-    if [[ -n "\$KILL_SWITCH_REL" && -n "\$available_bytes" && -n "\$total_bytes" && "\$total_bytes" -gt 0 ]]; then
-      rel_threshold="\${KILL_SWITCH_REL%\\%}"  # Remove % if present
-      if command -v bc >/dev/null 2>&1; then
-        free_percent=\$(echo "scale=2; (\$available_bytes * 100) / \$total_bytes" | bc 2>/dev/null || echo "")
-        if [[ -n "\$free_percent" && -n "\$rel_threshold" ]]; then
-          should_kill=\$(echo "\$free_percent < \$rel_threshold" | bc -l 2>/dev/null || echo "0")
-          if [[ "\$should_kill" == "1" ]]; then
-            echo "KILL_SWITCH_TRIGGERED: Free space (\${free_percent}%) is below relative threshold (\$KILL_SWITCH_REL)" >&2
-            exit 0  # Signal to kill the target pod
-          fi
+        if [[ "\$free_percent_raw" =~ ^\\. ]]; then
+          free_percent="0\${free_percent_raw}"
+        else
+          free_percent="\$free_percent_raw"
         fi
       else
-        echo "ERROR: Relative threshold monitoring requires 'bc' command, but it is not available in this container image." >&2
-        echo "       Either use --kill-switch-abs for absolute threshold monitoring," >&2
-        echo "       or ensure your container image (--image flag) includes the 'bc' package." >&2
-        exit 1  # Exit with error to indicate configuration problem
+        usage_percent="0.0"
+        free_percent="0.0"
+      fi
+
+      # Check absolute threshold (available space falls below threshold)
+      status_msg="OK"
+      if [[ -n "\$KILL_SWITCH_ABS" && -n "\$available_bytes" ]]; then
+        threshold_bytes=\$(parse_size_to_bytes "\$KILL_SWITCH_ABS")
+        if [[ -n "\$threshold_bytes" ]]; then
+          # Convert threshold to human-readable for display
+          if [[ "\$threshold_bytes" -ge 1073741824 ]]; then
+            threshold_raw=\$(echo "scale=2; \$threshold_bytes / 1073741824" | bc 2>/dev/null || echo "0")
+            threshold_display=\$(format_bc_result "\$threshold_raw" "GB")
+          elif [[ "\$threshold_bytes" -ge 1048576 ]]; then
+            threshold_raw=\$(echo "scale=2; \$threshold_bytes / 1048576" | bc 2>/dev/null || echo "0")
+            threshold_display=\$(format_bc_result "\$threshold_raw" "MB")
+          else
+            threshold_display="\${threshold_bytes}B"
+          fi
+
+          if [[ "\$available_bytes" -lt "\$threshold_bytes" ]]; then
+            status_msg="TRIGGERED"
+            printf "%-19s | %-9s | %-9s | %-9s | %5s%% | %5s%% | %-9s | %-20s\n" \
+              "\$TIMESTAMP" "\$total_human" "\$used_human" "\$avail_human" "\$usage_percent" "\$free_percent" "\$threshold_display" "\$status_msg" >&2
+            echo "" >&2
+            echo "======================================================================" >&2
+            echo "KILL_SWITCH_TRIGGERED at \$TIMESTAMP" >&2
+            echo "Available space (\${avail_human}) < Threshold (\${threshold_display})" >&2
+            echo "Terminating target pod: ${target_debug_pod}" >&2
+            echo "======================================================================" >&2
+            exit 0
+          else
+            margin_bytes=\$((\$available_bytes - \$threshold_bytes))
+            if [[ "\$margin_bytes" -ge 1073741824 ]]; then
+              margin_raw=\$(echo "scale=2; \$margin_bytes / 1073741824" | bc 2>/dev/null || echo "0")
+              margin_display=\$(format_bc_result "\$margin_raw" "GB")
+            elif [[ "\$margin_bytes" -ge 1048576 ]]; then
+              margin_raw=\$(echo "scale=2; \$margin_bytes / 1048576" | bc 2>/dev/null || echo "0")
+              margin_display=\$(format_bc_result "\$margin_raw" "MB")
+            else
+              margin_display="\${margin_bytes}B"
+            fi
+            status_msg="OK +\${margin_display}"
+          fi
+
+          printf "%-19s | %-9s | %-9s | %-9s | %5s%% | %5s%% | %-9s | %-20s\n" \
+            "\$TIMESTAMP" "\$total_human" "\$used_human" "\$avail_human" "\$usage_percent" "\$free_percent" "\$threshold_display" "\$status_msg" >&2
+        fi
+      fi
+
+      # Check relative threshold
+      if [[ -n "\$KILL_SWITCH_REL" && -n "\$available_bytes" && -n "\$total_bytes" && "\$total_bytes" -gt 0 ]]; then
+        rel_threshold="\${KILL_SWITCH_REL%\\%}"  # Remove % if present
+        if command -v bc >/dev/null 2>&1; then
+          if [[ -n "\$free_percent" && -n "\$rel_threshold" ]]; then
+            threshold_display="\${rel_threshold}%"
+
+            should_kill=\$(echo "\$free_percent < \$rel_threshold" | bc -l 2>/dev/null || echo "0")
+            if [[ "\$should_kill" == "1" ]]; then
+              status_msg="TRIGGERED"
+              printf "%-19s | %-9s | %-9s | %-9s | %5s%% | %5s%% | %-9s | %-20s\n" \
+                "\$TIMESTAMP" "\$total_human" "\$used_human" "\$avail_human" "\$usage_percent" "\$free_percent" "\$threshold_display" "\$status_msg" >&2
+              echo "" >&2
+              echo "======================================================================" >&2
+              echo "KILL_SWITCH_TRIGGERED at \$TIMESTAMP" >&2
+              echo "Free space (\${free_percent}%) < Threshold (\${rel_threshold}%)" >&2
+              echo "Terminating target pod: ${target_debug_pod}" >&2
+              echo "======================================================================" >&2
+              exit 0
+            else
+              margin_percent=\$(echo "\$free_percent - \$rel_threshold" | bc -l 2>/dev/null || echo "0")
+              status_msg="OK +\${margin_percent}%"
+              printf "%-19s | %-9s | %-9s | %-9s | %5s%% | %5s%% | %-9s | %-20s\n" \
+                "\$TIMESTAMP" "\$total_human" "\$used_human" "\$avail_human" "\$usage_percent" "\$free_percent" "\$threshold_display" "\$status_msg" >&2
+            fi
+          fi
+        else
+          echo "ERROR: Relative threshold requires 'bc' command" >&2
+          exit 1
+        fi
       fi
     fi
+  else
+    printf "%-19s | ERROR: Cannot read filesystem stats for \$VOLUME_PATH\n" "\$TIMESTAMP" >&2
   fi
 
   sleep "\$CHECK_INTERVAL"
