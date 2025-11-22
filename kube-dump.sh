@@ -4252,8 +4252,9 @@ main() {
     exit 1
   fi
 
-  # Create kill switch monitor pods if thresholds are configured
-  if [[ -n "$KILL_SWITCH_ABS" || -n "$KILL_SWITCH_REL" ]]; then
+  # Create kill switch monitor pods if thresholds or volume paths are configured
+  # Volume paths alone will trigger auto-detection of thresholds from kubelet
+  if [[ -n "$KILL_SWITCH_ABS" || -n "$KILL_SWITCH_REL" || -n "$POD_VOLUME" || -n "$NODE_VOLUME" ]]; then
     create_kill_switch_monitor_pods
 
     # Start monitoring kill switches in background
