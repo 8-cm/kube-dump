@@ -34,8 +34,8 @@ usage() {
   echo "   or: $0 [--label <label_selector>] [--namespace <namespace>] [--to-namespace=<debug_namespace>] [--execute <command>]"
   echo ""
   echo "Options:"
-  echo "  -l, --label          Label selector to find multiple pods [default: dumpme=yes]"
-  echo "  -L, --node-label     Label selector to find multiple nodes (for node-level commands)"
+  echo "  -l, --label          Label selector to find multiple pods (can be specified multiple times for OR logic) [default: dumpme=yes]"
+  echo "  -L, --node-label     Label selector to find multiple nodes (can be specified multiple times for OR logic)"
   echo "  -n, --namespace      Namespace where debug pods should be created (optional)"
   echo "  --to-namespace       Alias for -n/--namespace (deprecated, use -n instead)"
   echo "  --cri                Container runtime interface (containerd, crio, docker) [default: containerd]"
@@ -50,11 +50,12 @@ usage() {
   echo "  -o, --output         Output directory for downloaded files"
   echo "  -I, --placeholder    Set placeholder character for hostname substitution [default: %]"
   echo "  --kill-switch-abs    Kill pods when disk usage exceeds absolute threshold (e.g., 1GB, 500MB)"
-  echo "  --kill-switch-rel    Kill pods when free space falls below relative threshold (e.g., 10%)"
+  echo "  --kill-switch-rel    Kill pods when free space falls below relative threshold (e.g., 10%) [requires 'bc' in image]"
   echo "  --pod-volume         Volume path to monitor for pod-based kill switches (e.g., /tmp)"
   echo "  --node-volume        Volume path to monitor for node-based kill switches (e.g., /var)"
   echo "  --image              Container image for debug/discovery/killswitch pods [default: nicolaka/netshoot]"
   echo "  --no-glyphs          Disable emojis and use text labels like [INFO], [ERROR], [OK]"
+  echo "  --verbose            Enable verbose logging (max k8s verbosity, per-pod logs to OUTPUT_DIR/debug/)"
   echo "  -h, --help           Show this help message and exit"
   echo ""
   echo "Examples:"
@@ -64,8 +65,11 @@ usage() {
   echo "  # Capture traffic from all pods with app=nginx label:"
   echo "  $0 -l app=nginx"
   echo ""
-  echo "  # Capture from pods with multiple labels:"
+  echo "  # Capture from pods with multiple labels (AND logic within selector):"
   echo "  $0 -l 'tier=frontend,env=prod'"
+  echo ""
+  echo "  # Capture from pods matching ANY of multiple label selectors (OR logic):"
+  echo "  $0 -l app=nginx -l app=apache -l app=httpd"
   echo ""
   echo "  # Create debug pods in specific namespace (pods found cluster-wide):"
   echo "  $0 -l app=backend -n monitoring"
@@ -87,6 +91,9 @@ usage() {
   echo ""
   echo "  # Monitor all worker nodes:"
   echo "  $0 -L worker=true -E 'tcpdump -i eth0 -nn host 10.1.1.1'"
+  echo ""
+  echo "  # Run command on nodes matching ANY of multiple label selectors (OR logic):"
+  echo "  $0 -L zone=us-west -L zone=us-east -E 'ss -tuln'"
   echo ""
   echo "  # Use placeholder for hostname substitution in commands:"
   echo "  $0 -l app=web -e 'tcpdump -i any -w %.pcap'"
@@ -114,6 +121,9 @@ usage() {
   echo ""
   echo "  # Use custom container image for all debug pods:"
   echo "  $0 -l app=web --image alpine:latest"
+  echo ""
+  echo "  # Enable verbose logging with max Kubernetes verbosity (requires -o):"
+  echo "  $0 -l app=web -o ./output --verbose"
   echo ""
   echo "Note: Script automatically selects first container from each pod for PID discovery."
   echo "All containers in a pod share the same network namespace."
@@ -154,10 +164,10 @@ usage() {
 # -------------------------------------------------------------------------------
 initialize_variables() {
   POD_NAMES=()  # Array for discovered pods
-  POD_LABEL="dumpme=yes"  # Default label selector for finding pods
-  POD_LABEL_EXPLICIT=false  # Track if POD_LABEL was explicitly set by user
+  POD_LABELS=("dumpme=yes")  # Array of label selectors for finding pods (OR logic)
+  POD_LABEL_EXPLICIT=false  # Track if POD_LABELS was explicitly set by user
   NODE_NAMES=()  # Array for discovered nodes
-  NODE_LABEL=""  # Label selector for finding nodes
+  NODE_LABELS=()  # Array of label selectors for finding nodes (OR logic)
   NODE_COMMAND="tcpdump -i any -nn -s 0"  # Default tcpdump command (same as pod mode)
   CUSTOM_NODE_COMMAND=""  # Custom command from -E
   SELECT_TO_DOWNLOAD_COMMAND=""  # Command to list files to download from -s
@@ -189,6 +199,8 @@ initialize_variables() {
   DEBUG_IMAGE="nicolaka/netshoot"  # Default container image for debug/discovery/killswitch pods
   KILL_SWITCH_MONITOR_PODS=()  # Array for kill switch monitor pods
   KUBE_CLI=""  # Will be set to 'oc' or '$KUBE_CLI' based on availability
+  VERBOSE="false"  # Default: disable verbose logging
+  DEBUG_LOG_DIR=""  # Directory for verbose logs (created as OUTPUT_DIR/debug)
 }
 
 # -------------------------------------------------------------------------------
@@ -275,6 +287,258 @@ validate_option_value() {
 }
 
 # -------------------------------------------------------------------------------
+# Function: truncate_name_with_hash
+# -------------------------------------------------------------------------------
+# Description:
+#   Ensures a Kubernetes resource name does not exceed 253 characters (DNS subdomain
+#   limit per RFC 1123). If the name is too long, it truncates it and appends a
+#   hash of the original name to maintain uniqueness.
+#
+# Parameters:
+#   $1 (name): The name to validate and potentially truncate
+#
+# Example Usage:
+#   safe_name=$(truncate_name_with_hash "very-long-node-name-debug-12345678-1234567890")
+#
+# Expected Output:
+#   - Returns the original name if it's 253 characters or less
+#   - Returns truncated name with 8-char hash suffix if longer
+#
+# Detailed Behavior:
+#   - Checks if name length exceeds 253 characters
+#   - If too long, generates 8-character hash of the full name
+#   - Truncates to (253 - 9) = 244 chars and appends "-{hash}"
+#   - Uses md5sum, md5, or cksum depending on platform availability
+# -------------------------------------------------------------------------------
+truncate_name_with_hash() {
+  local name="$1"
+  local max_length=253
+
+  if [[ ${#name} -le $max_length ]]; then
+    echo "$name"
+    return
+  fi
+
+  # Generate hash of full name for uniqueness
+  local name_hash
+  if command -v md5sum &>/dev/null; then
+    name_hash=$(echo "$name" | md5sum | cut -c1-8)
+  elif command -v md5 &>/dev/null; then
+    name_hash=$(echo "$name" | md5 | cut -c1-8)
+  else
+    name_hash=$(echo "$name" | cksum | cut -d' ' -f1 | cut -c1-8)
+  fi
+
+  # Truncate to fit: max_length - 1 (dash) - 8 (hash)
+  local truncate_to=$((max_length - 9))
+  local truncated="${name:0:$truncate_to}"
+
+  echo "${truncated}-${name_hash}"
+}
+
+# -------------------------------------------------------------------------------
+# Function: truncate_label_value_with_hash
+# -------------------------------------------------------------------------------
+# Description:
+#   Ensures a Kubernetes label value does not exceed 63 characters. If the value
+#   is too long, it truncates it and appends a hash of the original value to
+#   maintain uniqueness.
+#
+# Parameters:
+#   $1 (value): The label value to validate and potentially truncate
+#
+# Example Usage:
+#   safe_label=$(truncate_label_value_with_hash "very-long-node-name-that-exceeds-limits")
+#
+# Expected Output:
+#   - Returns the original value if it's 63 characters or less
+#   - Returns truncated value with 8-char hash suffix if longer
+#
+# Detailed Behavior:
+#   - Checks if value length exceeds 63 characters
+#   - If too long, generates 8-character hash of the full value
+#   - Truncates to (63 - 9) = 54 chars and appends "-{hash}"
+#   - Uses md5sum, md5, or cksum depending on platform availability
+# -------------------------------------------------------------------------------
+truncate_label_value_with_hash() {
+  local value="$1"
+  local max_length=63
+
+  if [[ ${#value} -le $max_length ]]; then
+    echo "$value"
+    return
+  fi
+
+  # Generate hash of full value for uniqueness
+  local value_hash
+  if command -v md5sum &>/dev/null; then
+    value_hash=$(echo "$value" | md5sum | cut -c1-8)
+  elif command -v md5 &>/dev/null; then
+    value_hash=$(echo "$value" | md5 | cut -c1-8)
+  else
+    value_hash=$(echo "$value" | cksum | cut -d' ' -f1 | cut -c1-8)
+  fi
+
+  # Truncate to fit: max_length - 1 (dash) - 8 (hash)
+  local truncate_to=$((max_length - 9))
+  local truncated="${value:0:$truncate_to}"
+
+  echo "${truncated}-${value_hash}"
+}
+
+# -------------------------------------------------------------------------------
+# Function: setup_debug_logging
+# -------------------------------------------------------------------------------
+# Description:
+#   Sets up the debug logging directory when --verbose flag is enabled. Creates
+#   a 'debug' subdirectory inside the output directory specified by -o flag.
+#   This function should be called after OUTPUT_DIR is set and before any
+#   operations that need verbose logging.
+#
+# Parameters:
+#   None. (Uses global OUTPUT_DIR and VERBOSE variables)
+#
+# Example Usage:
+#   setup_debug_logging
+#
+# Expected Output:
+#   - Sets DEBUG_LOG_DIR to OUTPUT_DIR/debug if VERBOSE=true
+#   - Creates the debug directory if it doesn't exist
+#   - Returns 0 on success, 1 on failure
+#
+# Detailed Behavior:
+#   - Only acts if VERBOSE is true
+#   - Requires OUTPUT_DIR to be set (via -o flag)
+#   - Creates nested directory structure if needed
+#   - Prints error message if directory creation fails
+# -------------------------------------------------------------------------------
+setup_debug_logging() {
+  if [[ "$VERBOSE" != "true" ]]; then
+    return 0
+  fi
+
+  if [[ -z "$OUTPUT_DIR" ]]; then
+    echo "Error: --verbose requires -o (output directory) to be specified" >&2
+    return 1
+  fi
+
+  DEBUG_LOG_DIR="${OUTPUT_DIR}/debug"
+
+  if ! mkdir -p "$DEBUG_LOG_DIR" 2>/dev/null; then
+    echo "Error: Failed to create debug log directory: $DEBUG_LOG_DIR" >&2
+    return 1
+  fi
+
+  format_message "📋 Verbose logging enabled: $DEBUG_LOG_DIR"
+  return 0
+}
+
+# -------------------------------------------------------------------------------
+# Function: get_pod_log_file
+# -------------------------------------------------------------------------------
+# Description:
+#   Generates the log file path for a specific pod and operation. Returns
+#   different paths for stdout and stderr, or empty string if verbose logging
+#   is disabled.
+#
+# Parameters:
+#   $1 (pod_name): Name of the pod
+#   $2 (operation): Operation type (e.g., "create", "exec", "logs", "cp")
+#   $3 (stream): Either "stdout" or "stderr"
+#
+# Example Usage:
+#   stdout_log=$(get_pod_log_file "debug-pod-123" "create" "stdout")
+#   stderr_log=$(get_pod_log_file "debug-pod-123" "exec" "stderr")
+#
+# Expected Output:
+#   - Returns path like: /output/debug/debug-pod-123.create.stdout.log
+#   - Returns empty string if VERBOSE is false
+#
+# Detailed Behavior:
+#   - Checks if VERBOSE is enabled
+#   - Constructs log file path with pod name, operation, and stream type
+#   - Returns empty string if verbose logging is disabled
+# -------------------------------------------------------------------------------
+get_pod_log_file() {
+  local pod_name="$1"
+  local operation="$2"
+  local stream="$3"
+
+  if [[ "$VERBOSE" != "true" || -z "$DEBUG_LOG_DIR" ]]; then
+    echo ""
+    return
+  fi
+
+  echo "${DEBUG_LOG_DIR}/${pod_name}.${operation}.${stream}.log"
+}
+
+# -------------------------------------------------------------------------------
+# Function: run_kube_cmd
+# -------------------------------------------------------------------------------
+# Description:
+#   Wrapper function for kubectl/oc commands that adds verbose logging when
+#   enabled. Captures stdout and stderr to separate log files per pod and
+#   operation, and uses maximum Kubernetes verbosity level (--v=10).
+#
+# Parameters:
+#   $1 (pod_name): Name of the pod for logging (use "global" for non-pod operations)
+#   $2 (operation): Operation type (e.g., "create", "apply", "exec", "get", "delete")
+#   $@ (remaining): The kubectl/oc command arguments
+#
+# Example Usage:
+#   run_kube_cmd "debug-pod-123" "create" apply -f - <<EOF ... EOF
+#   run_kube_cmd "debug-pod-123" "exec" exec debug-pod-123 -n default -- ls
+#   run_kube_cmd "global" "get" get pods -n default
+#
+# Expected Output:
+#   - Executes the command with or without verbose logging based on VERBOSE flag
+#   - When VERBOSE=true: adds --v=10 and redirects stdout/stderr to log files
+#   - Returns the exit code of the command
+#
+# Detailed Behavior:
+#   - If VERBOSE=false: executes command normally without logging
+#   - If VERBOSE=true:
+#     * Adds --v=10 to kubectl/oc commands (max verbosity)
+#     * Redirects stdout to: DEBUG_LOG_DIR/{pod_name}.{operation}.stdout.log
+#     * Redirects stderr to: DEBUG_LOG_DIR/{pod_name}.{operation}.stderr.log
+#     * Appends to log files (doesn't overwrite)
+#   - Preserves command exit code
+# -------------------------------------------------------------------------------
+run_kube_cmd() {
+  local pod_name="$1"
+  local operation="$2"
+  shift 2
+
+  if [[ "$VERBOSE" != "true" ]]; then
+    # No verbose logging, run command normally
+    $KUBE_CLI "$@"
+    return $?
+  fi
+
+  # Verbose logging enabled
+  local stdout_log
+  local stderr_log
+  stdout_log=$(get_pod_log_file "$pod_name" "$operation" "stdout")
+  stderr_log=$(get_pod_log_file "$pod_name" "$operation" "stderr")
+
+  # Add timestamp to logs
+  echo "=== $(date '+%Y-%m-%d %H:%M:%S') - $operation ===" >> "$stdout_log"
+  echo "=== $(date '+%Y-%m-%d %H:%M:%S') - $operation ===" >> "$stderr_log"
+
+  # Run command with max verbosity and redirect output
+  $KUBE_CLI --v=10 "$@" >> "$stdout_log" 2>> "$stderr_log"
+  local exit_code=$?
+
+  # Log completion
+  echo "=== Completed with exit code: $exit_code ===" >> "$stdout_log"
+  echo "=== Completed with exit code: $exit_code ===" >> "$stderr_log"
+  echo "" >> "$stdout_log"
+  echo "" >> "$stderr_log"
+
+  return $exit_code
+}
+
+# -------------------------------------------------------------------------------
 # Function: format_message
 # -------------------------------------------------------------------------------
 # Description:
@@ -302,10 +566,11 @@ validate_option_value() {
 #   - If NO_GLYPHS is true, performs comprehensive emoji-to-text substitution:
 #     * 🔍 → [SEARCH], 🔧 → [SETUP], 🛡️ → [SECURITY], ✅ → [OK]
 #     * 🔴 → [KILL], ❌ → [ERROR], 🟢 → [SUCCESS], ⚠️ → [WARNING]
-#     * 📋 → [INFO], 🔄 → [PROGRESS], 📥 → [DOWNLOAD], 🚫 → [BLOCKED]
+#     * 📋 → [INFO], 🔄 → [PROGRESS], 📥 → [DOWNLOAD], 📂 → [DIR], 🚫 → [BLOCKED]
 #     * 💾 → [STORAGE], ⏳ → [WAITING], 🖥️ → [NODE], ℹ️ → [INFO]
 #     * ⏸️ → [PAUSE], 🗑️ → [CLEANUP], 📦 → [POD], 🧹 → [CLEAN]
 #     * 🚀 → [LAUNCH], 🎯 → [TARGET], 📊 → [STATUS], 🎉 → [COMPLETE]
+#     * ➕ → [+], • → * (bullet point)
 #     * ━ → = (converts Unicode box drawing to ASCII)
 #   - Prints formatted message to stdout
 #   - If OUTPUT_DIR and KUBE_DUMP_LOG_FILE are set, appends timestamped entry to log file
@@ -326,6 +591,7 @@ format_message() {
     message="${message//📋/[INFO]}"
     message="${message//🔄/[PROGRESS]}"
     message="${message//📥/[DOWNLOAD]}"
+    message="${message//📂/[DIR]}"
     message="${message//🚫/[BLOCKED]}"
     message="${message//💾/[STORAGE]}"
     message="${message//⏳/[WAITING]}"
@@ -339,6 +605,8 @@ format_message() {
     message="${message//🎯/[TARGET]}"
     message="${message//📊/[STATUS]}"
     message="${message//🎉/[COMPLETE]}"
+    message="${message//➕/[+]}"
+    message="${message//•/*}"
     message="${message//━/=}"
   fi
 
@@ -378,10 +646,11 @@ format_message() {
 #   - Applies the same comprehensive glyph replacement mapping:
 #     * 🔍 → [SEARCH], 🔧 → [SETUP], 🛡️ → [SECURITY], ✅ → [OK]
 #     * 🔴 → [KILL], ❌ → [ERROR], 🟢 → [SUCCESS], ⚠️ → [WARNING]
-#     * 📋 → [INFO], 🔄 → [PROGRESS], 📥 → [DOWNLOAD], 🚫 → [BLOCKED]
+#     * 📋 → [INFO], 🔄 → [PROGRESS], 📥 → [DOWNLOAD], 📂 → [DIR], 🚫 → [BLOCKED]
 #     * 💾 → [STORAGE], ⏳ → [WAITING], 🖥️ → [NODE], ℹ️ → [INFO]
 #     * ⏸️ → [PAUSE], 🗑️ → [CLEANUP], 📦 → [POD], 🧹 → [CLEAN]
 #     * 🚀 → [LAUNCH], 🎯 → [TARGET], 📊 → [STATUS], 🎉 → [COMPLETE]
+#     * ➕ → [+], • → * (bullet point)
 #     * ━ → = (converts Unicode box drawing to ASCII)
 #   - Outputs formatted message to stderr using >&2 redirection
 #   - If OUTPUT_DIR and KUBE_DUMP_LOG_FILE are set, appends timestamped entry with "STDERR:" prefix
@@ -403,6 +672,7 @@ format_message_stderr() {
     message="${message//📋/[INFO]}"
     message="${message//🔄/[PROGRESS]}"
     message="${message//📥/[DOWNLOAD]}"
+    message="${message//📂/[DIR]}"
     message="${message//🚫/[BLOCKED]}"
     message="${message//💾/[STORAGE]}"
     message="${message//⏳/[WAITING]}"
@@ -416,6 +686,8 @@ format_message_stderr() {
     message="${message//🎯/[TARGET]}"
     message="${message//📊/[STATUS]}"
     message="${message//🎉/[COMPLETE]}"
+    message="${message//➕/[+]}"
+    message="${message//•/*}"
     message="${message//━/=}"
   fi
 
@@ -527,11 +799,37 @@ show_configuration() {
   echo "Kubernetes CLI:      $KUBE_CLI"
   echo ""
   echo "Pod Selection:"
-  echo "  Label Selector:    ${POD_LABEL:-"(not set)"}"
+  if [[ ${#POD_LABELS[@]} -eq 0 ]]; then
+    echo "  Label Selectors:   (not set)"
+  elif [[ ${#POD_LABELS[@]} -eq 1 ]]; then
+    echo "  Label Selector:    ${POD_LABELS[0]}"
+  else
+    echo "  Label Selectors:   (OR logic)"
+    for label in "${POD_LABELS[@]}"; do
+      if [[ "$NO_GLYPHS" == "true" ]]; then
+        echo "                     * $label"
+      else
+        echo "                     • $label"
+      fi
+    done
+  fi
   echo "  Namespace:         ${DEBUG_NAMESPACE:-"(current/default)"}"
   echo ""
   echo "Node Selection:"
-  echo "  Node Label:        ${NODE_LABEL:-"(not set)"}"
+  if [[ ${#NODE_LABELS[@]} -eq 0 ]]; then
+    echo "  Node Labels:       (not set)"
+  elif [[ ${#NODE_LABELS[@]} -eq 1 ]]; then
+    echo "  Node Label:        ${NODE_LABELS[0]}"
+  else
+    echo "  Node Labels:       (OR logic)"
+    for label in "${NODE_LABELS[@]}"; do
+      if [[ "$NO_GLYPHS" == "true" ]]; then
+        echo "                     * $label"
+      else
+        echo "                     • $label"
+      fi
+    done
+  fi
   echo "  Include Nodes:     ${INCLUDE_NODES}"
   echo ""
   echo "Commands:"
@@ -735,28 +1033,36 @@ parse_arguments() {
     case $arg in
       -l|--label)
         if [[ $1 == --label=* ]]; then
-          POD_LABEL="$val"
+          # On first explicit -l, clear default and add new value
+          if [[ "$POD_LABEL_EXPLICIT" == "false" ]]; then
+            POD_LABELS=()
+          fi
+          POD_LABELS+=("$val")
           POD_LABEL_EXPLICIT=true
         else
           validate_option_value "$val" "-l|--label"
-          POD_LABEL="$val"
+          # On first explicit -l, clear default and add new value
+          if [[ "$POD_LABEL_EXPLICIT" == "false" ]]; then
+            POD_LABELS=()
+          fi
+          POD_LABELS+=("$val")
           POD_LABEL_EXPLICIT=true
           shift
         fi
         ;;
       -L|--node-label)
         if [[ $1 == --node-label=* ]]; then
-          NODE_LABEL="$val"
-          # Clear default pod label if only node targeting is intended (not explicitly set)
-          if [[ -z "$CUSTOM_COMMAND" && "$POD_LABEL" == "dumpme=yes" && "$POD_LABEL_EXPLICIT" == "false" ]]; then
-            POD_LABEL=""
+          NODE_LABELS+=("$val")
+          # Clear default pod labels if only node targeting is intended (not explicitly set)
+          if [[ -z "$CUSTOM_COMMAND" && ${#POD_LABELS[@]} -eq 1 && "${POD_LABELS[0]}" == "dumpme=yes" && "$POD_LABEL_EXPLICIT" == "false" ]]; then
+            POD_LABELS=()
           fi
         else
           validate_option_value "$val" "-L|--node-label"
-          NODE_LABEL="$val"
-          # Clear default pod label if only node targeting is intended (not explicitly set)
-          if [[ -z "$CUSTOM_COMMAND" && "$POD_LABEL" == "dumpme=yes" && "$POD_LABEL_EXPLICIT" == "false" ]]; then
-            POD_LABEL=""
+          NODE_LABELS+=("$val")
+          # Clear default pod labels if only node targeting is intended (not explicitly set)
+          if [[ -z "$CUSTOM_COMMAND" && ${#POD_LABELS[@]} -eq 1 && "${POD_LABELS[0]}" == "dumpme=yes" && "$POD_LABEL_EXPLICIT" == "false" ]]; then
+            POD_LABELS=()
           fi
           shift
         fi
@@ -913,6 +1219,9 @@ parse_arguments() {
       --no-glyphs)
         NO_GLYPHS=true
         ;;
+      --verbose)
+        VERBOSE=true
+        ;;
       -*)
         echo "Error: Unknown option: $1" >&2
         usage
@@ -976,11 +1285,11 @@ validate_arguments() {
   local has_pod_options=false
   local has_node_options=false
 
-  if [[ -n "$POD_LABEL" ]]; then
+  if [[ ${#POD_LABELS[@]} -gt 0 ]]; then
     has_pod_options=true
   fi
 
-  if [[ -n "$NODE_LABEL" ]]; then
+  if [[ ${#NODE_LABELS[@]} -gt 0 ]]; then
     has_node_options=true
   fi
 
@@ -999,7 +1308,11 @@ validate_arguments() {
   validate_variable "EXECUTION_MODE" "$EXECUTION_MODE" "enum" "pod,node,mixed" "true"
 
   if [[ "$EXECUTION_MODE" == "pod" || "$EXECUTION_MODE" == "mixed" ]]; then
-    validate_variable "POD_LABEL" "$POD_LABEL" "string" "" "true"
+    # Validate that POD_LABELS array has at least one element
+    if [[ ${#POD_LABELS[@]} -eq 0 ]]; then
+      echo "Error: No pod label selectors provided" >&2
+      return 1
+    fi
     validate_variable "CAPTURE_COMMAND" "$CAPTURE_COMMAND" "string" "" "true"
     validate_variable "CUSTOM_COMMAND" "$CUSTOM_COMMAND" "string" "" "false"
   fi
@@ -1008,12 +1321,16 @@ validate_arguments() {
     validate_variable "NODE_COMMAND" "$NODE_COMMAND" "string" "" "true"
     validate_variable "CUSTOM_NODE_COMMAND" "$CUSTOM_NODE_COMMAND" "string" "" "false"
 
-    # For mixed mode triggered by --include-nodes, NODE_LABEL is optional
-    if [[ "$EXECUTION_MODE" == "mixed" && "$INCLUDE_NODES" == "true" && -z "$NODE_LABEL" ]]; then
-      # --include-nodes case: NODE_LABEL is not required
+    # For mixed mode triggered by --include-nodes, NODE_LABELS is optional
+    if [[ "$EXECUTION_MODE" == "mixed" && "$INCLUDE_NODES" == "true" && ${#NODE_LABELS[@]} -eq 0 ]]; then
+      # --include-nodes case: NODE_LABELS is not required
       :
     else
-      validate_variable "NODE_LABEL" "$NODE_LABEL" "string" "" "true"
+      # Validate that NODE_LABELS array has at least one element
+      if [[ ${#NODE_LABELS[@]} -eq 0 ]]; then
+        echo "Error: No node label selectors provided" >&2
+        return 1
+      fi
     fi
   fi
 
@@ -1119,7 +1436,7 @@ select_target_pods() {
   fi
 
   # Label selector is required
-  if [[ -z "$POD_LABEL" ]]; then
+  if [[ ${#POD_LABELS[@]} -eq 0 ]]; then
     echo "Error: Label selector (-l) is required" >&2
     return 1
   fi
@@ -1252,27 +1569,60 @@ prepare_target_pods() {
 #   7. Handles errors gracefully with descriptive error messages
 # -------------------------------------------------------------------------------
 select_target_nodes() {
-  format_message "🔍 Finding nodes with label selector: $NODE_LABEL"
+  # Display all label selectors being used
+  if [[ ${#NODE_LABELS[@]} -eq 1 ]]; then
+    format_message "🔍 Finding nodes with label selector: ${NODE_LABELS[0]}"
+  else
+    format_message "🔍 Finding nodes with label selectors (OR logic):"
+    for label in "${NODE_LABELS[@]}"; do
+      format_message "   • $label"
+    done
+  fi
   echo ""
 
-  # Get nodes matching the label selector
-  local nodes_output
-  if ! nodes_output=$($KUBE_CLI get nodes -l "$NODE_LABEL" -o custom-columns="NAME:.metadata.name" --no-headers 2>/dev/null); then
-    echo "Error: Failed to query nodes with label selector '$NODE_LABEL'" >&2
+  # Collect all nodes from all label selectors
+  local all_nodes_output=""
+
+  # Iterate through each label selector
+  for node_label in "${NODE_LABELS[@]}"; do
+    local nodes_output
+    if ! nodes_output=$($KUBE_CLI get nodes -l "$node_label" -o custom-columns="NAME:.metadata.name" --no-headers 2>/dev/null); then
+      echo "Error: Failed to query nodes with label selector '$node_label'" >&2
+      return 1
+    fi
+
+    # Collect nodes from this label selector
+    if [[ -n "$nodes_output" ]]; then
+      all_nodes_output="${all_nodes_output}${nodes_output}"$'\n'
+    fi
+  done
+
+  # Check if any nodes were found
+  if [[ -z "$all_nodes_output" ]]; then
+    echo "Error: No nodes found matching any of the label selectors" >&2
     return 1
   fi
 
-  if [[ -z "$nodes_output" ]]; then
-    echo "Error: No nodes found with label selector '$NODE_LABEL'" >&2
-    return 1
-  fi
-
-  # Convert to array (compatible with older bash versions)
+  # Convert to array with deduplication (bash 3.2 compatible)
   while IFS= read -r line; do
-    NODE_NAMES+=("$line")
-  done <<< "$nodes_output"
+    if [[ -n "$line" ]]; then
+      # Check if already in array (bash 3.2 compatible)
+      local already_added=false
+      for existing_node in "${NODE_NAMES[@]}"; do
+        if [[ "$existing_node" == "$line" ]]; then
+          already_added=true
+          break
+        fi
+      done
 
-  format_message "✅ Found ${#NODE_NAMES[@]} nodes:"
+      # Only add if not already in array
+      if [[ "$already_added" == "false" ]]; then
+        NODE_NAMES+=("$line")
+      fi
+    fi
+  done <<< "$all_nodes_output"
+
+  format_message "✅ Found ${#NODE_NAMES[@]} unique nodes:"
   for node_name in "${NODE_NAMES[@]}"; do
     format_message "   🖥️  $node_name"
     TARGET_NODES+=("$node_name")
@@ -1315,7 +1665,7 @@ select_target_nodes() {
     done
 
     if [[ ${#additional_nodes[@]} -gt 0 ]]; then
-      echo "   ➕ Added ${#additional_nodes[@]} additional nodes from pod selections:"
+      format_message "   ➕ Added ${#additional_nodes[@]} additional nodes from pod selections:"
       for node in "${additional_nodes[@]}"; do
         format_message "      🖥️  $node"
       done
@@ -1360,28 +1710,74 @@ select_target_nodes() {
 #   - This function is the core of the pod discovery mechanism
 # -------------------------------------------------------------------------------
 find_pods_by_label() {
-  format_message "🔍 Finding pods with label selector: $POD_LABEL"
+  # Display all label selectors being used
+  if [[ ${#POD_LABELS[@]} -eq 1 ]]; then
+    format_message "🔍 Finding pods with label selector: ${POD_LABELS[0]}"
+  else
+    format_message "🔍 Finding pods with label selectors (OR logic):"
+    for label in "${POD_LABELS[@]}"; do
+      format_message "   • $label"
+    done
+  fi
   echo ""
 
-  local pod_list
-  if ! pod_list=$($KUBE_CLI get pods --all-namespaces -l "${POD_LABEL}" -o jsonpath='{range .items[*]}{.metadata.name}{":"}{.spec.containers[*].name}{":"}{.spec.nodeName}{":"}{.metadata.namespace}{"\n"}{end}' 2>/dev/null); then
-    echo "Error: Failed to find pods with label '$POD_LABEL'" >&2
+  # Collect all pods from all label selectors
+  local all_pods_list=""
+
+  # Iterate through each label selector
+  for pod_label in "${POD_LABELS[@]}"; do
+    local pod_list
+    if ! pod_list=$($KUBE_CLI get pods --all-namespaces -l "${pod_label}" -o jsonpath='{range .items[*]}{.metadata.name}{":"}{.spec.containers[*].name}{":"}{.spec.nodeName}{":"}{.metadata.namespace}{"\n"}{end}' 2>/dev/null); then
+      echo "Error: Failed to query pods with label '$pod_label'" >&2
+      return 1
+    fi
+
+    # Collect pods from this label selector
+    if [[ -n "$pod_list" ]]; then
+      all_pods_list="${all_pods_list}${pod_list}"$'\n'
+    fi
+  done
+
+  # Check if any pods were found
+  if [[ -z "$all_pods_list" ]]; then
+    echo "Error: No pods found matching any of the label selectors (searched cluster-wide)" >&2
     return 1
   fi
 
-  if [[ -z "$pod_list" ]]; then
-    echo "Error: No pods found with label '$POD_LABEL' (searched cluster-wide)" >&2
-    return 1
-  fi
-
-  # Parse pod list and populate POD_NAMES array
+  # Parse pod list and populate POD_NAMES array with deduplication (bash 3.2 compatible)
   while IFS= read -r line; do
     if [[ -n "$line" ]]; then
-      POD_NAMES+=("$line")
-    fi
-  done <<< "$pod_list"
+      # Extract pod name and namespace for deduplication key
+      local pod_name
+      local pod_namespace
+      pod_name=$(echo "$line" | cut -d':' -f1)
+      pod_namespace=$(echo "$line" | cut -d':' -f4)
+      local pod_key="${pod_name}:${pod_namespace}"
 
-  format_message "✅ Found ${#POD_NAMES[@]} pods:"
+      # Check if already in array (bash 3.2 compatible)
+      local already_added=false
+      for existing_pod in "${POD_NAMES[@]}"; do
+        # Extract existing pod's key
+        local existing_pod_name
+        local existing_pod_namespace
+        existing_pod_name=$(echo "$existing_pod" | cut -d':' -f1)
+        existing_pod_namespace=$(echo "$existing_pod" | cut -d':' -f4)
+        local existing_key="${existing_pod_name}:${existing_pod_namespace}"
+
+        if [[ "$existing_key" == "$pod_key" ]]; then
+          already_added=true
+          break
+        fi
+      done
+
+      # Only add if not already in array
+      if [[ "$already_added" == "false" ]]; then
+        POD_NAMES+=("$line")
+      fi
+    fi
+  done <<< "$all_pods_list"
+
+  format_message "✅ Found ${#POD_NAMES[@]} unique pods:"
   for pod_info in "${POD_NAMES[@]}"; do
     local pod_name
     local pod_namespace
@@ -1496,9 +1892,11 @@ validate_all_requirements() {
 # -------------------------------------------------------------------------------
 create_debug_pods_for_targets() {
   # Set capture command before creating pods
+  local HAS_CUSTOM_CMD="false"
   if [[ -n "$CUSTOM_COMMAND" ]]; then
     # Encode custom command to base64
     CAPTURE_COMMAND=$(echo -n "$CUSTOM_COMMAND" | base64 -w 0)
+    HAS_CUSTOM_CMD="true"
   fi
 
   # Encode select-to-download commands to base64
@@ -1533,13 +1931,14 @@ create_debug_pods_for_targets() {
       # Fallback to simple hash
       pod_hash=$(echo "$pod_name" | cksum | cut -d' ' -f1 | cut -c1-8)
     fi
-    local debug_pod_name="${node_name}-debug-${pod_hash}-${epoch_time}"
+    local debug_pod_name
+    debug_pod_name=$(truncate_name_with_hash "${node_name}-debug-${pod_hash}-${epoch_time}")
 
     # Check if pod name exists and increment until unique
     local counter=1
     while $KUBE_CLI get pod "${debug_pod_name}" -n "${debug_ns}" &>/dev/null; do
       counter=$((counter + 1))
-      debug_pod_name="${node_name}-debug-${pod_hash}-${epoch_time}-${counter}"
+      debug_pod_name=$(truncate_name_with_hash "${node_name}-debug-${pod_hash}-${epoch_time}-${counter}")
     done
 
     format_message "   📦 Creating debug pod for ${pod_name}:${container_name} on ${node_name}"
@@ -1615,13 +2014,13 @@ create_node_debug_pods() {
       node_hash=$(echo "$node_name" | cksum | cut -d' ' -f1 | cut -c1-6)
     fi
     local debug_pod_name
-    debug_pod_name="node-${node_hash}-$(date +%s)"
+    debug_pod_name=$(truncate_name_with_hash "node-${node_hash}-$(date +%s)")
     local counter=1
 
     # Check if pod name exists and increment until unique
     while $KUBE_CLI get pod "${debug_pod_name}" -n "${debug_ns}" &>/dev/null; do
       counter=$((counter + 1))
-      debug_pod_name="node-${node_hash}-$(date +%s)-${counter}"
+      debug_pod_name=$(truncate_name_with_hash "node-${node_hash}-$(date +%s)-${counter}")
     done
 
     format_message "   🖥️  Creating debug pod for node '${node_name}'"
@@ -1688,9 +2087,13 @@ create_single_node_debug_pod() {
   local debug_pod_name="$2"
   local debug_ns="$3"
 
+  # Truncate node name for label value (63 char limit)
+  local node_label_value
+  node_label_value=$(truncate_label_value_with_hash "$node_name")
+
   # Create pod with embedded script
 
-  $KUBE_CLI apply -f - 2>/dev/null <<EOF
+  run_kube_cmd "$debug_pod_name" "apply" apply -f - <<EOF
 apiVersion: v1
 kind: Pod
 metadata:
@@ -1698,7 +2101,7 @@ metadata:
   namespace: ${debug_ns}
   labels:
     app: debug
-    node: ${node_name}
+    node: ${node_label_value}
 spec:
   hostPID: true
   hostNetwork: true
@@ -1779,7 +2182,12 @@ build_node_debug_script() {
 
   cat <<SCRIPT
 set -e
-echo "=== Node command execution on node:${node_name} ===" >&2
+echo "======================================================================" >&2
+echo "Starting command execution" >&2
+echo "  Target: node=${node_name}" >&2
+echo "  Debug Pod: ${debug_pod_name}" >&2
+echo "  Command: ${final_node_command}" >&2
+echo "======================================================================" >&2
 
 # Install CRI dependencies if requested
 if [[ "${INSTALL_DEPS}" == "true" ]]; then
@@ -1798,7 +2206,9 @@ if [[ "${INSTALL_DEPS}" == "true" ]]; then
   fi
 fi
 
-echo "Executing: ${final_node_command}" >&2
+echo "======================================================================" >&2
+echo "Executing command on node: ${node_name}" >&2
+echo "======================================================================" >&2
 
 # Execute the node command directly
 ${final_node_command} ; tail -f /dev/null
@@ -1861,7 +2271,7 @@ create_single_debug_pod() {
 
   # Create pod with embedded script
 
-  $KUBE_CLI apply -f - 2>/dev/null <<EOF
+  run_kube_cmd "$debug_pod_name" "apply" apply -f - <<EOF
 apiVersion: v1
 kind: Pod
 metadata:
@@ -1952,7 +2362,20 @@ build_debug_script() {
 
   cat <<SCRIPT
 set -e
-echo "Starting network capture for ${pod_name}:${container_name}" >&2
+echo "======================================================================" >&2
+echo "Starting command execution" >&2
+echo "  Target: pod=${pod_name} container=${container_name}" >&2
+echo "  Node: ${node_name}" >&2
+echo "  Debug Pod: ${debug_pod_name}" >&2
+
+# Show command that will be executed
+if [[ "${HAS_CUSTOM_CMD}" == "true" ]]; then
+  PREVIEW_CMD=\$(echo '${CAPTURE_COMMAND}' | base64 -d)
+  echo "  Command: \$PREVIEW_CMD" >&2
+else
+  echo "  Command: ${CAPTURE_COMMAND}" >&2
+fi
+echo "======================================================================" >&2
 
 # -------------------------------------------------------------------------------
 # Function: configure_crictl_socket
@@ -2071,7 +2494,9 @@ if [ -z "\$PID" ] || [ "\$PID" = "0" ]; then
 fi
 
 echo "Found container PID: \$PID" >&2
-echo "=== Network capture for pod:${pod_name} container:${container_name} PID:\$PID ===" >&2
+echo "======================================================================" >&2
+echo "Executing command for pod:${pod_name} container:${container_name} PID:\$PID" >&2
+echo "======================================================================" >&2
 
 # Execute in network namespace
 if [[ -d "/host/proc/\$PID" ]]; then
@@ -2331,16 +2756,13 @@ create_file_discovery_pods() {
       fi
       local base_name="disc-${node_name}-${pod_hash}-${epoch_time}"
       local counter=1
-      local discovery_pod_name="${base_name}-${counter}"
+      local discovery_pod_name
+      discovery_pod_name=$(truncate_name_with_hash "${base_name}-${counter}")
 
-      # Find available name (truncate if still too long)
+      # Find available name with truncation for k8s 253 char limit
       while $KUBE_CLI get pod "$discovery_pod_name" -n "$debug_ns" &>/dev/null; do
         counter=$((counter + 1))
-        discovery_pod_name="${base_name}-${counter}"
-        # Ensure name is under 63 chars (k8s limit)
-        if [[ ${#discovery_pod_name} -gt 63 ]]; then
-          discovery_pod_name=$(echo "$discovery_pod_name" | cut -c1-63)
-        fi
+        discovery_pod_name=$(truncate_name_with_hash "${base_name}-${counter}")
       done
 
       # Create discovery pod with tail -f /dev/null entrypoint
@@ -2368,16 +2790,13 @@ create_file_discovery_pods() {
       # Generate unique discovery pod name (shortened to avoid k8s length limits)
       local base_name="ndisc-${node_name}-${epoch_time}"
       local counter=1
-      local discovery_pod_name="${base_name}-${counter}"
+      local discovery_pod_name
+      discovery_pod_name=$(truncate_name_with_hash "${base_name}-${counter}")
 
-      # Find available name (truncate if still too long)
+      # Find available name with truncation for k8s 253 char limit
       while $KUBE_CLI get pod "$discovery_pod_name" -n "$debug_ns" &>/dev/null; do
         counter=$((counter + 1))
-        discovery_pod_name="${base_name}-${counter}"
-        # Ensure name is under 63 chars (k8s limit)
-        if [[ ${#discovery_pod_name} -gt 63 ]]; then
-          discovery_pod_name=$(echo "$discovery_pod_name" | cut -c1-63)
-        fi
+        discovery_pod_name=$(truncate_name_with_hash "${base_name}-${counter}")
       done
 
       # Create node discovery pod with tail -f /dev/null entrypoint
@@ -2456,7 +2875,7 @@ handle_file_downloads() {
     local files_list
     # Try to execute the command - if it fails due to pod issues, that's an error
     # But if it succeeds with no output, that just means no files to download
-    if ! $KUBE_CLI exec "$discovery_pod_name" -n "$debug_ns" -- true 2>/dev/null; then
+    if ! run_kube_cmd "$discovery_pod_name" "exec-test" exec "$discovery_pod_name" -n "$debug_ns" -- true 2>/dev/null; then
       # Pod is not accessible - this is a real error
       format_message_stderr "   ❌ Failed to access pod $discovery_pod_name (node $node_name)"
       failed_pods+=("$discovery_pod_name")
@@ -2464,7 +2883,7 @@ handle_file_downloads() {
     fi
 
     # Pod is accessible, now run the select command (exit code doesn't matter)
-    files_list=$($KUBE_CLI exec "$discovery_pod_name" -n "$debug_ns" -- bash -c "$select_command" 2>/dev/null || true)
+    files_list=$(run_kube_cmd "$discovery_pod_name" "exec-list" exec "$discovery_pod_name" -n "$debug_ns" -- bash -c "$select_command" 2>/dev/null || true)
 
     if [[ -z "$files_list" ]]; then
       # No files found - this is not an error, just skip with info message
@@ -2489,7 +2908,7 @@ handle_file_downloads() {
             sleep 1  # Brief pause between retries to allow pod/network recovery
           fi
 
-          if $KUBE_CLI cp "$debug_ns/$discovery_pod_name:$file_path" "$output_file" 2>/dev/null; then
+          if run_kube_cmd "$discovery_pod_name" "cp" cp "$debug_ns/$discovery_pod_name:$file_path" "$output_file" 2>/dev/null; then
             if [[ $attempt -gt 1 ]]; then
               format_message_stderr "   ✅ $(basename "$file_path") (succeeded on attempt $attempt)"
             else
@@ -2512,7 +2931,7 @@ handle_file_downloads() {
 
     # Remove successfully downloaded files from the node's persistent filesystem
     for file_path in "${downloaded_files[@]}"; do
-      $KUBE_CLI exec "$discovery_pod_name" -n "$debug_ns" -- rm -f "$file_path" 2>/dev/null
+      run_kube_cmd "$discovery_pod_name" "exec-rm" exec "$discovery_pod_name" -n "$debug_ns" -- rm -f "$file_path" 2>/dev/null
     done
 
     # Track which pods had issues
@@ -2527,7 +2946,7 @@ handle_file_downloads() {
   if [[ ${#successful_pods[@]} -gt 0 ]]; then
     echo ""
     format_message "🧹 Cleaning up ${#successful_pods[@]} successful discovery pods..."
-    $KUBE_CLI delete pods "${successful_pods[@]}" -n "$debug_ns" --ignore-not-found >/dev/null 2>&1
+    run_kube_cmd "discovery-cleanup" "delete" delete pods "${successful_pods[@]}" -n "$debug_ns" --ignore-not-found >/dev/null 2>&1
   fi
 
   if [[ ${#failed_pods[@]} -gt 0 ]]; then
@@ -2578,7 +2997,7 @@ cleanup_debug_pods() {
   local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE}}"
 
   if [[ ${#DEBUG_POD_NAMES[@]} -gt 0 ]]; then
-    $KUBE_CLI delete pods "${DEBUG_POD_NAMES[@]}" -n "${debug_ns}" --ignore-not-found >/dev/null 2>&1
+    run_kube_cmd "debug-cleanup" "delete" delete pods "${DEBUG_POD_NAMES[@]}" -n "${debug_ns}" --ignore-not-found >/dev/null 2>&1
   fi
 }
 
@@ -2641,7 +3060,7 @@ cleanup_discovery_pods() {
     fi
 
     # Now delete all discovery pods
-    $KUBE_CLI delete pods "${DISCOVERY_POD_NAMES[@]}" -n "${debug_ns}" --ignore-not-found >/dev/null 2>&1
+    run_kube_cmd "discovery-cleanup" "delete" delete pods "${DISCOVERY_POD_NAMES[@]}" -n "${debug_ns}" --ignore-not-found >/dev/null 2>&1
   fi
 }
 
@@ -2867,7 +3286,7 @@ create_discovery_pod() {
   local debug_ns="$5"
 
   # Create discovery pod using YAML manifest for file discovery
-  $KUBE_CLI apply -f - 2>/dev/null <<EOF
+  run_kube_cmd "$discovery_pod_name" "apply" apply -f - <<EOF
 apiVersion: v1
 kind: Pod
 metadata:
@@ -2918,7 +3337,7 @@ create_node_discovery_pod() {
   local debug_ns="$3"
 
   # Create node discovery pod using YAML manifest
-  $KUBE_CLI apply -f - 2>/dev/null <<EOF
+  run_kube_cmd "$discovery_pod_name" "apply" apply -f - <<EOF
 apiVersion: v1
 kind: Pod
 metadata:
@@ -3036,7 +3455,15 @@ create_kill_switch_monitor_pods() {
       # Fallback to simple hash
       debug_pod_hash=$(echo "$debug_pod" | cksum | cut -d' ' -f1 | cut -c1-8)
     fi
-    local monitor_pod_name="ks-${node_name}-${debug_pod_hash}"
+    local monitor_pod_name
+    monitor_pod_name=$(truncate_name_with_hash "ks-${node_name}-${debug_pod_hash}")
+
+    # Check if pod name exists and increment until unique
+    local counter=1
+    while $KUBE_CLI get pod "${monitor_pod_name}" -n "${debug_ns}" &>/dev/null; do
+      counter=$((counter + 1))
+      monitor_pod_name=$(truncate_name_with_hash "ks-${node_name}-${debug_pod_hash}-${counter}")
+    done
 
     if create_kill_switch_monitor_pod "$debug_pod" "$node_name" "$monitor_pod_name" "$debug_ns" "$volume_path"; then
       KILL_SWITCH_MONITOR_PODS+=("$monitor_pod_name")
@@ -3059,7 +3486,11 @@ create_kill_switch_monitor_pod() {
   local debug_ns="$4"
   local volume_path="$5"
 
-  $KUBE_CLI apply -f - 2>/dev/null <<EOF
+  # Truncate target pod name for label value (63 char limit)
+  local target_pod_label_value
+  target_pod_label_value=$(truncate_label_value_with_hash "$target_debug_pod")
+
+  run_kube_cmd "$monitor_pod_name" "apply" apply -f - <<EOF
 apiVersion: v1
 kind: Pod
 metadata:
@@ -3067,7 +3498,7 @@ metadata:
   namespace: ${debug_ns}
   labels:
     app: kill-switch-monitor
-    target-pod: ${target_debug_pod}
+    target-pod: ${target_pod_label_value}
 spec:
   restartPolicy: Never
   hostNetwork: true
@@ -3317,6 +3748,11 @@ while true; do
             exit 0  # Signal to kill the target pod
           fi
         fi
+      else
+        echo "ERROR: Relative threshold monitoring requires 'bc' command, but it is not available in this container image." >&2
+        echo "       Either use --kill-switch-abs for absolute threshold monitoring," >&2
+        echo "       or ensure your container image (--image flag) includes the 'bc' package." >&2
+        exit 1  # Exit with error to indicate configuration problem
       fi
     fi
   fi
@@ -3521,6 +3957,13 @@ main() {
     echo "=== Kube-dump session started at $(date) ===" > "$KUBE_DUMP_LOG_FILE"
     echo "Command: $0 $*" >> "$KUBE_DUMP_LOG_FILE"
     echo "===============================================" >> "$KUBE_DUMP_LOG_FILE"
+  fi
+
+  # Setup verbose debug logging if --verbose is enabled
+  if [[ "$VERBOSE" == "true" ]]; then
+    if ! setup_debug_logging; then
+      exit 1
+    fi
   fi
 
   if true; then
