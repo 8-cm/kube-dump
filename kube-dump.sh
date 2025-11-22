@@ -526,8 +526,9 @@ run_kube_cmd() {
   echo "=== $(date '+%Y-%m-%d %H:%M:%S') - $operation ===" >> "$stderr_log"
 
   # Run command with max verbosity and redirect output
-  $KUBE_CLI --v=10 "$@" >> "$stdout_log" 2>> "$stderr_log"
-  local exit_code=$?
+  # Use tee to send output to both log file and stdout so callers can capture it
+  $KUBE_CLI --v=10 "$@" 2>> "$stderr_log" | tee -a "$stdout_log"
+  local exit_code=${PIPESTATUS[0]}
 
   # Log completion
   echo "=== Completed with exit code: $exit_code ===" >> "$stdout_log"
@@ -1922,6 +1923,7 @@ create_debug_pods_for_targets() {
     node_name=$(echo "$target_pod" | cut -d':' -f3)
 
     # Generate unique debug pod name with hash for shorter names
+    # Use "pod-debug-" prefix to distinguish from node-debug pods
     local pod_hash
     if command -v md5sum >/dev/null 2>&1; then
       pod_hash=$(echo "$pod_name" | md5sum | cut -c1-8)
@@ -1932,13 +1934,13 @@ create_debug_pods_for_targets() {
       pod_hash=$(echo "$pod_name" | cksum | cut -d' ' -f1 | cut -c1-8)
     fi
     local debug_pod_name
-    debug_pod_name=$(truncate_name_with_hash "${node_name}-debug-${pod_hash}-${epoch_time}")
+    debug_pod_name=$(truncate_name_with_hash "pod-debug-${pod_hash}-${epoch_time}")
 
     # Check if pod name exists and increment until unique
     local counter=1
     while $KUBE_CLI get pod "${debug_pod_name}" -n "${debug_ns}" &>/dev/null; do
       counter=$((counter + 1))
-      debug_pod_name=$(truncate_name_with_hash "${node_name}-debug-${pod_hash}-${epoch_time}-${counter}")
+      debug_pod_name=$(truncate_name_with_hash "pod-debug-${pod_hash}-${epoch_time}-${counter}")
     done
 
     format_message "   📦 Creating debug pod for ${pod_name}:${container_name} on ${node_name}"
@@ -2004,6 +2006,8 @@ create_node_debug_pods() {
   local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE:-default}}"
 
   for node_name in "${TARGET_NODES[@]}"; do
+    # Generate unique node debug pod name with hash
+    # Use "node-debug-" prefix to clearly indicate node-level debugging
     local node_hash
     if command -v md5sum >/dev/null 2>&1; then
       node_hash=$(echo "$node_name" | md5sum | cut -c1-6)
@@ -2014,13 +2018,13 @@ create_node_debug_pods() {
       node_hash=$(echo "$node_name" | cksum | cut -d' ' -f1 | cut -c1-6)
     fi
     local debug_pod_name
-    debug_pod_name=$(truncate_name_with_hash "node-${node_hash}-$(date +%s)")
+    debug_pod_name=$(truncate_name_with_hash "node-debug-${node_hash}-$(date +%s)")
     local counter=1
 
     # Check if pod name exists and increment until unique
     while $KUBE_CLI get pod "${debug_pod_name}" -n "${debug_ns}" &>/dev/null; do
       counter=$((counter + 1))
-      debug_pod_name=$(truncate_name_with_hash "node-${node_hash}-$(date +%s)-${counter}")
+      debug_pod_name=$(truncate_name_with_hash "node-debug-${node_hash}-$(date +%s)-${counter}")
     done
 
     format_message "   🖥️  Creating debug pod for node '${node_name}'"
@@ -2553,14 +2557,28 @@ generate_exec_command() {
     echo "DECODED_CMD=\$(echo '${CAPTURE_COMMAND}' | base64 -d)"
     echo "FINAL_CMD=\$(echo \"\$DECODED_CMD\" | sed 's/${PLACEHOLDER_CHAR}/${debug_pod_hostname}/g')"
     cat <<'EXECEND'
-exec nsenter -n -t $PID /bin/bash <<'CMDEOF'
-$FINAL_CMD
-tail -f /dev/null
-CMDEOF
+# Run command in target pod's network namespace (keep debug pod's mount namespace for /host access)
+nsenter -n -t $PID /bin/bash -c "$FINAL_CMD" 2>&1 &
+NSENTER_PID=$!
+echo "Command started in background (PID: $NSENTER_PID)" >&2
+
+# Keep pod alive and monitor the background process
+tail -f /dev/null &
+TAIL_PID=$!
+
+# Wait for nsenter process to complete or continue
+wait $NSENTER_PID 2>/dev/null || true
+echo "Command completed with exit code: $?" >&2
+
+# Keep pod alive with tail
+wait $TAIL_PID
 EXECEND
   else
     local final_capture_cmd="${CAPTURE_COMMAND//${PLACEHOLDER_CHAR}/$debug_pod_hostname}"
-    echo "exec nsenter -n -t \$PID ${final_capture_cmd}"
+    echo "nsenter -n -t \$PID ${final_capture_cmd} 2>&1 &"
+    echo "NSENTER_PID=\$!"
+    echo "echo \"Command started in background (PID: \$NSENTER_PID)\" >&2"
+    echo "tail -f /dev/null"
   fi
 }
 
@@ -2749,7 +2767,8 @@ create_file_discovery_pods() {
         # Fallback to simple hash
         pod_hash=$(echo "$pod_name" | cksum | cut -d' ' -f1 | cut -c1-8)
       fi
-      local base_name="disc-${node_name}-${pod_hash}-${epoch_time}"
+      # Use "pod-disc-" prefix to match pod-debug- naming scheme
+      local base_name="pod-disc-${pod_hash}-${epoch_time}"
       local counter=1
       local discovery_pod_name
       discovery_pod_name=$(truncate_name_with_hash "${base_name}-${counter}")
@@ -2761,7 +2780,8 @@ create_file_discovery_pods() {
       done
 
       # Create discovery pod with tail -f /dev/null entrypoint
-      if create_discovery_pod "$pod_name" "$container_name" "$node_name" "$discovery_pod_name" "$debug_ns" 2>/dev/null; then
+      # Pass original debug pod name so placeholder substitution uses the correct filename
+      if create_discovery_pod "$pod_name" "$container_name" "$node_name" "$discovery_pod_name" "$debug_ns" "$original_debug_hostname" 2>/dev/null; then
         DISCOVERY_POD_NAMES+=("$discovery_pod_name")
         DISCOVERY_POD_INFO+=("$discovery_pod_name:$node_name:pod:$original_debug_hostname")
       else
@@ -2783,7 +2803,16 @@ create_file_discovery_pods() {
       local original_debug_hostname="${NODE_DEBUG_HOSTNAMES[$node_index]}"
 
       # Generate unique discovery pod name (shortened to avoid k8s length limits)
-      local base_name="ndisc-${node_name}-${epoch_time}"
+      # Use "node-disc-" prefix to match node-debug- naming scheme
+      local node_hash
+      if command -v md5sum >/dev/null 2>&1; then
+        node_hash=$(echo "$node_name" | md5sum | cut -c1-6)
+      elif command -v md5 >/dev/null 2>&1; then
+        node_hash=$(echo "$node_name" | md5 | cut -c1-6)
+      else
+        node_hash=$(echo "$node_name" | cksum | cut -d' ' -f1 | cut -c1-6)
+      fi
+      local base_name="node-disc-${node_hash}-${epoch_time}"
       local counter=1
       local discovery_pod_name
       discovery_pod_name=$(truncate_name_with_hash "${base_name}-${counter}")
@@ -2795,7 +2824,8 @@ create_file_discovery_pods() {
       done
 
       # Create node discovery pod with tail -f /dev/null entrypoint
-      if create_node_discovery_pod "$node_name" "$discovery_pod_name" "$debug_ns" 2>/dev/null; then
+      # Pass original debug pod name so placeholder substitution uses the correct filename
+      if create_node_discovery_pod "$node_name" "$discovery_pod_name" "$debug_ns" "$original_debug_hostname" 2>/dev/null; then
         DISCOVERY_POD_NAMES+=("$discovery_pod_name")
         DISCOVERY_POD_INFO+=("$discovery_pod_name:$node_name:node:$original_debug_hostname")
       else
@@ -2851,23 +2881,6 @@ handle_file_downloads() {
     pod_type=$(echo "$pod_info" | cut -d':' -f3)
     original_debug_pod_name=$(echo "$pod_info" | cut -d':' -f4)
 
-    # Determine which select command to use based on pod type
-    local select_command=""
-    if [[ "$pod_type" == "pod" && -n "$ENCODED_SELECT_COMMAND" ]]; then
-      select_command=$(echo "$ENCODED_SELECT_COMMAND" | base64 -d)
-    elif [[ "$pod_type" == "node" && -n "$ENCODED_NODE_SELECT_COMMAND" ]]; then
-      select_command=$(echo "$ENCODED_NODE_SELECT_COMMAND" | base64 -d)
-    fi
-
-    if [[ -z "$select_command" ]]; then
-      continue
-    fi
-
-    # Apply placeholder substitution using the original debug pod name that created the files
-    select_command="${select_command//${PLACEHOLDER_CHAR}/$original_debug_pod_name}"
-
-    # Execute the select command to get list of files
-    local files_list
     # Try to execute the command - if it fails due to pod issues, that's an error
     # But if it succeeds with no output, that just means no files to download
     if ! run_kube_cmd "$discovery_pod_name" "exec-test" exec "$discovery_pod_name" -n "$debug_ns" -- true 2>/dev/null; then
@@ -2877,8 +2890,31 @@ handle_file_downloads() {
       continue
     fi
 
-    # Pod is accessible, now run the select command (exit code doesn't matter)
-    files_list=$(run_kube_cmd "$discovery_pod_name" "exec-list" exec "$discovery_pod_name" -n "$debug_ns" -- bash -c "$select_command" 2>/dev/null || true)
+    # Execute the select command by decoding it from the pod's environment variable
+    # This approach is safer as it avoids passing the command through multiple shell interpretations
+    # which could break on special characters like ; && | etc.
+    local files_list
+    if [[ "$pod_type" == "node" ]]; then
+      # For node discovery pods: decode ENCODED_NODE_SELECT_COMMAND, apply placeholder substitution, and run from /host
+      files_list=$(run_kube_cmd "$discovery_pod_name" "exec-list" exec "$discovery_pod_name" -n "$debug_ns" -- bash -c '
+POD_NAME='"'$original_debug_pod_name'"'
+cmd=$(echo "$ENCODED_NODE_SELECT_COMMAND" | base64 -d 2>/dev/null || echo "")
+if [[ -n "$cmd" ]]; then
+  cmd="${cmd//${PLACEHOLDER_CHAR}/$POD_NAME}"
+  cd /host && bash -c "$cmd"
+fi
+' 2>/dev/null || true)
+    else
+      # For pod discovery pods: decode ENCODED_SELECT_COMMAND and apply placeholder substitution
+      files_list=$(run_kube_cmd "$discovery_pod_name" "exec-list" exec "$discovery_pod_name" -n "$debug_ns" -- bash -c '
+POD_NAME='"'$original_debug_pod_name'"'
+cmd=$(echo "$ENCODED_SELECT_COMMAND" | base64 -d 2>/dev/null || echo "")
+if [[ -n "$cmd" ]]; then
+  cmd="${cmd//${PLACEHOLDER_CHAR}/$POD_NAME}"
+  bash -c "$cmd"
+fi
+' 2>/dev/null || true)
+    fi
 
     if [[ -z "$files_list" ]]; then
       # No files found - this is not an error, just skip with info message
@@ -3063,119 +3099,67 @@ cleanup_discovery_pods() {
 # Function: build_discovery_script
 # -------------------------------------------------------------------------------
 # Description:
-#   Generates a complete bash script for execution within discovery pods to continuously
-#   monitor and output file discovery results. This function creates a self-contained
-#   script that attaches to target pod network namespaces, executes file discovery
-#   commands every second, and outputs timestamped results to stdout for monitoring.
+#   Generates a complete bash script for execution within discovery pods to perform
+#   one-time file discovery. This function creates a self-contained script that
+#   executes the file selection command once and outputs results. The pod then
+#   keeps running to allow the main script to download the discovered files.
 #
 # Parameters:
-#   $1 - pod_name: Name of the target pod to discover files from
-#   $2 - container_name: Name of the target container within the pod
-#   $3 - node_name: Name of the node where the target pod resides
-#   $4 - discovery_pod_name: Name of the discovery pod (for logging)
+#   $1 - pod_name: Name of the target pod (for logging)
+#   $2 - container_name: Name of the target container (for logging)
+#   $3 - node_name: Name of the node where this discovery pod runs
+#   $4 - discovery_pod_name: Name of the discovery pod (used in placeholder substitution)
 #
 # Expected Output:
 #   - Complete bash script suitable for execution in discovery pod
-#   - Script outputs timestamped file discovery results every second
-#   - Includes error handling and CRI socket configuration
+#   - Script executes selection command once and outputs file list
+#   - Pod stays alive with tail -f /dev/null for file downloads
 # -------------------------------------------------------------------------------
 build_discovery_script() {
   local pod_name="$1"
   local container_name="$2"
   local node_name="$3"
   local discovery_pod_name="$4"
+  local original_debug_pod_name="${5:-$discovery_pod_name}"  # Use original debug pod name for placeholder substitution
 
   cat <<DISCOVERY_SCRIPT
 #!/bin/bash
 set -e
 
-echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Discovery pod $discovery_pod_name starting on node $node_name" >&2
-echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Target: pod=$pod_name, container=$container_name" >&2
+timestamp="\$(date '+%Y-%m-%d %H:%M:%S')"
+echo "[\$timestamp] Discovery pod $discovery_pod_name starting" >&2
+echo "[\$timestamp] Target: pod=$pod_name, container=$container_name, node=$node_name" >&2
 
-# Configure crictl socket
-configure_crictl_socket() {
-  local socket_path=""
-  if [[ -n "\${CRI_SOCKET}" ]]; then
-    socket_path="/host\${CRI_SOCKET}"
-  else
-    case "\${CRI_RUNTIME:-containerd}" in
-      containerd)
-        socket_path="/host/run/containerd/containerd.sock"
-        ;;
-      crio)
-        socket_path="/host/var/run/crio/crio.sock"
-        ;;
-      docker)
-        socket_path="/host/var/run/docker.sock"
-        ;;
-      *)
-        socket_path="/host/run/containerd/containerd.sock"
-        ;;
-    esac
-  fi
-  echo "runtime-endpoint: unix://\$socket_path" > /etc/crictl.yaml
-  echo "image-endpoint: unix://\$socket_path" >> /etc/crictl.yaml
-  echo "Configured crictl to use: \$socket_path" >&2
-}
+# Execute the select command
+if [[ -n "\${ENCODED_SELECT_COMMAND:-}" ]]; then
+  select_cmd=\$(echo "\$ENCODED_SELECT_COMMAND" | base64 -d 2>/dev/null || echo "")
+  if [[ -n "\$select_cmd" ]]; then
+    # Apply placeholder substitution using original debug pod name (where files were created)
+    select_cmd="\${select_cmd//\${PLACEHOLDER_CHAR:-\%}/$original_debug_pod_name}"
 
-configure_crictl_socket
+    echo "[\$timestamp] Running selection command: \$select_cmd" >&2
 
-# Find target pod and container
-echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Searching for target pod: $pod_name" >&2
-
-while true; do
-  # Get current timestamp
-  timestamp="\$(date '+%Y-%m-%d %H:%M:%S')"
-
-  # Try to find the pod and get its container PID
-  pod_id=\$(crictl pods --name "$pod_name" -q 2>/dev/null | head -1)
-  if [[ -z "\$pod_id" ]]; then
-    echo "[\$timestamp] ERROR: Pod $pod_name not found"
-    sleep 1
-    continue
-  fi
-
-  container_id=\$(crictl ps --pod "\$pod_id" --name "$container_name" -q 2>/dev/null | head -1)
-  if [[ -z "\$container_id" ]]; then
-    echo "[\$timestamp] ERROR: Container $container_name not found in pod $pod_name"
-    sleep 1
-    continue
-  fi
-
-  container_pid=\$(crictl inspect "\$container_id" 2>/dev/null | jq -r '.info.pid // .status.pid // empty' 2>/dev/null)
-  if [[ -z "\$container_pid" || "\$container_pid" == "null" ]]; then
-    echo "[\$timestamp] ERROR: Unable to get PID for container $container_name"
-    sleep 1
-    continue
-  fi
-
-  # Execute the select command in the target container namespace
-  if [[ -n "\${ENCODED_SELECT_COMMAND:-}" ]]; then
-    select_cmd=\$(echo "\$ENCODED_SELECT_COMMAND" | base64 -d 2>/dev/null || echo "")
-    if [[ -n "\$select_cmd" ]]; then
-      # Apply placeholder substitution
-      select_cmd="\${select_cmd//\${PLACEHOLDER_CHAR:-\%}/\$discovery_pod_name}"
-
-      # Execute command in container namespace and capture output
-      if result=\$(nsenter -t "\$container_pid" -n -p -m -u -i bash -c "\$select_cmd" 2>/dev/null); then
-        if [[ -n "\$result" ]]; then
-          echo "[\$timestamp] FILES_FOUND:"
-          echo "\$result" | while IFS= read -r line; do
-            [[ -n "\$line" ]] && echo "[\$timestamp]   \$line"
-          done
-        else
-          echo "[\$timestamp] NO_FILES_FOUND"
-        fi
+    # Execute command and capture output
+    if result=\$(bash -c "\$select_cmd" 2>/dev/null); then
+      if [[ -n "\$result" ]]; then
+        echo "[\$timestamp] FILES_FOUND:" >&2
+        echo "\$result" | while IFS= read -r line; do
+          [[ -n "\$line" ]] && echo "[\$timestamp]   \$line" >&2
+        done
       else
-        echo "[\$timestamp] ERROR: Select command failed: \$select_cmd"
+        echo "[\$timestamp] NO_FILES_FOUND" >&2
       fi
+    else
+      echo "[\$timestamp] ERROR: Selection command failed" >&2
     fi
-  else
-    echo "[\$timestamp] ERROR: No select command configured"
   fi
+else
+  echo "[\$timestamp] WARNING: No select command configured" >&2
+fi
 
-  sleep 1
-done
+# Keep pod alive for file downloads
+echo "[\$timestamp] Discovery complete, keeping pod alive for downloads..." >&2
+tail -f /dev/null
 DISCOVERY_SCRIPT
 }
 
@@ -3184,9 +3168,9 @@ DISCOVERY_SCRIPT
 # -------------------------------------------------------------------------------
 # Description:
 #   Generates a complete bash script for execution within node discovery pods to
-#   continuously monitor and output file discovery results from node filesystem.
-#   This function creates a self-contained script that executes file discovery
-#   commands every second on the host node and outputs timestamped results.
+#   perform one-time file discovery from node filesystem. This function creates a
+#   self-contained script that executes the file selection command once on the host
+#   node and outputs results. The pod then keeps running to allow log retrieval.
 #
 # Parameters:
 #   $1 - node_name: Name of the target node to discover files from
@@ -3194,12 +3178,13 @@ DISCOVERY_SCRIPT
 #
 # Expected Output:
 #   - Complete bash script suitable for execution in node discovery pod
-#   - Script outputs timestamped file discovery results every second
-#   - Executes commands directly on host filesystem
+#   - Script executes file selection command once on host filesystem
+#   - Outputs timestamped file discovery results once, then keeps pod alive
 # -------------------------------------------------------------------------------
 build_node_discovery_script() {
   local node_name="$1"
   local discovery_pod_name="$2"
+  local original_debug_pod_name="${3:-$discovery_pod_name}"  # Use original debug pod name for placeholder substitution
 
   cat <<NODE_DISCOVERY_SCRIPT
 #!/bin/bash
@@ -3207,37 +3192,39 @@ set -e
 
 echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Node discovery pod $discovery_pod_name starting on node $node_name" >&2
 
-while true; do
-  # Get current timestamp
-  timestamp="\$(date '+%Y-%m-%d %H:%M:%S')"
+# Get current timestamp
+timestamp="\$(date '+%Y-%m-%d %H:%M:%S')"
 
-  # Execute the node select command on host filesystem
-  if [[ -n "\${ENCODED_NODE_SELECT_COMMAND:-}" ]]; then
-    select_cmd=\$(echo "\$ENCODED_NODE_SELECT_COMMAND" | base64 -d 2>/dev/null || echo "")
-    if [[ -n "\$select_cmd" ]]; then
-      # Apply placeholder substitution
-      select_cmd="\${select_cmd//\${PLACEHOLDER_CHAR:-\%}/\$discovery_pod_name}"
+# Execute the node select command on host filesystem
+if [[ -n "\${ENCODED_NODE_SELECT_COMMAND:-}" ]]; then
+  select_cmd=\$(echo "\$ENCODED_NODE_SELECT_COMMAND" | base64 -d 2>/dev/null || echo "")
+  if [[ -n "\$select_cmd" ]]; then
+    # Apply placeholder substitution using original debug pod name (where files were created)
+    select_cmd="\${select_cmd//\${PLACEHOLDER_CHAR:-\%}/$original_debug_pod_name}"
 
-      # Execute command on host filesystem and capture output
-      if result=\$(cd /host && bash -c "\$select_cmd" 2>/dev/null); then
-        if [[ -n "\$result" ]]; then
-          echo "[\$timestamp] NODE_FILES_FOUND:"
-          echo "\$result" | while IFS= read -r line; do
-            [[ -n "\$line" ]] && echo "[\$timestamp]   \$line"
-          done
-        else
-          echo "[\$timestamp] NO_NODE_FILES_FOUND"
-        fi
+    echo "[\$timestamp] Running node selection command: \$select_cmd" >&2
+
+    # Execute command on host filesystem and capture output
+    if result=\$(cd /host && bash -c "\$select_cmd" 2>/dev/null); then
+      if [[ -n "\$result" ]]; then
+        echo "[\$timestamp] NODE_FILES_FOUND:" >&2
+        echo "\$result" | while IFS= read -r line; do
+          [[ -n "\$line" ]] && echo "[\$timestamp]   \$line" >&2
+        done
       else
-        echo "[\$timestamp] ERROR: Node select command failed: \$select_cmd"
+        echo "[\$timestamp] NO_NODE_FILES_FOUND" >&2
       fi
+    else
+      echo "[\$timestamp] ERROR: Node select command failed: \$select_cmd" >&2
     fi
-  else
-    echo "[\$timestamp] ERROR: No node select command configured"
   fi
+else
+  echo "[\$timestamp] WARNING: No node select command configured" >&2
+fi
 
-  sleep 1
-done
+# Keep pod alive
+echo "[\$timestamp] Discovery complete, keeping pod alive..." >&2
+tail -f /dev/null
 NODE_DISCOVERY_SCRIPT
 }
 
@@ -3279,6 +3266,7 @@ create_discovery_pod() {
   local node_name="$3"
   local discovery_pod_name="$4"
   local debug_ns="$5"
+  local original_debug_pod_name="${6:-$discovery_pod_name}"  # Original debug pod name for placeholder substitution
 
   # Create discovery pod using YAML manifest for file discovery
   run_kube_cmd "$discovery_pod_name" "apply" apply -f - <<EOF
@@ -3299,7 +3287,7 @@ spec:
     command: ["/bin/bash", "-c"]
     args:
     - |
-$(build_discovery_script "$pod_name" "$container_name" "$node_name" "$discovery_pod_name" | sed 's/^/      /')
+$(build_discovery_script "$pod_name" "$container_name" "$node_name" "$discovery_pod_name" "$original_debug_pod_name" | sed 's/^/      /')
     securityContext:
       privileged: true
     env:
@@ -3330,6 +3318,7 @@ create_node_discovery_pod() {
   local node_name="$1"
   local discovery_pod_name="$2"
   local debug_ns="$3"
+  local original_debug_pod_name="${4:-$discovery_pod_name}"  # Original debug pod name for placeholder substitution
 
   # Create node discovery pod using YAML manifest
   run_kube_cmd "$discovery_pod_name" "apply" apply -f - <<EOF
@@ -3350,7 +3339,7 @@ spec:
     command: ["/bin/bash", "-c"]
     args:
     - |
-$(build_node_discovery_script "$node_name" "$discovery_pod_name" | sed 's/^/      /')
+$(build_node_discovery_script "$node_name" "$discovery_pod_name" "$original_debug_pod_name" | sed 's/^/      /')
     securityContext:
       privileged: true
     env:
@@ -3440,7 +3429,7 @@ create_kill_switch_monitor_pods() {
       volume_path="$POD_VOLUME"
     fi
 
-    # Create shorter name: node + hash of original debug pod name
+    # Create shorter name with prefix based on debug pod type
     local debug_pod_hash
     if command -v md5sum >/dev/null 2>&1; then
       debug_pod_hash=$(echo "$debug_pod" | md5sum | cut -c1-8)
@@ -3450,14 +3439,26 @@ create_kill_switch_monitor_pods() {
       # Fallback to simple hash
       debug_pod_hash=$(echo "$debug_pod" | cksum | cut -d' ' -f1 | cut -c1-8)
     fi
+
+    # Determine prefix based on debug pod type
+    local ks_prefix
+    if [[ "$debug_pod" == pod-debug-* ]]; then
+      ks_prefix="pod-ks"
+    elif [[ "$debug_pod" == node-debug-* ]]; then
+      ks_prefix="node-ks"
+    else
+      # Fallback for legacy naming
+      ks_prefix="ks"
+    fi
+
     local monitor_pod_name
-    monitor_pod_name=$(truncate_name_with_hash "ks-${node_name}-${debug_pod_hash}")
+    monitor_pod_name=$(truncate_name_with_hash "${ks_prefix}-${debug_pod_hash}")
 
     # Check if pod name exists and increment until unique
     local counter=1
     while $KUBE_CLI get pod "${monitor_pod_name}" -n "${debug_ns}" &>/dev/null; do
       counter=$((counter + 1))
-      monitor_pod_name=$(truncate_name_with_hash "ks-${node_name}-${debug_pod_hash}-${counter}")
+      monitor_pod_name=$(truncate_name_with_hash "${ks_prefix}-${debug_pod_hash}-${counter}")
     done
 
     if create_kill_switch_monitor_pod "$debug_pod" "$node_name" "$monitor_pod_name" "$debug_ns" "$volume_path"; then
