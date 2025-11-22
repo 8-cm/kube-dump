@@ -3448,6 +3448,10 @@ detect_kubelet_eviction_threshold() {
   if [[ "$threshold" == *% ]]; then
     # Percentage threshold - add 5%
     local value="${threshold%%%}"
+    # Validate we have a numeric value
+    if [[ -z "$value" ]] || ! [[ "$value" =~ ^[0-9.]+$ ]]; then
+      return 1
+    fi
     local new_value
     new_value=$(awk "BEGIN {printf \"%.0f\", $value + 5}")
     echo "${new_value}%"
@@ -3455,6 +3459,10 @@ detect_kubelet_eviction_threshold() {
     # Absolute threshold - add 5% to the value
     local value="${threshold//[^0-9.]/}"
     local unit="${threshold//[0-9.]/}"
+    # Validate we have a numeric value
+    if [[ -z "$value" ]] || ! [[ "$value" =~ ^[0-9.]+$ ]]; then
+      return 1
+    fi
     local new_value
     new_value=$(awk "BEGIN {printf \"%.1f\", $value * 1.05}")
     echo "${new_value}${unit}"
