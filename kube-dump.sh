@@ -2936,7 +2936,16 @@ fi
     while IFS= read -r file_path; do
       if [[ -n "$file_path" ]]; then
         local output_file
-        output_file="$OUTPUT_DIR/${target_name}_$(basename "$file_path")"
+        local base_filename
+        base_filename="$(basename "$file_path")"
+
+        # Check if basename already starts with target name (user used % in filename)
+        # If so, don't duplicate the prefix
+        if [[ "$base_filename" == "${target_name}"* ]]; then
+          output_file="$OUTPUT_DIR/${base_filename}"
+        else
+          output_file="$OUTPUT_DIR/${target_name}_${base_filename}"
+        fi
 
         # Try download with up to 3 attempts (handles transient network/pod issues)
         local download_success=false
