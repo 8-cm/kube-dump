@@ -568,7 +568,7 @@ run_kube_cmd() {
   echo "" >> "$stdout_log"
   echo "" >> "$stderr_log"
 
-  return $exit_code
+  return "$exit_code"
 }
 
 # -------------------------------------------------------------------------------
@@ -2788,11 +2788,9 @@ create_file_discovery_pods() {
       local pod_name
       local container_name
       local node_name
-      local original_debug_hostname
       pod_name=$(echo "$target_pod" | cut -d':' -f1)
       container_name=$(echo "$target_pod" | cut -d':' -f2)
       node_name=$(echo "$target_pod" | cut -d':' -f3)
-      original_debug_hostname="${POD_DEBUG_HOSTNAMES[$pod_index]}"
 
       # Generate unique discovery pod name (shortened to avoid k8s length limits)
       local pod_hash
@@ -2837,8 +2835,6 @@ create_file_discovery_pods() {
 
     local node_index=0
     for node_name in "${TARGET_NODES[@]}"; do
-      local original_debug_hostname="${NODE_DEBUG_HOSTNAMES[$node_index]}"
-
       # Generate unique discovery pod name (shortened to avoid k8s length limits)
       # Use "node-disc-" prefix to match node-debug- naming scheme
       local node_hash
@@ -2973,24 +2969,24 @@ handle_file_downloads() {
     local files_list
     if [[ "$pod_type" == "node" ]]; then
       # For node discovery pods: decode ENCODED_NODE_SELECT_COMMAND, apply placeholder substitution with target node name, and run from /host
-      files_list=$(run_kube_cmd "$discovery_pod_name" "exec-list" exec "$discovery_pod_name" -n "$debug_ns" -- bash -c '
-TARGET_NAME='"'$target_name'"'
-cmd=$(echo "$ENCODED_NODE_SELECT_COMMAND" | base64 -d 2>/dev/null || echo "")
-if [[ -n "$cmd" ]]; then
-  cmd="${cmd//${PLACEHOLDER_CHAR}/$TARGET_NAME}"
-  cd /host && bash -c "$cmd"
+      files_list=$(run_kube_cmd "$discovery_pod_name" "exec-list" exec "$discovery_pod_name" -n "$debug_ns" -- bash -c "
+TARGET_NAME='$target_name'
+cmd=\$(echo \"\$ENCODED_NODE_SELECT_COMMAND\" | base64 -d 2>/dev/null || echo \"\")
+if [[ -n \"\$cmd\" ]]; then
+  cmd=\"\${cmd//\${PLACEHOLDER_CHAR}/\$TARGET_NAME}\"
+  cd /host && bash -c \"\$cmd\"
 fi
-' 2>/dev/null || true)
+" 2>/dev/null || true)
     else
       # For pod discovery pods: decode ENCODED_SELECT_COMMAND and apply placeholder substitution with target pod name
-      files_list=$(run_kube_cmd "$discovery_pod_name" "exec-list" exec "$discovery_pod_name" -n "$debug_ns" -- bash -c '
-TARGET_NAME='"'$target_name'"'
-cmd=$(echo "$ENCODED_SELECT_COMMAND" | base64 -d 2>/dev/null || echo "")
-if [[ -n "$cmd" ]]; then
-  cmd="${cmd//${PLACEHOLDER_CHAR}/$TARGET_NAME}"
-  bash -c "$cmd"
+      files_list=$(run_kube_cmd "$discovery_pod_name" "exec-list" exec "$discovery_pod_name" -n "$debug_ns" -- bash -c "
+TARGET_NAME='$target_name'
+cmd=\$(echo \"\$ENCODED_SELECT_COMMAND\" | base64 -d 2>/dev/null || echo \"\")
+if [[ -n \"\$cmd\" ]]; then
+  cmd=\"\${cmd//\${PLACEHOLDER_CHAR}/\$TARGET_NAME}\"
+  bash -c \"\$cmd\"
 fi
-' 2>/dev/null || true)
+" 2>/dev/null || true)
     fi
 
     if [[ -z "$files_list" ]]; then
