@@ -51,6 +51,7 @@ usage() {
   echo "  -I, --placeholder    Set placeholder character for hostname substitution [default: %]"
   echo "  --kill-switch-abs    Kill pods when disk usage exceeds absolute threshold (e.g., 1GB, 500MB)"
   echo "  --kill-switch-rel    Kill pods when free space falls below relative threshold (e.g., 10%) [requires 'bc' in image]"
+  echo "                       If omitted, auto-detects from kubelet nodefs.available (+5% safety), fallback to 10%"
   echo "  --pod-volume         Volume path to monitor for pod-based kill switches (e.g., /tmp)"
   echo "  --node-volume        Volume path to monitor for node-based kill switches (e.g., /var)"
   echo "  --image              Container image for debug/discovery/killswitch pods [default: nicolaka/netshoot]"
@@ -115,6 +116,9 @@ usage() {
   echo ""
   echo "  # Use kill switch to prevent disk pressure (relative threshold):"
   echo "  $0 -L worker=true --kill-switch-rel 10% --node-volume /var"
+  echo ""
+  echo "  # Auto-detect kill switch threshold from kubelet (uses nodefs.available + 5%):"
+  echo "  $0 -l app=web --pod-volume /tmp"
   echo ""
   echo "  # Also run commands on nodes hosting selected pods:"
   echo "  $0 -l app=web --include-nodes -E 'ss -tuln'"
@@ -1370,7 +1374,8 @@ validate_arguments() {
   fi
 
   # Kill switches require volume path arguments based on execution mode
-  if [[ -n "$KILL_SWITCH_ABS" || -n "$KILL_SWITCH_REL" ]]; then
+  # Volume paths can be provided alone (will auto-detect thresholds) or with explicit thresholds
+  if [[ -n "$KILL_SWITCH_ABS" || -n "$KILL_SWITCH_REL" || -n "$POD_VOLUME" || -n "$NODE_VOLUME" ]]; then
     case "$EXECUTION_MODE" in
       "pod")
         if [[ -z "$POD_VOLUME" ]]; then
@@ -3402,24 +3407,76 @@ wait_for_discovery_pods_ready() {
   return 1
 }
 
+# -------------------------------------------------------------------------------
+# Function: detect_kubelet_eviction_threshold
+# -------------------------------------------------------------------------------
+# Description:
+#   Queries a node's kubelet configz endpoint to detect the nodefs.available
+#   eviction threshold and adds a 5% safety margin. This threshold indicates
+#   when kubelet will start evicting pods due to disk pressure.
+#
+# Parameters:
+#   $1 - node_name: Name of the node to query
+#
+# Returns:
+#   Outputs the threshold with 5% safety margin to stdout
+#   Format: percentage (e.g., "15%") or absolute size (e.g., "1.5Gi")
+#   Returns empty string if detection fails
+#
+# Example Usage:
+#   threshold=$(detect_kubelet_eviction_threshold "k8s-node-01")
+#   # Returns: "15%" if kubelet threshold is "10%"
+#
+detect_kubelet_eviction_threshold() {
+  local node_name="$1"
 
+  # Query kubelet configz endpoint
+  local configz
+  if ! configz=$($KUBE_CLI get --raw "/api/v1/nodes/${node_name}/proxy/configz" 2>/dev/null); then
+    return 1
+  fi
 
+  # Extract nodefs.available threshold
+  local threshold
+  threshold=$(echo "$configz" | grep -oE '"nodefs\.available"\s*:\s*"[0-9.]+(%|[KMGTPEkmgtpe]i?[Bb]?)?"' | grep -oE '[0-9.]+(%|[KMGTPEkmgtpe]i?[Bb]?)?')
 
+  if [[ -z "$threshold" ]]; then
+    return 1
+  fi
+
+  # Add 5% safety margin
+  if [[ "$threshold" == *% ]]; then
+    # Percentage threshold - add 5%
+    local value="${threshold%%%}"
+    local new_value
+    new_value=$(awk "BEGIN {printf \"%.0f\", $value + 5}")
+    echo "${new_value}%"
+  else
+    # Absolute threshold - add 5% to the value
+    local value="${threshold//[^0-9.]/}"
+    local unit="${threshold//[0-9.]/}"
+    local new_value
+    new_value=$(awk "BEGIN {printf \"%.1f\", $value * 1.05}")
+    echo "${new_value}${unit}"
+  fi
+}
 
 # -------------------------------------------------------------------------------
 # Function: create_kill_switch_monitor_pods
 # -------------------------------------------------------------------------------
 create_kill_switch_monitor_pods() {
-  # Skip if no kill switches are configured
-  if [[ -z "$KILL_SWITCH_ABS" && -z "$KILL_SWITCH_REL" ]]; then
-    return 0
-  fi
-
   local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE}}"
   local epoch_time
   epoch_time=$(date +"%s")
 
-  format_message "🛡️  Creating kill switch monitor pods..."
+  # Check if we need to use auto-detection (no thresholds provided)
+  local use_auto_detect=false
+  if [[ -z "$KILL_SWITCH_ABS" && -z "$KILL_SWITCH_REL" ]]; then
+    use_auto_detect=true
+    format_message "🛡️  Creating kill switch monitor pods (auto-detecting thresholds from kubelet)..."
+  else
+    format_message "🛡️  Creating kill switch monitor pods..."
+  fi
 
   for debug_pod in "${DEBUG_POD_NAMES[@]}"; do
     # Get the node where the debug pod is running
@@ -3427,6 +3484,27 @@ create_kill_switch_monitor_pods() {
     if ! node_name=$($KUBE_CLI get pod "$debug_pod" -n "$debug_ns" -o jsonpath='{.spec.nodeName}' 2>/dev/null); then
       format_message_stderr "   ⚠️  Warning: Could not get node for debug pod $debug_pod, skipping monitor"
       continue
+    fi
+
+    # Auto-detect threshold from kubelet if needed
+    local kill_switch_threshold_abs="$KILL_SWITCH_ABS"
+    local kill_switch_threshold_rel="$KILL_SWITCH_REL"
+
+    if [[ "$use_auto_detect" == "true" ]]; then
+      local detected_threshold
+      if detected_threshold=$(detect_kubelet_eviction_threshold "$node_name"); then
+        if [[ "$detected_threshold" == *% ]]; then
+          kill_switch_threshold_rel="$detected_threshold"
+          format_message "   🔍 Auto-detected threshold for node $node_name: $detected_threshold (kubelet eviction + 5%)"
+        else
+          kill_switch_threshold_abs="$detected_threshold"
+          format_message "   🔍 Auto-detected threshold for node $node_name: $detected_threshold (kubelet eviction + 5%)"
+        fi
+      else
+        # Fallback to 10% if detection fails
+        kill_switch_threshold_rel="10%"
+        format_message "   ⚠️  Could not auto-detect threshold for node $node_name, using fallback: 10%"
+      fi
     fi
 
     # Determine volume path based on pod type (pod vs node debug pod)
@@ -3469,12 +3547,23 @@ create_kill_switch_monitor_pods() {
       monitor_pod_name=$(truncate_name_with_hash "${ks_prefix}-${debug_pod_hash}-${counter}")
     done
 
+    # Temporarily override global kill switch variables for this specific monitor pod
+    local saved_kill_switch_abs="$KILL_SWITCH_ABS"
+    local saved_kill_switch_rel="$KILL_SWITCH_REL"
+    KILL_SWITCH_ABS="$kill_switch_threshold_abs"
+    KILL_SWITCH_REL="$kill_switch_threshold_rel"
+
     if create_kill_switch_monitor_pod "$debug_pod" "$node_name" "$monitor_pod_name" "$debug_ns" "$volume_path"; then
       KILL_SWITCH_MONITOR_PODS+=("$monitor_pod_name")
-      format_message "   ✅ Created kill switch monitor: $monitor_pod_name -> $debug_pod (volume: $volume_path)"
+      local threshold_display="${kill_switch_threshold_abs:-$kill_switch_threshold_rel}"
+      format_message "   ✅ Created kill switch monitor: $monitor_pod_name -> $debug_pod (threshold: $threshold_display, volume: $volume_path)"
     else
       format_message "   ❌ Failed to create kill switch monitor for $debug_pod"
     fi
+
+    # Restore global variables
+    KILL_SWITCH_ABS="$saved_kill_switch_abs"
+    KILL_SWITCH_REL="$saved_kill_switch_rel"
   done
 
   return 0
