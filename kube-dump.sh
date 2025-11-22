@@ -2143,17 +2143,18 @@ EOF
 #   optional dependency installation and placeholder substitution for node-specific operations.
 #
 # Parameters:
-#   $1 - node_name: Name of the target node (used for logging and identification)
-#   $2 - debug_pod_name: Name of the debug pod (used for placeholder substitution)
+#   $1 - node_name: Name of the target node (used for placeholder substitution)
+#   $2 - debug_pod_name: Name of the debug pod (for logging/identification only)
 #   Uses global variables:
 #     $NODE_COMMAND     - The command to execute on the node
-#     $PLACEHOLDER_CHAR - Character for hostname substitution in commands (default: %)
+#     $PLACEHOLDER_CHAR - Character for target substitution in commands (% replaced with node_name)
 #     $INSTALL_DEPS     - Boolean flag for automatic dependency installation
 #
 # Example Usage:
 #   NODE_COMMAND="tcpdump -i any -w %.pcap"
 #   SCRIPT_CONTENT=$(build_node_debug_script "worker1" "node-debug-123")
-#   # Returns bash script that executes tcpdump on worker1, saving to node-debug-123.pcap
+#   # Returns bash script that executes tcpdump on worker1, saving to worker1.pcap
+#   # Placeholder % in commands will be replaced with "worker1"
 #
 # Expected Output:
 #   - Complete bash script suitable for execution in node debug pod
@@ -2163,7 +2164,7 @@ EOF
 #
 # Detailed Behavior:
 #   1. Accepts node and debug pod names as parameters for context and substitution
-#   2. Performs placeholder substitution in NODE_COMMAND using debug pod name
+#   2. Performs placeholder substitution in NODE_COMMAND using target node name
 #   3. Generates script header with error handling and node identification logging
 #   4. Implements optional CRI dependency installation when INSTALL_DEPS=true:
 #      - Downloads and installs crictl v1.28.0 from GitHub releases
@@ -2181,8 +2182,8 @@ build_node_debug_script() {
   local node_name="$1"
   local debug_pod_name="$2"
 
-  # Substitute placeholder with debug pod hostname in node command
-  local final_node_command="${NODE_COMMAND//${PLACEHOLDER_CHAR}/$debug_pod_name}"
+  # Substitute placeholder with target node name in node command
+  local final_node_command="${NODE_COMMAND//${PLACEHOLDER_CHAR}/$node_name}"
 
   cat <<SCRIPT
 set -e
@@ -2308,10 +2309,10 @@ EOF
 #   and network namespace execution for pod-level debugging operations.
 #
 # Parameters:
-#   $1 - pod_name: Name of the target pod to debug
+#   $1 - pod_name: Name of the target pod to debug (used for placeholder substitution)
 #   $2 - container_name: Name of the target container within the pod
 #   $3 - node_name: Name of the node where the pod resides (informational)
-#   $4 - debug_pod_name: Name of the debug pod (used for placeholder substitution)
+#   $4 - debug_pod_name: Name of the debug pod (for logging/identification only)
 #   Uses global variables:
 #     $CRI_SOCKET      - Custom CRI socket path if specified
 #     $CRI_RUNTIME     - Container runtime type (containerd/crio/docker)
@@ -2319,11 +2320,12 @@ EOF
 #     $NAMESPACE       - Kubernetes namespace containing the target pod
 #     $CUSTOM_COMMAND  - Custom command to execute (if specified)
 #     $CAPTURE_COMMAND - Encoded command or default tcpdump command
-#     $PLACEHOLDER_CHAR - Character for hostname substitution in commands
+#     $PLACEHOLDER_CHAR - Character for target substitution in commands (% replaced with pod_name)
 #
 # Example Usage:
-#   SCRIPT_CONTENT=$(build_debug_script "nginx-app" "nginx" "worker1" "debug-pod-123")
+#   SCRIPT_CONTENT=$(build_debug_script "nginx-app" "nginx" "worker1" "pod-debug-123")
 #   # Returns complete bash script for debugging nginx-app pod
+#   # Placeholder % in commands will be replaced with "nginx-app"
 #
 # Expected Output:
 #   - Complete bash script suitable for execution in debug pod
@@ -2494,7 +2496,7 @@ echo "======================================================================" >&
 
 # Execute in network namespace
 if [[ -d "/host/proc/\$PID" ]]; then
-  $(generate_exec_command "${debug_pod_name}")
+  $(generate_exec_command "${pod_name}")
 else
   echo "ERROR: PID \$PID not found" >&2
   exit 1
@@ -2513,36 +2515,36 @@ SCRIPT
 #   proper nsenter command for network namespace execution.
 #
 # Parameters:
-#   $1 - debug_pod_hostname: Hostname of the debug pod for placeholder substitution
+#   $1 - target_pod_name: Name of the target pod for placeholder substitution
 #   Uses global variables:
 #     $CUSTOM_COMMAND    - Boolean/flag indicating custom command usage
 #     $CAPTURE_COMMAND   - Base64 encoded command or default tcpdump command
-#     $PLACEHOLDER_CHAR  - Character used for hostname substitution (default: %)
+#     $PLACEHOLDER_CHAR  - Character used for target substitution (default: %)
 #
 # Example Usage:
 #   CUSTOM_COMMAND="true"
 #   CAPTURE_COMMAND="dGNwZHVtcCAtaSBhbnkgLXcgJS5wY2Fw"  # base64: "tcpdump -i any -w %.pcap"
 #   PLACEHOLDER_CHAR="%"
-#   generate_exec_command "debug-pod-123"
+#   generate_exec_command "nginx-app-123"
 #   # Returns: DECODED_CMD=$(echo 'dGNw...' | base64 -d)
-#   #          FINAL_CMD=$(echo "$DECODED_CMD" | sed 's/%/debug-pod-123/g')
-#   #          exec nsenter -n -t $PID /bin/bash -c "$FINAL_CMD ; tail -f /dev/null"
+#   #          FINAL_CMD=$(echo "$DECODED_CMD" | sed 's/%/nginx-app-123/g')
+#   #          nsenter -n -t $PID /bin/bash -c "$FINAL_CMD" & ...
 #
 # Expected Output:
 #   - Bash command lines for execution within debug pod script
 #   - Commands include base64 decoding for custom commands
-#   - Placeholder substitution with actual debug pod hostname
+#   - Placeholder substitution with actual target pod name
 #   - Returns properly formatted nsenter command to stdout
 #
 # Detailed Behavior:
-#   1. Accepts debug pod hostname for placeholder substitution
+#   1. Accepts target pod name for placeholder substitution
 #   2. Branches based on CUSTOM_COMMAND flag:
 #      a. Custom command path:
 #         - Generates base64 decode command for CAPTURE_COMMAND
-#         - Creates sed command for placeholder substitution
+#         - Creates sed command for placeholder substitution with target pod name
 #         - Wraps in nsenter with network namespace and adds tail to keep pod alive
 #      b. Default command path:
-#         - Directly substitutes placeholder in CAPTURE_COMMAND
+#         - Directly substitutes placeholder in CAPTURE_COMMAND with target pod name
 #         - Creates simple nsenter command without bash wrapping
 #   3. Uses nsenter -n -t $PID to enter target container's network namespace
 #   4. For custom commands, appends "tail -f /dev/null" to prevent pod exit
@@ -2551,11 +2553,11 @@ SCRIPT
 #   7. Ensures proper escaping for shell execution within nsenter context
 # -------------------------------------------------------------------------------
 generate_exec_command() {
-  local debug_pod_hostname="$1"
+  local target_pod_name="$1"
 
   if [[ -n "$CUSTOM_COMMAND" ]]; then
     echo "DECODED_CMD=\$(echo '${CAPTURE_COMMAND}' | base64 -d)"
-    echo "FINAL_CMD=\$(echo \"\$DECODED_CMD\" | sed 's/${PLACEHOLDER_CHAR}/${debug_pod_hostname}/g')"
+    echo "FINAL_CMD=\$(echo \"\$DECODED_CMD\" | sed 's/${PLACEHOLDER_CHAR}/${target_pod_name}/g')"
     cat <<'EXECEND'
 # Run command in target pod's network namespace (keep debug pod's mount namespace for /host access)
 nsenter -n -t $PID /bin/bash -c "$FINAL_CMD" 2>&1 &
@@ -2574,7 +2576,7 @@ echo "Command completed with exit code: $?" >&2
 wait $TAIL_PID
 EXECEND
   else
-    local final_capture_cmd="${CAPTURE_COMMAND//${PLACEHOLDER_CHAR}/$debug_pod_hostname}"
+    local final_capture_cmd="${CAPTURE_COMMAND//${PLACEHOLDER_CHAR}/$target_pod_name}"
     echo "nsenter -n -t \$PID ${final_capture_cmd} 2>&1 &"
     echo "NSENTER_PID=\$!"
     echo "echo \"Command started in background (PID: \$NSENTER_PID)\" >&2"
@@ -2780,10 +2782,10 @@ create_file_discovery_pods() {
       done
 
       # Create discovery pod with tail -f /dev/null entrypoint
-      # Pass original debug pod name so placeholder substitution uses the correct filename
-      if create_discovery_pod "$pod_name" "$container_name" "$node_name" "$discovery_pod_name" "$debug_ns" "$original_debug_hostname" 2>/dev/null; then
+      # Pass target pod name for placeholder substitution
+      if create_discovery_pod "$pod_name" "$container_name" "$node_name" "$discovery_pod_name" "$debug_ns" "$pod_name" 2>/dev/null; then
         DISCOVERY_POD_NAMES+=("$discovery_pod_name")
-        DISCOVERY_POD_INFO+=("$discovery_pod_name:$node_name:pod:$original_debug_hostname")
+        DISCOVERY_POD_INFO+=("$discovery_pod_name:$node_name:pod:$pod_name")
       else
         echo "  Warning: Failed to create discovery pod for $pod_name" >&2
         return 1
@@ -2824,10 +2826,10 @@ create_file_discovery_pods() {
       done
 
       # Create node discovery pod with tail -f /dev/null entrypoint
-      # Pass original debug pod name so placeholder substitution uses the correct filename
-      if create_node_discovery_pod "$node_name" "$discovery_pod_name" "$debug_ns" "$original_debug_hostname" 2>/dev/null; then
+      # Pass target node name for placeholder substitution
+      if create_node_discovery_pod "$node_name" "$discovery_pod_name" "$debug_ns" "$node_name" 2>/dev/null; then
         DISCOVERY_POD_NAMES+=("$discovery_pod_name")
-        DISCOVERY_POD_INFO+=("$discovery_pod_name:$node_name:node:$original_debug_hostname")
+        DISCOVERY_POD_INFO+=("$discovery_pod_name:$node_name:node:$node_name")
       else
         echo "  Warning: Failed to create discovery pod for node $node_name" >&2
         return 1
@@ -2874,12 +2876,12 @@ handle_file_downloads() {
     local discovery_pod_name
     local node_name
     local pod_type
-    local original_debug_pod_name
+    local target_name
     local pod_had_failure=false
     discovery_pod_name=$(echo "$pod_info" | cut -d':' -f1)
     node_name=$(echo "$pod_info" | cut -d':' -f2)
     pod_type=$(echo "$pod_info" | cut -d':' -f3)
-    original_debug_pod_name=$(echo "$pod_info" | cut -d':' -f4)
+    target_name=$(echo "$pod_info" | cut -d':' -f4)
 
     # Try to execute the command - if it fails due to pod issues, that's an error
     # But if it succeeds with no output, that just means no files to download
@@ -2895,22 +2897,22 @@ handle_file_downloads() {
     # which could break on special characters like ; && | etc.
     local files_list
     if [[ "$pod_type" == "node" ]]; then
-      # For node discovery pods: decode ENCODED_NODE_SELECT_COMMAND, apply placeholder substitution, and run from /host
+      # For node discovery pods: decode ENCODED_NODE_SELECT_COMMAND, apply placeholder substitution with target node name, and run from /host
       files_list=$(run_kube_cmd "$discovery_pod_name" "exec-list" exec "$discovery_pod_name" -n "$debug_ns" -- bash -c '
-POD_NAME='"'$original_debug_pod_name'"'
+TARGET_NAME='"'$target_name'"'
 cmd=$(echo "$ENCODED_NODE_SELECT_COMMAND" | base64 -d 2>/dev/null || echo "")
 if [[ -n "$cmd" ]]; then
-  cmd="${cmd//${PLACEHOLDER_CHAR}/$POD_NAME}"
+  cmd="${cmd//${PLACEHOLDER_CHAR}/$TARGET_NAME}"
   cd /host && bash -c "$cmd"
 fi
 ' 2>/dev/null || true)
     else
-      # For pod discovery pods: decode ENCODED_SELECT_COMMAND and apply placeholder substitution
+      # For pod discovery pods: decode ENCODED_SELECT_COMMAND and apply placeholder substitution with target pod name
       files_list=$(run_kube_cmd "$discovery_pod_name" "exec-list" exec "$discovery_pod_name" -n "$debug_ns" -- bash -c '
-POD_NAME='"'$original_debug_pod_name'"'
+TARGET_NAME='"'$target_name'"'
 cmd=$(echo "$ENCODED_SELECT_COMMAND" | base64 -d 2>/dev/null || echo "")
 if [[ -n "$cmd" ]]; then
-  cmd="${cmd//${PLACEHOLDER_CHAR}/$POD_NAME}"
+  cmd="${cmd//${PLACEHOLDER_CHAR}/$TARGET_NAME}"
   bash -c "$cmd"
 fi
 ' 2>/dev/null || true)
@@ -3105,22 +3107,24 @@ cleanup_discovery_pods() {
 #   keeps running to allow the main script to download the discovered files.
 #
 # Parameters:
-#   $1 - pod_name: Name of the target pod (for logging)
+#   $1 - pod_name: Name of the target pod (used for placeholder substitution)
 #   $2 - container_name: Name of the target container (for logging)
 #   $3 - node_name: Name of the node where this discovery pod runs
-#   $4 - discovery_pod_name: Name of the discovery pod (used in placeholder substitution)
+#   $4 - discovery_pod_name: Name of the discovery pod (for logging/identification)
+#   $5 - target_name: Target pod name for placeholder substitution (defaults to pod_name)
 #
 # Expected Output:
 #   - Complete bash script suitable for execution in discovery pod
 #   - Script executes selection command once and outputs file list
 #   - Pod stays alive with tail -f /dev/null for file downloads
+#   - Placeholder % in commands will be replaced with target pod name
 # -------------------------------------------------------------------------------
 build_discovery_script() {
   local pod_name="$1"
   local container_name="$2"
   local node_name="$3"
   local discovery_pod_name="$4"
-  local original_debug_pod_name="${5:-$discovery_pod_name}"  # Use original debug pod name for placeholder substitution
+  local target_name="${5:-$pod_name}"  # Use target pod name for placeholder substitution
 
   cat <<DISCOVERY_SCRIPT
 #!/bin/bash
@@ -3134,8 +3138,8 @@ echo "[\$timestamp] Target: pod=$pod_name, container=$container_name, node=$node
 if [[ -n "\${ENCODED_SELECT_COMMAND:-}" ]]; then
   select_cmd=\$(echo "\$ENCODED_SELECT_COMMAND" | base64 -d 2>/dev/null || echo "")
   if [[ -n "\$select_cmd" ]]; then
-    # Apply placeholder substitution using original debug pod name (where files were created)
-    select_cmd="\${select_cmd//\${PLACEHOLDER_CHAR:-\%}/$original_debug_pod_name}"
+    # Apply placeholder substitution using target pod name
+    select_cmd="\${select_cmd//\${PLACEHOLDER_CHAR:-\%}/$target_name}"
 
     echo "[\$timestamp] Running selection command: \$select_cmd" >&2
 
@@ -3173,18 +3177,20 @@ DISCOVERY_SCRIPT
 #   node and outputs results. The pod then keeps running to allow log retrieval.
 #
 # Parameters:
-#   $1 - node_name: Name of the target node to discover files from
-#   $2 - discovery_pod_name: Name of the discovery pod (for logging)
+#   $1 - node_name: Name of the target node (used for placeholder substitution)
+#   $2 - discovery_pod_name: Name of the discovery pod (for logging/identification)
+#   $3 - target_name: Target node name for placeholder substitution (defaults to node_name)
 #
 # Expected Output:
 #   - Complete bash script suitable for execution in node discovery pod
 #   - Script executes file selection command once on host filesystem
 #   - Outputs timestamped file discovery results once, then keeps pod alive
+#   - Placeholder % in commands will be replaced with target node name
 # -------------------------------------------------------------------------------
 build_node_discovery_script() {
   local node_name="$1"
   local discovery_pod_name="$2"
-  local original_debug_pod_name="${3:-$discovery_pod_name}"  # Use original debug pod name for placeholder substitution
+  local target_name="${3:-$node_name}"  # Use target node name for placeholder substitution
 
   cat <<NODE_DISCOVERY_SCRIPT
 #!/bin/bash
@@ -3199,8 +3205,8 @@ timestamp="\$(date '+%Y-%m-%d %H:%M:%S')"
 if [[ -n "\${ENCODED_NODE_SELECT_COMMAND:-}" ]]; then
   select_cmd=\$(echo "\$ENCODED_NODE_SELECT_COMMAND" | base64 -d 2>/dev/null || echo "")
   if [[ -n "\$select_cmd" ]]; then
-    # Apply placeholder substitution using original debug pod name (where files were created)
-    select_cmd="\${select_cmd//\${PLACEHOLDER_CHAR:-\%}/$original_debug_pod_name}"
+    # Apply placeholder substitution using target node name
+    select_cmd="\${select_cmd//\${PLACEHOLDER_CHAR:-\%}/$target_name}"
 
     echo "[\$timestamp] Running node selection command: \$select_cmd" >&2
 
