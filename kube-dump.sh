@@ -2364,12 +2364,14 @@ echo "  Target: pod=${pod_name} container=${container_name}" >&2
 echo "  Node: ${node_name}" >&2
 echo "  Debug Pod: ${debug_pod_name}" >&2
 
-# Show command that will be executed
+# Show command that will be executed (with placeholder substitution for display)
 if [[ "${HAS_CUSTOM_CMD}" == "true" ]]; then
   PREVIEW_CMD=\$(echo '${CAPTURE_COMMAND}' | base64 -d)
+  PREVIEW_CMD="\${PREVIEW_CMD//${PLACEHOLDER_CHAR}/${pod_name}}"
   echo "  Command: \$PREVIEW_CMD" >&2
 else
-  echo "  Command: ${CAPTURE_COMMAND}" >&2
+  PREVIEW_CMD="${CAPTURE_COMMAND//${PLACEHOLDER_CHAR}/${pod_name}}"
+  echo "  Command: \$PREVIEW_CMD" >&2
 fi
 echo "======================================================================" >&2
 
