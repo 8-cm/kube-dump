@@ -483,6 +483,7 @@ get_pod_log_file() {
 #   Wrapper function for kubectl/oc commands that adds verbose logging when
 #   enabled. Captures stdout and stderr to separate log files per pod and
 #   operation, and uses maximum Kubernetes verbosity level (--v=10).
+#   For "apply" operations, always suppresses PodSecurity warnings to process logs.
 #
 # Parameters:
 #   $1 (pod_name): Name of the pod for logging (use "global" for non-pod operations)
@@ -497,9 +498,14 @@ get_pod_log_file() {
 # Expected Output:
 #   - Executes the command with or without verbose logging based on VERBOSE flag
 #   - When VERBOSE=true: adds --v=10 and redirects stdout/stderr to log files
+#   - For "apply" operations: always redirects stderr to process logs (suppresses PodSecurity warnings)
 #   - Returns the exit code of the command
 #
 # Detailed Behavior:
+#   - If operation is "apply" and OUTPUT_DIR is set:
+#     * Redirects stderr to: OUTPUT_DIR/process-logs/{pod_name}.{operation}.stderr.log
+#     * Suppresses PodSecurity warnings from user display
+#     * Warnings are saved to log file for troubleshooting
 #   - If VERBOSE=false: executes command normally without logging
 #   - If VERBOSE=true:
 #     * Adds --v=10 to kubectl/oc commands (max verbosity)
@@ -512,6 +518,28 @@ run_kube_cmd() {
   local pod_name="$1"
   local operation="$2"
   shift 2
+
+  # For apply operations, always redirect stderr to suppress PodSecurity warnings
+  # even when VERBOSE is not enabled
+  if [[ "$operation" == "apply" && -n "$OUTPUT_DIR" ]]; then
+    local stderr_log="${OUTPUT_DIR}/process-logs/${pod_name}.${operation}.stderr.log"
+
+    # Create process-logs directory if it doesn't exist
+    mkdir -p "${OUTPUT_DIR}/process-logs" 2>/dev/null
+
+    # Add timestamp to log
+    echo "=== $(date '+%Y-%m-%d %H:%M:%S') - $operation ===" >> "$stderr_log"
+
+    # Run command and redirect stderr to log file
+    $KUBE_CLI "$@" 2>> "$stderr_log"
+    local exit_code=$?
+
+    # Log completion
+    echo "=== Completed with exit code: $exit_code ===" >> "$stderr_log"
+    echo "" >> "$stderr_log"
+
+    return $exit_code
+  fi
 
   if [[ "$VERBOSE" != "true" ]]; then
     # No verbose logging, run command normally
@@ -2865,6 +2893,46 @@ create_file_discovery_pods() {
 # -------------------------------------------------------------------------------
 # Function: handle_file_downloads
 # -------------------------------------------------------------------------------
+# Description:
+#   Downloads files from discovery pods (both pod and node types) that were created
+#   to collect network captures or command outputs. Handles file discovery, download
+#   with retry logic, cleanup of downloaded files from nodes, and selective cleanup
+#   of successful pods while preserving failed pods for inspection.
+#
+# Parameters:
+#   Uses global variables:
+#     $DISCOVERY_POD_INFO[] - Array with format "pod_name:node_name:pod_type:target_name"
+#     $DEBUG_NAMESPACE      - Namespace where discovery pods exist
+#     $NAMESPACE            - Fallback namespace if DEBUG_NAMESPACE not set
+#     $OUTPUT_DIR           - Directory where files will be downloaded
+#     $ENCODED_SELECT_COMMAND       - Base64-encoded select command for pod discovery
+#     $ENCODED_NODE_SELECT_COMMAND  - Base64-encoded select command for node discovery
+#     $PLACEHOLDER_CHAR     - Character to substitute with target name (typically "%")
+#
+# Returns:
+#   Always returns 0 (success)
+#   Files are downloaded to $OUTPUT_DIR with prefix "${target_name}_filename"
+#   Successful pods are deleted after download
+#   Failed pods are preserved for inspection
+#
+# Example Usage:
+#   DISCOVERY_POD_INFO=("pod-disc-abc:node-01:pod:nginx-app" "node-disc-def:node-01:node:node-01")
+#   OUTPUT_DIR="/tmp/outputs"
+#   handle_file_downloads
+#
+# Expected Behavior:
+#   1. Creates OUTPUT_DIR if it doesn't exist
+#   2. For each discovery pod:
+#      - Verifies pod accessibility
+#      - Decodes and executes select command with placeholder substitution
+#      - Downloads all files found by the select command with retry (3 attempts)
+#      - Removes downloaded files from node's filesystem
+#      - Tracks success/failure status
+#   3. Cleans up successful pods immediately
+#   4. Preserves failed pods for user inspection
+#   5. Handles duplicate filenames by checking if user included % in filename
+#   6. Provides detailed progress feedback for each file download
+# -------------------------------------------------------------------------------
 handle_file_downloads() {
   local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE}}"
   local successful_pods=()
@@ -3336,6 +3404,38 @@ EOF
 # -------------------------------------------------------------------------------
 # Function: create_node_discovery_pod
 # -------------------------------------------------------------------------------
+# Description:
+#   Creates a privileged discovery pod on a specific node with host network and
+#   host filesystem access. This pod executes file selection commands to discover
+#   files matching user criteria (e.g., network captures, logs) on the node's
+#   filesystem. Used in conjunction with -E/--node-select option.
+#
+# Parameters:
+#   $1 - node_name: Kubernetes node name where pod should be scheduled
+#   $2 - discovery_pod_name: Name for the discovery pod (e.g., "node-disc-abc123")
+#   $3 - debug_ns: Namespace where pod should be created
+#   $4 - target_name: Name used for placeholder substitution (defaults to node_name)
+#
+# Uses global variables:
+#   $DEBUG_IMAGE                  - Container image for discovery pod
+#   $ENCODED_NODE_SELECT_COMMAND  - Base64-encoded file selection command
+#   $PLACEHOLDER_CHAR             - Character to substitute with target name
+#
+# Returns:
+#   Returns kubectl/oc apply exit code (0 on success)
+#
+# Example Usage:
+#   create_node_discovery_pod "k8s-node-01" "node-disc-abc123" "default" "k8s-node-01"
+#
+# Expected Behavior:
+#   1. Creates pod with privileged security context
+#   2. Mounts host root filesystem at /host
+#   3. Uses nodeSelector to schedule on specified node
+#   4. Sets hostNetwork and hostPID for node-level access
+#   5. Embeds node discovery script via build_node_discovery_script
+#   6. Passes ENCODED_NODE_SELECT_COMMAND as environment variable
+#   7. Pod runs to completion after executing discovery script
+# -------------------------------------------------------------------------------
 create_node_discovery_pod() {
   local node_name="$1"
   local discovery_pod_name="$2"
@@ -3383,6 +3483,35 @@ EOF
 
 # -------------------------------------------------------------------------------
 # Function: wait_for_discovery_pods_ready
+# -------------------------------------------------------------------------------
+# Description:
+#   Waits for all discovery pods to reach Running phase before proceeding with
+#   file downloads. Polls pod status every 2 seconds with a 120-second timeout.
+#   Provides visual feedback during the wait period.
+#
+# Parameters:
+#   Uses global variables:
+#     $DISCOVERY_POD_NAMES[] - Array of discovery pod names to wait for
+#     $DEBUG_NAMESPACE       - Namespace where discovery pods exist
+#     $NAMESPACE             - Fallback namespace if DEBUG_NAMESPACE not set
+#     $KUBE_CLI              - Kubernetes CLI command (kubectl/oc)
+#
+# Returns:
+#   0 - All discovery pods are ready (Running phase)
+#   1 - Timeout exceeded (pods not ready within 120 seconds)
+#
+# Example Usage:
+#   DISCOVERY_POD_NAMES=("pod-disc-abc123" "node-disc-def456")
+#   if wait_for_discovery_pods_ready; then
+#     echo "All discovery pods ready"
+#   fi
+#
+# Expected Behavior:
+#   1. Continuously checks pod status every 2 seconds
+#   2. Prints progress dots to stderr during wait
+#   3. Returns immediately when all pods are Running
+#   4. Times out after 120 seconds if any pod not ready
+#   5. Provides clear success/failure messages
 # -------------------------------------------------------------------------------
 wait_for_discovery_pods_ready() {
   local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE}}"
@@ -3481,6 +3610,43 @@ detect_kubelet_eviction_threshold() {
 
 # -------------------------------------------------------------------------------
 # Function: create_kill_switch_monitor_pods
+# -------------------------------------------------------------------------------
+# Description:
+#   Creates kill switch monitor pods for all debug pods. Each monitor continuously
+#   watches disk usage on a specified volume path and terminates its target debug
+#   pod if usage exceeds the threshold. Supports auto-detection of kubelet eviction
+#   thresholds with 5% safety margin, or manual absolute/relative thresholds.
+#
+# Parameters:
+#   Uses global variables:
+#     $DEBUG_POD_NAMES[]    - Array of debug pod names to monitor
+#     $KILL_SWITCH_ABS      - Absolute threshold (e.g., "1GB", "500MB") or empty
+#     $KILL_SWITCH_REL      - Relative threshold (e.g., "10%", "5%") or empty
+#     $POD_VOLUME           - Volume path for pod debug pods (e.g., "/tmp")
+#     $NODE_VOLUME          - Volume path for node debug pods (e.g., "/host/tmp")
+#     $DEBUG_NAMESPACE      - Namespace for monitor pods
+#     $NAMESPACE            - Fallback namespace
+#     $KUBE_CLI             - Kubernetes CLI command
+#
+# Returns:
+#   0 on success
+#   Updates global array $KILL_SWITCH_MONITOR_PODS with created monitor pod names
+#
+# Example Usage:
+#   DEBUG_POD_NAMES=("pod-debug-abc123" "node-debug-def456")
+#   KILL_SWITCH_REL="10%"
+#   POD_VOLUME="/tmp"
+#   create_kill_switch_monitor_pods
+#
+# Expected Behavior:
+#   1. Auto-detects thresholds from kubelet if KILL_SWITCH_ABS and KILL_SWITCH_REL empty
+#   2. Adds 5% safety margin to auto-detected thresholds
+#   3. Falls back to 10% if auto-detection fails
+#   4. Creates one monitor pod per debug pod on the same node
+#   5. Uses pod-ks-* prefix for pod debug monitors, node-ks-* for node debug monitors
+#   6. Generates unique names using MD5/cksum hash of debug pod name
+#   7. Passes appropriate volume path based on debug pod type
+#   8. Provides detailed feedback about created monitors and thresholds
 # -------------------------------------------------------------------------------
 create_kill_switch_monitor_pods() {
   local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE}}"
@@ -3589,6 +3755,39 @@ create_kill_switch_monitor_pods() {
 
 # -------------------------------------------------------------------------------
 # Function: create_kill_switch_monitor_pod
+# -------------------------------------------------------------------------------
+# Description:
+#   Creates a single kill switch monitor pod that watches disk usage on a specified
+#   volume path and terminates a target debug pod when usage exceeds configured
+#   thresholds. The monitor pod runs on the same node as its target debug pod.
+#
+# Parameters:
+#   $1 - target_debug_pod: Name of debug pod to monitor and terminate if threshold exceeded
+#   $2 - node_name: Node where monitor pod should run (same as target debug pod)
+#   $3 - monitor_pod_name: Unique name for the monitor pod (e.g., "pod-ks-abc123")
+#   $4 - debug_ns: Namespace where monitor pod should be created
+#   $5 - volume_path: Filesystem path to monitor (e.g., "/tmp" or "/host/tmp")
+#
+# Uses global variables:
+#   $KILL_SWITCH_ABS  - Absolute threshold (e.g., "1GB", overrides relative)
+#   $KILL_SWITCH_REL  - Relative threshold (e.g., "10%")
+#   $DEBUG_IMAGE      - Container image for monitor pod
+#
+# Returns:
+#   Returns kubectl/oc apply exit code (0 on success)
+#
+# Example Usage:
+#   KILL_SWITCH_REL="10%"
+#   create_kill_switch_monitor_pod "pod-debug-abc123" "k8s-node-01" "pod-ks-xyz789" "default" "/tmp"
+#
+# Expected Behavior:
+#   1. Creates privileged pod with host network and host filesystem access
+#   2. Schedules pod on specified node using nodeSelector
+#   3. Adds label "target-pod" pointing to debug pod for tracking
+#   4. Embeds kill switch monitoring script via build_kill_switch_monitor_script
+#   5. Monitor continuously checks disk usage every 1 second
+#   6. Pod exits with status 0 when threshold exceeded (triggers kill switch)
+#   7. Pod exits with status 1 if monitoring fails
 # -------------------------------------------------------------------------------
 create_kill_switch_monitor_pod() {
   local target_debug_pod="$1"
@@ -3765,7 +3964,27 @@ KILL_SWITCH_REL="${KILL_SWITCH_REL}"
 CHECK_INTERVAL=1  # Check every 1 second
 VOLUME_PATH="${volume_path}"
 
-# Helper function to format bc output with leading zero
+# -------------------------------------------------------------------------------
+# Function: format_bc_result
+# -------------------------------------------------------------------------------
+# Description:
+#   Formats bc (calculator) output to ensure proper decimal notation with leading zeros
+#
+# Parameters:
+#   \$1 - result: The numeric result from bc calculation (may start with decimal point)
+#   \$2 - unit: The unit suffix to append (e.g., "GB", "MB", "%")
+#
+# Returns:
+#   Formatted string with leading zero if result starts with decimal point
+#
+# Example Usage:
+#   format_bc_result ".5" "GB"  # Returns: 0.5GB
+#   format_bc_result "1.5" "MB" # Returns: 1.5MB
+#
+# Expected Behavior:
+#   bc calculator can output results like ".5" instead of "0.5"
+#   This function ensures consistent formatting by adding leading zero when needed
+# -------------------------------------------------------------------------------
 format_bc_result() {
   local result=\$1
   local unit=\$2
@@ -3994,6 +4213,44 @@ SCRIPT
 
 # -------------------------------------------------------------------------------
 # Function: monitor_kill_switches
+# -------------------------------------------------------------------------------
+# Description:
+#   Continuously monitors kill switch monitor pods to detect when disk usage
+#   thresholds are exceeded. When a monitor pod completes successfully (exits 0),
+#   it indicates the kill switch was triggered and this function terminates the
+#   corresponding debug pod. Runs in background until all monitors are processed
+#   or parent process exits.
+#
+# Parameters:
+#   Uses global variables:
+#     $KILL_SWITCH_MONITOR_PODS[] - Array of monitor pod names to watch
+#     $DEBUG_NAMESPACE            - Namespace where monitor/debug pods exist
+#     $NAMESPACE                  - Fallback namespace
+#     $KUBE_CLI                   - Kubernetes CLI command
+#     $OUTPUT_DIR                 - Directory for saving monitor pod logs
+#
+# Returns:
+#   Does not return (runs until completion or parent exit)
+#   Side effect: Terminates debug pods when kill switches trigger
+#   Side effect: Saves monitor pod logs to OUTPUT_DIR
+#
+# Example Usage:
+#   KILL_SWITCH_MONITOR_PODS=("pod-ks-abc123" "node-ks-def456")
+#   monitor_kill_switches &  # Run in background
+#
+# Expected Behavior:
+#   1. Polls monitor pod status every 1 second
+#   2. When monitor pod status is "Succeeded":
+#      - Logs kill switch trigger message
+#      - Downloads monitor pod logs to OUTPUT_DIR
+#      - Deletes target debug pod immediately
+#      - Marks monitor as processed
+#   3. When monitor pod status is "Failed":
+#      - Logs failure warning
+#      - Downloads monitor pod logs for debugging
+#      - Marks monitor as processed
+#   4. Exits when all monitors processed or parent process terminates
+#   5. Skips already-processed monitors to avoid duplicate actions
 # -------------------------------------------------------------------------------
 monitor_kill_switches() {
   local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE}}"
