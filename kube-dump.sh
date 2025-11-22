@@ -3601,9 +3601,9 @@ echo "=== Kill switch monitor for ${target_debug_pod} ===" >&2
 #        Supports: B, K/Ki, M/Mi, G/Gi, T/Ti with various case combinations
 #
 # Example Usage:
-#   bytes=$(parse_size_to_bytes "1GB")     # Returns: 1073741824
-#   bytes=$(parse_size_to_bytes "500MB")   # Returns: 524288000
-#   bytes=$(parse_size_to_bytes "1.5Gi")   # Returns: 1610612736
+#   bytes=\$(parse_size_to_bytes "1GB")     # Returns: 1073741824
+#   bytes=\$(parse_size_to_bytes "500MB")   # Returns: 524288000
+#   bytes=\$(parse_size_to_bytes "1.5Gi")   # Returns: 1610612736
 #
 # Expected Output:
 #   - Returns the equivalent number of bytes as a string to stdout
