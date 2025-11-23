@@ -2528,16 +2528,27 @@ EOF
 build_node_debug_script() {
   local node_name="$1"
   local debug_pod_name="$2"
+  local container_index="${3:-0}"  # Default to 0 for backwards compatibility
+
+  # Determine which command to use
+  local cmd_to_use
+  local is_custom="false"
+  if [[ ${#CUSTOM_NODE_COMMANDS[@]} -gt "$container_index" ]]; then
+    cmd_to_use="${CUSTOM_NODE_COMMANDS[$container_index]}"
+    is_custom="true"
+  else
+    cmd_to_use="$NODE_COMMAND"
+  fi
 
   # Substitute placeholder with target node name in node command, strip newlines
   local node_command_clean
-  node_command_clean=$(echo "$NODE_COMMAND" | tr -d '\n')
+  node_command_clean=$(echo "$cmd_to_use" | tr -d '\n')
   local final_node_command="${node_command_clean//${PLACEHOLDER_CHAR}/$node_name}"
 
   cat <<SCRIPT
 set -e
 echo "======================================================================" >&2
-echo "Starting command execution" >&2
+echo "Starting command execution (container index: ${container_index})" >&2
 echo "  Target: node=${node_name}" >&2
 echo "  Debug Pod: ${debug_pod_name}" >&2
 echo "  Command: ${final_node_command}" >&2
@@ -2781,22 +2792,33 @@ build_debug_script() {
   local container_name="$2"
   local node_name="$3"
   local debug_pod_name="$4"
+  local container_index="${5:-0}"  # Default to 0 for backwards compatibility
+
+  # Determine which command to use
+  local cmd_to_use
+  local is_custom="false"
+  if [[ ${#ENCODED_CUSTOM_COMMANDS[@]} -gt "$container_index" ]]; then
+    cmd_to_use="${ENCODED_CUSTOM_COMMANDS[$container_index]}"
+    is_custom="true"
+  else
+    cmd_to_use="$CAPTURE_COMMAND"
+  fi
 
   cat <<SCRIPT
 set -e
 echo "======================================================================" >&2
-echo "Starting command execution" >&2
+echo "Starting command execution (container index: ${container_index})" >&2
 echo "  Target: pod=${pod_name} container=${container_name}" >&2
 echo "  Node: ${node_name}" >&2
 echo "  Debug Pod: ${debug_pod_name}" >&2
 
 # Show command that will be executed (with placeholder substitution for display)
-if [[ "${HAS_CUSTOM_CMD}" == "true" ]]; then
-  PREVIEW_CMD=\$(echo '${CAPTURE_COMMAND}' | base64 -d)
+if [[ "${is_custom}" == "true" ]]; then
+  PREVIEW_CMD=\$(echo '${cmd_to_use}' | base64 -d)
   PREVIEW_CMD="\${PREVIEW_CMD//${PLACEHOLDER_CHAR}/${pod_name}}"
   echo "  Command: \$PREVIEW_CMD" >&2
 else
-  PREVIEW_CMD="${CAPTURE_COMMAND//${PLACEHOLDER_CHAR}/${pod_name}}"
+  PREVIEW_CMD="${cmd_to_use//${PLACEHOLDER_CHAR}/${pod_name}}"
   echo "  Command: \$PREVIEW_CMD" >&2
 fi
 echo "======================================================================" >&2
@@ -2927,7 +2949,7 @@ echo "======================================================================" >&
 
 # Execute in network namespace
 if [[ -d "/host/proc/\$PID" ]]; then
-  $(generate_exec_command "${pod_name}")
+  $(generate_exec_command "${pod_name}" "${cmd_to_use}" "${is_custom}")
 else
   echo "ERROR: PID \$PID not found" >&2
   exit 1
@@ -2947,15 +2969,13 @@ SCRIPT
 #
 # Parameters:
 #   $1 - target_pod_name: Name of the target pod for placeholder substitution
+#   $2 - cmd_to_use: Base64 encoded command to execute
+#   $3 - is_custom: "true" if custom command, "false" if default
 #   Uses global variables:
-#     $ENCODED_CUSTOM_COMMANDS[] - Array of base64 encoded custom commands
-#     $CAPTURE_COMMAND   - Base64 encoded default capture command (if no custom commands)
 #     $PLACEHOLDER_CHAR  - Character used for target substitution (default: %)
 #
 # Example Usage:
-#   ENCODED_CUSTOM_COMMANDS=("dGNwZHVtcCAtaSBhbnkgLXcgJS5wY2Fw")  # base64: "tcpdump -i any -w %.pcap"
-#   PLACEHOLDER_CHAR="%"
-#   generate_exec_command "nginx-app-123"
+#   generate_exec_command "nginx-app-123" "dGNwZHVtcCAtaSBhbnkgLXcgJS5wY2Fw" "true"
 #   # Returns: DECODED_CMD=$(echo 'dGNw...' | base64 -d)
 #   #          FINAL_CMD=$(echo "$DECODED_CMD" | sed 's/%/nginx-app-123/g')
 #   #          nsenter -n -t $PID /bin/bash -c "$FINAL_CMD" & ...
@@ -2984,10 +3004,11 @@ SCRIPT
 # -------------------------------------------------------------------------------
 generate_exec_command() {
   local target_pod_name="$1"
+  local cmd_to_use="$2"
+  local is_custom="${3:-true}"
 
-  # Use first custom command if available (backwards compatibility - will be rewritten for multi-sidecar)
-  if [[ ${#ENCODED_CUSTOM_COMMANDS[@]} -gt 0 ]]; then
-    printf "DECODED_CMD=\$(echo '%s' | base64 -d | tr -d '\\\\n')\\n" "${ENCODED_CUSTOM_COMMANDS[0]}"
+  if [[ "$is_custom" == "true" ]]; then
+    printf "DECODED_CMD=\$(echo '%s' | base64 -d | tr -d '\\\\n')\\n" "$cmd_to_use"
     echo "FINAL_CMD=\$(echo \"\$DECODED_CMD\" | sed 's/${PLACEHOLDER_CHAR}/${target_pod_name}/g')"
     cat <<'EXECEND'
 # Run command in target pod's network namespace (keep debug pod's mount namespace for /host access)
