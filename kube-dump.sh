@@ -1992,6 +1992,22 @@ create_debug_pods_for_targets() {
   local epoch_time
   epoch_time=$(date +"%s")
 
+  # Auto-detect CRI socket from first node if not specified
+  if [[ -z "$CRI_SOCKET" ]] && [[ ${#TARGET_PODS[@]} -gt 0 ]]; then
+    # Extract first node name
+    local first_node
+    first_node=$(echo "${TARGET_PODS[0]}" | cut -d':' -f3)
+
+    if [[ -n "$first_node" ]]; then
+      local detected_socket
+      if detected_socket=$(detect_cri_socket_from_node "$first_node"); then
+        CRI_SOCKET="$detected_socket"
+        format_message "🔍 Auto-detected CRI socket from node $first_node: $CRI_SOCKET"
+      else
+        format_message "⚠️  Could not auto-detect CRI socket from node $first_node, using defaults based on runtime: $CRI_RUNTIME"
+      fi
+    fi
+  fi
 
   for target_pod in "${TARGET_PODS[@]}"; do
     local pod_name
@@ -2083,6 +2099,21 @@ create_debug_pods_for_targets() {
 # -------------------------------------------------------------------------------
 create_node_debug_pods() {
   local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE:-default}}"
+
+  # Auto-detect CRI socket from first node if not specified
+  if [[ -z "$CRI_SOCKET" ]] && [[ ${#TARGET_NODES[@]} -gt 0 ]]; then
+    local first_node="${TARGET_NODES[0]}"
+
+    if [[ -n "$first_node" ]]; then
+      local detected_socket
+      if detected_socket=$(detect_cri_socket_from_node "$first_node"); then
+        CRI_SOCKET="$detected_socket"
+        format_message "🔍 Auto-detected CRI socket from node $first_node: $CRI_SOCKET"
+      else
+        format_message "⚠️  Could not auto-detect CRI socket from node $first_node, using defaults based on runtime: $CRI_RUNTIME"
+      fi
+    fi
+  fi
 
   for node_name in "${TARGET_NODES[@]}"; do
     # Generate unique node debug pod name with hash
@@ -3766,6 +3797,63 @@ wait_for_discovery_pods_ready() {
 
   echo "" >&2
   echo "Timeout: Discovery pods did not become ready within ${max_wait}s" >&2
+  return 1
+}
+
+# -------------------------------------------------------------------------------
+# Function: detect_cri_socket_from_node
+# -------------------------------------------------------------------------------
+# Description:
+#   Queries a node's kubelet configz endpoint to automatically detect the
+#   container runtime socket path. This eliminates the need for manual
+#   --cri-socket configuration by reading the actual kubelet configuration.
+#
+# Parameters:
+#   $1 - node_name: Name of the node to query
+#
+# Returns:
+#   Outputs the CRI socket path to stdout (e.g., "/run/containerd/containerd.sock")
+#   Returns empty string if detection fails
+#
+# Example Usage:
+#   socket=$(detect_cri_socket_from_node "k8s-node-01")
+#   # Returns: "/run/containerd/containerd.sock"
+#
+# Detailed Behavior:
+#   1. Queries kubelet configz endpoint via Kubernetes API
+#   2. Extracts containerRuntimeEndpoint from kubelet configuration
+#   3. Strips "unix://" prefix if present to get clean socket path
+#   4. Returns the socket path for use in CRI operations
+#   5. Returns empty if query fails or endpoint not found
+#   6. Validates path looks like a valid socket path before returning
+#
+detect_cri_socket_from_node() {
+  local node_name="$1"
+
+  # Query kubelet configz endpoint
+  local configz
+  if ! configz=$($KUBE_CLI get --raw "/api/v1/nodes/${node_name}/proxy/configz" 2>/dev/null); then
+    return 1
+  fi
+
+  # Extract containerRuntimeEndpoint
+  # Pattern: "containerRuntimeEndpoint":"unix:///run/containerd/containerd.sock"
+  local socket_path
+  socket_path=$(echo "$configz" | grep -oE '"containerRuntimeEndpoint"\s*:\s*"[^"]+"' | grep -oE '"[^"]+$' | tr -d '"')
+
+  if [[ -z "$socket_path" ]]; then
+    return 1
+  fi
+
+  # Strip unix:// prefix if present
+  socket_path="${socket_path#unix://}"
+
+  # Validate we got a reasonable path
+  if [[ "$socket_path" == /*.sock ]] || [[ "$socket_path" == */containerd/* ]] || [[ "$socket_path" == */crio/* ]] || [[ "$socket_path" == */cri-dockerd.sock ]]; then
+    echo "$socket_path"
+    return 0
+  fi
+
   return 1
 }
 
