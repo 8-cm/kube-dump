@@ -3348,24 +3348,32 @@ handle_file_downloads() {
     # which could break on special characters like ; && | etc.
     local files_list
     if [[ "$pod_type" == "node" ]]; then
-      # For node discovery pods: decode ENCODED_NODE_SELECT_COMMAND, apply placeholder substitution with target node name, and run from /host
+      # For node discovery pods: loop through all ENCODED_NODE_SELECT_COMMAND_* env vars
       files_list=$(run_kube_cmd "$discovery_pod_name" "exec-list" exec "$discovery_pod_name" -n "$debug_ns" -- bash -c "
 TARGET_NAME='$target_name'
-cmd=\$(echo \"\$ENCODED_NODE_SELECT_COMMAND\" | base64 -d 2>/dev/null || echo \"\")
-if [[ -n \"\$cmd\" ]]; then
-  cmd=\"\${cmd//\${PLACEHOLDER_CHAR}/\$TARGET_NAME}\"
-  cd /host && bash -c \"\$cmd\"
-fi
+NUM=\${NUM_NODE_SELECT_COMMANDS:-0}
+for ((i=0; i<\$NUM; i++)); do
+  var_name=\"ENCODED_NODE_SELECT_COMMAND_\${i}\"
+  cmd=\$(eval echo \"\\\$\$var_name\" | base64 -d 2>/dev/null || echo \"\")
+  if [[ -n \"\$cmd\" ]]; then
+    cmd=\"\${cmd//\${PLACEHOLDER_CHAR}/\$TARGET_NAME}\"
+    cd /host && bash -c \"\$cmd\"
+  fi
+done
 " 2>/dev/null || true)
     else
-      # For pod discovery pods: decode ENCODED_SELECT_COMMAND and apply placeholder substitution with target pod name
+      # For pod discovery pods: loop through all ENCODED_SELECT_COMMAND_* env vars
       files_list=$(run_kube_cmd "$discovery_pod_name" "exec-list" exec "$discovery_pod_name" -n "$debug_ns" -- bash -c "
 TARGET_NAME='$target_name'
-cmd=\$(echo \"\$ENCODED_SELECT_COMMAND\" | base64 -d 2>/dev/null || echo \"\")
-if [[ -n \"\$cmd\" ]]; then
-  cmd=\"\${cmd//\${PLACEHOLDER_CHAR}/\$TARGET_NAME}\"
-  bash -c \"\$cmd\"
-fi
+NUM=\${NUM_SELECT_COMMANDS:-0}
+for ((i=0; i<\$NUM; i++)); do
+  var_name=\"ENCODED_SELECT_COMMAND_\${i}\"
+  cmd=\$(eval echo \"\\\$\$var_name\" | base64 -d 2>/dev/null || echo \"\")
+  if [[ -n \"\$cmd\" ]]; then
+    cmd=\"\${cmd//\${PLACEHOLDER_CHAR}/\$TARGET_NAME}\"
+    bash -c \"\$cmd\"
+  fi
+done
 " 2>/dev/null || true)
     fi
 
@@ -3779,6 +3787,23 @@ create_discovery_pod() {
   local debug_ns="$5"
   local target_name="${6:-$pod_name}"  # Target pod name for placeholder substitution
 
+  # Build environment variables for all select commands
+  local env_vars=""
+  env_vars+="    - name: CRI_RUNTIME"$'\n'
+  env_vars+="      value: \"${CRI_RUNTIME}\""$'\n'
+  env_vars+="    - name: CRI_SOCKET"$'\n'
+  env_vars+="      value: \"${CRI_SOCKET}\""$'\n'
+  env_vars+="    - name: NUM_SELECT_COMMANDS"$'\n'
+  env_vars+="      value: \"${#ENCODED_SELECT_COMMANDS[@]}\""$'\n'
+  env_vars+="    - name: PLACEHOLDER_CHAR"$'\n'
+  env_vars+="      value: \"${PLACEHOLDER_CHAR}\""$'\n'
+
+  # Add each encoded command as a separate environment variable
+  for ((i=0; i<${#ENCODED_SELECT_COMMANDS[@]}; i++)); do
+    env_vars+="    - name: ENCODED_SELECT_COMMAND_${i}"$'\n'
+    env_vars+="      value: \"${ENCODED_SELECT_COMMANDS[$i]}\""$'\n'
+  done
+
   # Create discovery pod using YAML manifest for file discovery
   run_kube_cmd "$discovery_pod_name" "apply" apply -f - <<EOF
 apiVersion: v1
@@ -3802,15 +3827,7 @@ $(build_discovery_script "$pod_name" "$container_name" "$node_name" "$discovery_
     securityContext:
       privileged: true
     env:
-    - name: CRI_RUNTIME
-      value: "${CRI_RUNTIME}"
-    - name: CRI_SOCKET
-      value: "${CRI_SOCKET}"
-    - name: ENCODED_SELECT_COMMAND
-      value: "${ENCODED_SELECT_COMMAND}"
-    - name: PLACEHOLDER_CHAR
-      value: "${PLACEHOLDER_CHAR}"
-    volumeMounts:
+${env_vars}    volumeMounts:
     - name: host-root
       mountPath: /host
       readOnly: false
@@ -3863,6 +3880,19 @@ create_node_discovery_pod() {
   local debug_ns="$3"
   local target_name="${4:-$node_name}"  # Target node name for placeholder substitution
 
+  # Build environment variables for all node select commands
+  local env_vars=""
+  env_vars+="    - name: NUM_NODE_SELECT_COMMANDS"$'\n'
+  env_vars+="      value: \"${#ENCODED_NODE_SELECT_COMMANDS[@]}\""$'\n'
+  env_vars+="    - name: PLACEHOLDER_CHAR"$'\n'
+  env_vars+="      value: \"${PLACEHOLDER_CHAR}\""$'\n'
+
+  # Add each encoded command as a separate environment variable
+  for ((i=0; i<${#ENCODED_NODE_SELECT_COMMANDS[@]}; i++)); do
+    env_vars+="    - name: ENCODED_NODE_SELECT_COMMAND_${i}"$'\n'
+    env_vars+="      value: \"${ENCODED_NODE_SELECT_COMMANDS[$i]}\""$'\n'
+  done
+
   # Create node discovery pod using YAML manifest
   run_kube_cmd "$discovery_pod_name" "apply" apply -f - <<EOF
 apiVersion: v1
@@ -3886,11 +3916,7 @@ $(build_node_discovery_script "$node_name" "$discovery_pod_name" "$target_name" 
     securityContext:
       privileged: true
     env:
-    - name: ENCODED_NODE_SELECT_COMMAND
-      value: "${ENCODED_NODE_SELECT_COMMAND}"
-    - name: PLACEHOLDER_CHAR
-      value: "${PLACEHOLDER_CHAR}"
-    volumeMounts:
+${env_vars}    volumeMounts:
     - name: host-root
       mountPath: /host
       readOnly: false
