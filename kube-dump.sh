@@ -3839,7 +3839,7 @@ detect_cri_socket_from_node() {
   # Extract containerRuntimeEndpoint
   # Pattern: "containerRuntimeEndpoint":"unix:///run/containerd/containerd.sock"
   local socket_path
-  socket_path=$(echo "$configz" | grep -oE '"containerRuntimeEndpoint"\s*:\s*"[^"]+"' | grep -oE '"[^"]+$' | tr -d '"')
+  socket_path=$(echo "$configz" | sed -n 's/.*"containerRuntimeEndpoint"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
 
   if [[ -z "$socket_path" ]]; then
     return 1
