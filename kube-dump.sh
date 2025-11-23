@@ -2036,13 +2036,11 @@ validate_all_requirements() {
 # -------------------------------------------------------------------------------
 create_debug_pods_for_targets() {
   # Encode all custom commands to base64
-  local HAS_CUSTOM_CMD="false"
   ENCODED_CUSTOM_COMMANDS=()
   if [[ ${#CUSTOM_COMMANDS[@]} -gt 0 ]]; then
     for cmd in "${CUSTOM_COMMANDS[@]}"; do
       ENCODED_CUSTOM_COMMANDS+=("$(echo -n "$cmd" | base64 -w 0)")
     done
-    HAS_CUSTOM_CMD="true"
   fi
 
   # Encode select-to-download commands to base64
