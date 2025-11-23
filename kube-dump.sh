@@ -2338,6 +2338,12 @@ generate_file_monitor_container() {
   local script_builder_func="$7"
   local encoded_command="$8"
 
+  # Detect if this is a node file monitor (script builder contains "node")
+  local is_node_monitor=false
+  if [[ "$script_builder_func" == *"node"* ]]; then
+    is_node_monitor=true
+  fi
+
   cat <<EOF
   - name: ${container_name}
     image: ${DEBUG_IMAGE}
@@ -2349,6 +2355,20 @@ $($script_builder_func "$pod_name" "$container_name_target" "$node_name" "$targe
       privileged: true
       runAsUser: 0
     env:
+EOF
+
+  # Set environment variables based on monitor type
+  if [[ "$is_node_monitor" == "true" ]]; then
+    cat <<EOF
+    - name: NODE_NAME
+      value: "${target_name}"
+    - name: ENCODED_NODE_SELECT_COMMAND
+      value: "${encoded_command}"
+    - name: PLACEHOLDER_CHAR
+      value: "${PLACEHOLDER_CHAR}"
+EOF
+  else
+    cat <<EOF
     - name: POD_NAME
       value: "${pod_name}"
     - name: CONTAINER_NAME
@@ -2359,6 +2379,10 @@ $($script_builder_func "$pod_name" "$container_name_target" "$node_name" "$targe
       value: "${encoded_command}"
     - name: PLACEHOLDER_CHAR
       value: "${PLACEHOLDER_CHAR}"
+EOF
+  fi
+
+  cat <<EOF
     volumeMounts:
     - name: host
       mountPath: /host
