@@ -1,0 +1,36 @@
+# Test dependencies (cloned at CI time)
+test/bats-core/
+test/bats-assert/
+test/bats-file/
+test/bats-support/
+
+# Test temporary files
+test/tmp/
+test/fixtures/
+
+# Output directories
+output/
+*.pcap
+*.log
+
+# Backup files
+*.bak
+*.orig
+
+# macOS
+.DS_Store
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Dependencies
+dependencies/
+
+# Runtime generated files
+tester/
+final-test/
+final-test-renamed/
