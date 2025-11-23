@@ -426,7 +426,7 @@ setup_debug_logging() {
     return 1
   fi
 
-  DEBUG_LOG_DIR="${OUTPUT_DIR}/debug"
+  DEBUG_LOG_DIR="${OUTPUT_DIR}/verbose"
 
   if ! mkdir -p "$DEBUG_LOG_DIR" 2>/dev/null; then
     echo "Error: Failed to create debug log directory: $DEBUG_LOG_DIR" >&2
@@ -434,6 +434,52 @@ setup_debug_logging() {
   fi
 
   format_message "📋 Verbose logging enabled: $DEBUG_LOG_DIR"
+  return 0
+}
+
+# -------------------------------------------------------------------------------
+# Function: setup_output_directories
+# -------------------------------------------------------------------------------
+# Description:
+#   Creates organized subdirectory structure within OUTPUT_DIR for different
+#   types of artifacts. This keeps downloaded files, logs, and diagnostics
+#   organized and easy to find.
+#
+# Parameters:
+#   None (uses global $OUTPUT_DIR)
+#
+# Expected Output:
+#   Creates subdirectories:
+#     - files/          Downloaded files from -s/-S commands
+#     - discovery-logs/ Discovery pod logs
+#     - debug-logs/     Debug pod logs
+#     - killswitch-logs/Kill switch monitor logs
+#     - process-logs/   PodSecurity warnings
+#     - verbose/        Verbose kubectl logs (if --verbose enabled)
+#
+# Returns:
+#   0 on success, 1 on failure
+# -------------------------------------------------------------------------------
+setup_output_directories() {
+  if [[ -z "$OUTPUT_DIR" ]]; then
+    return 0  # No output directory specified, skip
+  fi
+
+  local subdirs=(
+    "files"
+    "discovery-logs"
+    "debug-logs"
+    "killswitch-logs"
+    "process-logs"
+  )
+
+  for subdir in "${subdirs[@]}"; do
+    if ! mkdir -p "${OUTPUT_DIR}/${subdir}" 2>/dev/null; then
+      echo "Error: Failed to create ${OUTPUT_DIR}/${subdir}" >&2
+      return 1
+    fi
+  done
+
   return 0
 }
 
@@ -2937,9 +2983,8 @@ handle_file_downloads() {
   echo ""
   format_message_stderr "📥 Downloading files..."
 
-  # Create output directory if it doesn't exist
-  if ! mkdir -p "$OUTPUT_DIR"; then
-    echo "Error: Failed to create output directory: $OUTPUT_DIR" >&2
+  # Create output directory structure
+  if ! setup_output_directories; then
     return 1
   fi
 
@@ -3006,9 +3051,9 @@ fi
         # Check if basename already starts with target name (user used % in filename)
         # If so, don't duplicate the prefix
         if [[ "$base_filename" == "${target_name}"* ]]; then
-          output_file="$OUTPUT_DIR/${base_filename}"
+          output_file="$OUTPUT_DIR/files/${base_filename}"
         else
-          output_file="$OUTPUT_DIR/${target_name}_${base_filename}"
+          output_file="$OUTPUT_DIR/files/${target_name}_${base_filename}"
         fi
 
         # Try download with up to 3 attempts (handles transient network/pod issues)
@@ -3062,7 +3107,7 @@ fi
 
     local all_discovery_pods=("${successful_pods[@]}" "${failed_pods[@]}")
     for discovery_pod_name in "${all_discovery_pods[@]}"; do
-      local log_file="$OUTPUT_DIR/discovery-${discovery_pod_name}.log"
+      local log_file="$OUTPUT_DIR/discovery-logs/${discovery_pod_name}.log"
       if run_kube_cmd "$discovery_pod_name" "logs" logs "$discovery_pod_name" -n "$debug_ns" > "$log_file" 2>&1; then
         format_message_stderr "   ✅ ${discovery_pod_name}.log"
       else
@@ -3127,6 +3172,22 @@ cleanup_debug_pods() {
   local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE}}"
 
   if [[ ${#DEBUG_POD_NAMES[@]} -gt 0 ]]; then
+    # Download debug pod logs before cleanup (only if -o is specified)
+    if [[ -n "$OUTPUT_DIR" ]]; then
+      echo ""
+      format_message_stderr "📋 Downloading debug pod logs..."
+
+      for debug_pod_name in "${DEBUG_POD_NAMES[@]}"; do
+        local log_file="${OUTPUT_DIR}/debug-logs/${debug_pod_name}.log"
+        if run_kube_cmd "$debug_pod_name" "logs" logs "$debug_pod_name" -n "$debug_ns" > "$log_file" 2>&1; then
+          format_message_stderr "   ✅ ${debug_pod_name}.log"
+        else
+          format_message_stderr "   ⚠️  Failed to get logs for $debug_pod_name"
+          rm -f "$log_file" 2>/dev/null
+        fi
+      done
+    fi
+
     run_kube_cmd "debug-cleanup" "delete" delete pods "${DEBUG_POD_NAMES[@]}" -n "${debug_ns}" --ignore-not-found >/dev/null 2>&1
   fi
 }
@@ -3175,10 +3236,10 @@ cleanup_discovery_pods() {
       for discovery_pod in "${DISCOVERY_POD_NAMES[@]}"; do
         format_message "   📥 Downloading logs from discovery pod: $discovery_pod"
         if $KUBE_CLI get pod "$discovery_pod" -n "${debug_ns}" >/dev/null 2>&1; then
-          local log_file="${OUTPUT_DIR}/discovery-${discovery_pod}.log"
+          local log_file="${OUTPUT_DIR}/discovery-logs/${discovery_pod}.log"
           $KUBE_CLI logs "$discovery_pod" -n "${debug_ns}" --ignore-errors > "$log_file" 2>/dev/null || true
           if [[ -s "$log_file" ]]; then
-            format_message "      ✅ Discovery logs saved to: $log_file"
+            format_message "      ✅ Discovery logs saved to: discovery-logs/${discovery_pod}.log"
           else
             format_message "      ⚠️  No logs available for: $discovery_pod"
             rm -f "$log_file" 2>/dev/null || true
@@ -4288,7 +4349,7 @@ monitor_kill_switches() {
 
             # Download kill switch monitor logs immediately
             if [[ -n "$OUTPUT_DIR" ]]; then
-              local log_file="${OUTPUT_DIR}/killswitch-${monitor_pod}.log"
+              local log_file="${OUTPUT_DIR}/killswitch-logs/${monitor_pod}.log"
               $KUBE_CLI logs "$monitor_pod" -n "$debug_ns" --ignore-errors > "$log_file" 2>/dev/null
             fi
 
@@ -4301,7 +4362,7 @@ monitor_kill_switches() {
 
           # Download failed kill switch monitor logs for debugging
           if [[ -n "$OUTPUT_DIR" ]]; then
-            local log_file="${OUTPUT_DIR}/killswitch-${monitor_pod}.log"
+            local log_file="${OUTPUT_DIR}/killswitch-logs/${monitor_pod}.log"
             $KUBE_CLI logs "$monitor_pod" -n "$debug_ns" --ignore-errors > "$log_file" 2>/dev/null
           fi
 
@@ -4372,10 +4433,10 @@ cleanup_kill_switch_monitor_pods() {
       for monitor_pod in "${KILL_SWITCH_MONITOR_PODS[@]}"; do
         format_message "   📥 Downloading logs from kill switch monitor: $monitor_pod"
         if $KUBE_CLI get pod "$monitor_pod" -n "${debug_ns}" >/dev/null 2>&1; then
-          local log_file="${OUTPUT_DIR}/killswitch-${monitor_pod}.log"
+          local log_file="${OUTPUT_DIR}/killswitch-logs/${monitor_pod}.log"
           $KUBE_CLI logs "$monitor_pod" -n "${debug_ns}" --ignore-errors > "$log_file" 2>/dev/null || true
           if [[ -s "$log_file" ]]; then
-            format_message "      ✅ Kill switch logs saved to: $log_file"
+            format_message "      ✅ Kill switch logs saved to: killswitch-logs/${monitor_pod}.log"
           else
             format_message "      ⚠️  No logs available for: $monitor_pod"
             rm -f "$log_file" 2>/dev/null || true
