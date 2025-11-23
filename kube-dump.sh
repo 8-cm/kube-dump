@@ -2345,8 +2345,25 @@ if [[ "${INSTALL_DEPS}" == "true" ]] && ! command -v crictl >/dev/null 2>&1; the
   echo "CRI tools setup completed" >&2
 fi
 
-# Execute the node command directly
-${final_node_command} ; tail -f /dev/null
+echo "======================================================================" >&2
+echo "Executing command on node:${node_name}" >&2
+echo "======================================================================" >&2
+
+# Execute the node command directly on host (with host PID/Network/IPC namespaces)
+${final_node_command} 2>&1 &
+NODE_CMD_PID=\$!
+echo "Command started in background (PID: \$NODE_CMD_PID)" >&2
+
+# Keep pod alive and monitor the background process
+tail -f /dev/null &
+TAIL_PID=\$!
+
+# Wait for node command to complete or continue
+wait \$NODE_CMD_PID 2>/dev/null || true
+echo "Command completed with exit code: \$?" >&2
+
+# Keep pod alive with tail
+wait \$TAIL_PID
 SCRIPT
 }
 
