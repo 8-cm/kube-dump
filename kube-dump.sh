@@ -4536,6 +4536,11 @@ while true; do
             size=$(echo "$file_info" | awk '{print $5}')
             mod_time=$(echo "$file_info" | awk '{print $6, $7, $8}')
 
+            # Add 'B' suffix if size is just a number (bytes without suffix)
+            if [[ "$size" =~ ^[0-9]+$ ]]; then
+              size="${size}B"
+            fi
+
             # Truncate filename if too long
             display_file="$file_path"
             if [[ ${#display_file} -gt 60 ]]; then
@@ -4630,6 +4635,11 @@ while true; do
             # Extract size and modification time
             size=$(echo "$file_info" | awk '{print $5}')
             mod_time=$(echo "$file_info" | awk '{print $6, $7, $8}')
+
+            # Add 'B' suffix if size is just a number (bytes without suffix)
+            if [[ "$size" =~ ^[0-9]+$ ]]; then
+              size="${size}B"
+            fi
 
             # Truncate filename if too long
             display_file="$file_path"
