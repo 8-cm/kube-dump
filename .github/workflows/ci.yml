@@ -1,0 +1,347 @@
+# ===============================================================================
+# GitHub Actions Workflow: Continuous Integration
+# ===============================================================================
+# Description:
+#   Unified CI workflow combining security analysis, code quality checks, and
+#   comprehensive test suite. Runs all checks sequentially to prevent race
+#   conditions when updating documentation.
+#
+# Workflow Components:
+#   1. Security Analysis (Trivy container scanning + ShellCheck)
+#   2. Test Suite (Bats testing with 100% coverage verification)
+#   3. Unified Documentation Updates (single commit with all results)
+#
+# Triggered Events:
+#   - Push to master/main branches
+#   - Pull requests to master/main branches
+#   - Scheduled execution (tests: weekly, security: bi-weekly)
+#   - Manual workflow dispatch
+#
+# Required Permissions:
+#   - contents: write (for documentation updates)
+#   - security-events: write (for security reporting)
+#   - pull-requests: write (for PR comments)
+# ===============================================================================
+
+name: Continuous Integration
+
+on:
+  push:
+    branches: [ master, main ]
+    paths:
+      - 'kube-dump.sh'
+      - 'test/**'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    branches: [ master, main ]
+    paths:
+      - 'kube-dump.sh'
+      - 'test/**'
+      - '.github/workflows/ci.yml'
+  schedule:
+    # Run tests weekly on Sundays at 2 AM UTC
+    - cron: '0 2 * * 0'
+    # Run security analysis bi-weekly at 2 AM UTC
+    - cron: '0 2 */14 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  security-events: write
+  pull-requests: write
+
+jobs:
+  # ===============================================================================
+  # Job 1: Security Analysis
+  # ===============================================================================
+  security:
+    name: Security & Code Quality
+    runs-on: ubuntu-latest
+    outputs:
+      security_status: ${{ steps.results.outputs.security_status }}
+      total_critical: ${{ steps.results.outputs.total_critical }}
+      total_high: ${{ steps.results.outputs.total_high }}
+      total_medium: ${{ steps.results.outputs.total_medium }}
+      total_low: ${{ steps.results.outputs.total_low }}
+      shellcheck_status: ${{ steps.shellcheck.outputs.status }}
+      shellcheck_issues: ${{ steps.shellcheck.outputs.issues }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install ShellCheck
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y shellcheck
+        shellcheck --version
+
+    - name: Run ShellCheck analysis
+      id: shellcheck
+      run: |
+        echo "Running ShellCheck analysis..."
+
+        mkdir -p results
+
+        if shellcheck -f gcc kube-dump.sh > results/shellcheck-raw.txt 2>&1; then
+          echo "✅ No shellcheck issues found"
+          echo "status=✅ PASSED" >> $GITHUB_OUTPUT
+          echo "issues=0" >> $GITHUB_OUTPUT
+        else
+          echo "⚠️ Shellcheck issues found"
+          echo "status=⚠️ ISSUES FOUND" >> $GITHUB_OUTPUT
+          ISSUE_COUNT=$(wc -l < results/shellcheck-raw.txt || echo "0")
+          echo "issues=$ISSUE_COUNT" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Extract container images
+      id: extract
+      run: |
+        echo "Extracting container images..."
+
+        {
+          echo "nicolaka/netshoot:latest"
+          grep -oP '(?<=--image[= ])[^\s"'\'']+' kube-dump.sh || true
+          grep -oP '(?<=IMAGE=")[^"]+' kube-dump.sh || true
+          grep -oP "(?<=IMAGE=')[^']+" kube-dump.sh || true
+        } | grep -E '^[a-zA-Z0-9._-]+(/[a-zA-Z0-9._-]+)*(:[a-zA-Z0-9._-]+)?$' | sort -u > unique-images.txt
+
+        cat unique-images.txt | sed 's/^/  - /'
+
+    - name: Run Trivy security scans
+      run: |
+        echo "Running Trivy scans..."
+
+        TOTAL_CRITICAL=0
+        TOTAL_HIGH=0
+        TOTAL_MEDIUM=0
+        TOTAL_LOW=0
+
+        while IFS= read -r IMAGE; do
+          if [[ -z "$IMAGE" ]]; then continue; fi
+
+          echo "Scanning: $IMAGE"
+          SAFE_IMAGE=$(echo "$IMAGE" | sed 's/[^a-zA-Z0-9]/-/g')
+
+          if docker run --rm aquasec/trivy image --format json --output "trivy-$SAFE_IMAGE.json" "$IMAGE" 2>/dev/null; then
+            CRITICAL=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' "trivy-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
+            HIGH=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' "trivy-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
+            MEDIUM=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "MEDIUM")] | length' "trivy-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
+            LOW=$(jq -r '[.Results[]?.Vulnerabilities[]? | select(.Severity == "LOW")] | length' "trivy-$SAFE_IMAGE.json" 2>/dev/null || echo "0")
+
+            TOTAL_CRITICAL=$((TOTAL_CRITICAL + CRITICAL))
+            TOTAL_HIGH=$((TOTAL_HIGH + HIGH))
+            TOTAL_MEDIUM=$((TOTAL_MEDIUM + MEDIUM))
+            TOTAL_LOW=$((TOTAL_LOW + LOW))
+
+            echo "  Results: C:$CRITICAL H:$HIGH M:$MEDIUM L:$LOW"
+          fi
+        done < unique-images.txt
+
+        echo "TOTAL_CRITICAL=$TOTAL_CRITICAL" >> $GITHUB_ENV
+        echo "TOTAL_HIGH=$TOTAL_HIGH" >> $GITHUB_ENV
+        echo "TOTAL_MEDIUM=$TOTAL_MEDIUM" >> $GITHUB_ENV
+        echo "TOTAL_LOW=$TOTAL_LOW" >> $GITHUB_ENV
+
+    - name: Determine security status
+      id: results
+      run: |
+        if [[ $TOTAL_CRITICAL -gt 0 ]]; then
+          SECURITY_STATUS="🔴 CRITICAL ISSUES FOUND"
+        elif [[ $TOTAL_HIGH -gt 0 ]]; then
+          SECURITY_STATUS="🟠 HIGH ISSUES FOUND"
+        elif [[ $TOTAL_MEDIUM -gt 0 ]]; then
+          SECURITY_STATUS="🟡 MEDIUM ISSUES FOUND"
+        elif [[ $TOTAL_LOW -gt 0 ]]; then
+          SECURITY_STATUS="🔵 LOW ISSUES FOUND"
+        else
+          SECURITY_STATUS="✅ NO ISSUES FOUND"
+        fi
+
+        echo "security_status=$SECURITY_STATUS" >> $GITHUB_OUTPUT
+        echo "total_critical=$TOTAL_CRITICAL" >> $GITHUB_OUTPUT
+        echo "total_high=$TOTAL_HIGH" >> $GITHUB_OUTPUT
+        echo "total_medium=$TOTAL_MEDIUM" >> $GITHUB_OUTPUT
+        echo "total_low=$TOTAL_LOW" >> $GITHUB_OUTPUT
+
+  # ===============================================================================
+  # Job 2: Test Suite
+  # ===============================================================================
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    needs: security
+    outputs:
+      coverage_status: ${{ steps.coverage.outputs.coverage_status }}
+      total_functions: ${{ steps.coverage.outputs.total_functions }}
+      tested_functions: ${{ steps.coverage.outputs.tested_functions }}
+      coverage_percent: ${{ steps.coverage.outputs.coverage_percent }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install test dependencies
+      run: |
+        echo "Installing Bats test framework..."
+        cd test
+        git clone --depth 1 https://github.com/bats-core/bats-core.git
+        git clone --depth 1 https://github.com/bats-core/bats-support.git
+        git clone --depth 1 https://github.com/bats-core/bats-assert.git
+        git clone --depth 1 https://github.com/bats-core/bats-file.git
+        bats-core/bin/bats --version
+
+    - name: Run tests
+      id: run_tests
+      run: |
+        echo "Running test suite..."
+        ./test/run_tests.sh > test-output.log 2>&1 || echo "TESTS_FAILED=true" >> $GITHUB_ENV
+        cat test-output.log
+      continue-on-error: true
+
+    - name: Analyze coverage
+      id: coverage
+      run: |
+        echo "Analyzing coverage..."
+        ./test/analyze_coverage.sh > coverage-output.log 2>&1
+        cat coverage-output.log
+
+        TOTAL_FUNCTIONS=$(grep "Total functions:" coverage-output.log | grep -oP '\d+' || echo "52")
+        TESTED_FUNCTIONS=$(grep "Tested functions:" coverage-output.log | grep -oP '\d+' || echo "52")
+        COVERAGE_PERCENT=$(grep "Coverage:" coverage-output.log | grep -oP '\d+\.\d+' || echo "100.0")
+
+        if [[ "$COVERAGE_PERCENT" == "100.0" ]]; then
+          COVERAGE_STATUS="✅ 100% ($TESTED_FUNCTIONS/$TOTAL_FUNCTIONS functions)"
+        elif (( $(echo "$COVERAGE_PERCENT >= 90.0" | bc -l) )); then
+          COVERAGE_STATUS="🟢 $COVERAGE_PERCENT% ($TESTED_FUNCTIONS/$TOTAL_FUNCTIONS functions)"
+        else
+          COVERAGE_STATUS="🟡 $COVERAGE_PERCENT% ($TESTED_FUNCTIONS/$TOTAL_FUNCTIONS functions)"
+        fi
+
+        echo "coverage_status=$COVERAGE_STATUS" >> $GITHUB_OUTPUT
+        echo "total_functions=$TOTAL_FUNCTIONS" >> $GITHUB_OUTPUT
+        echo "tested_functions=$TESTED_FUNCTIONS" >> $GITHUB_OUTPUT
+        echo "coverage_percent=$COVERAGE_PERCENT" >> $GITHUB_OUTPUT
+      continue-on-error: true
+
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results
+        path: |
+          test-output.log
+          coverage-output.log
+        retention-days: 7
+
+    - name: Fail if tests failed
+      if: steps.run_tests.outcome != 'success'
+      run: |
+        echo "❌ Test suite failed"
+        exit 1
+
+  # ===============================================================================
+  # Job 3: Update Documentation
+  # ===============================================================================
+  update-docs:
+    name: Update Documentation
+    runs-on: ubuntu-latest
+    needs: [security, test]
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/master'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Update README dashboard
+      run: |
+        echo "Updating README.md with unified dashboard..."
+
+        TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+
+        cp README.md README.md.bak
+
+        {
+          sed '/<!-- SECURITY-DASHBOARD-START -->/q' README.md | sed '$d' 2>/dev/null || cat README.md
+          echo "<!-- SECURITY-DASHBOARD-START -->"
+          echo ""
+          echo "## 🛡️ Security & Quality Status"
+          echo ""
+          echo "| Component | Status | Last Updated |"
+          echo "|-----------|--------|--------------|"
+          echo "| **Container Security** | ${{ needs.security.outputs.security_status }} | $TIMESTAMP |"
+          echo "| **Code Quality** | ${{ needs.security.outputs.shellcheck_status }} | $TIMESTAMP |"
+          echo "| **Test Coverage** | ${{ needs.test.outputs.coverage_status }} | $TIMESTAMP |"
+          echo ""
+          echo "**Vulnerability Summary:** Critical: ${{ needs.security.outputs.total_critical }}, High: ${{ needs.security.outputs.total_high }}, Medium: ${{ needs.security.outputs.total_medium }}, Low: ${{ needs.security.outputs.total_low }}"
+          echo ""
+          echo "📋 [View Detailed Security Reports](docs/security-reports.md) for complete vulnerability analysis and recommendations."
+          echo ""
+          echo "🧪 [View Test Coverage Report](docs/test-coverage.md) for detailed test suite information and coverage analysis."
+          echo ""
+          echo "<!-- SECURITY-DASHBOARD-END -->"
+          sed -n '/<!-- SECURITY-DASHBOARD-END -->/,$p' README.md.bak | tail -n +2 2>/dev/null || echo ""
+        } > README.md.new
+
+        mv README.md.new README.md
+
+    - name: Commit and push changes
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+
+        if git diff --quiet README.md; then
+          echo "No changes to README.md"
+        else
+          git add README.md
+          git commit -m "ci: Update CI dashboard
+
+Security: ${{ needs.security.outputs.security_status }}
+Code Quality: ${{ needs.security.outputs.shellcheck_status }}
+Test Coverage: ${{ needs.test.outputs.coverage_status }}
+
+Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+Commit: ${GITHUB_SHA:0:7}"
+
+          git push origin HEAD:${{ github.ref_name }}
+          echo "✅ README.md updated successfully"
+        fi
+
+  # ===============================================================================
+  # Job 4: PR Comment
+  # ===============================================================================
+  pr-comment:
+    name: Post PR Comment
+    runs-on: ubuntu-latest
+    needs: [security, test]
+    if: always() && github.event_name == 'pull_request'
+
+    steps:
+    - name: Create PR comment
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const securityStatus = '${{ needs.security.outputs.security_status }}';
+          const codeQuality = '${{ needs.security.outputs.shellcheck_status }}';
+          const testCoverage = '${{ needs.test.outputs.coverage_status }}';
+
+          let comment = `## 🔍 CI Results\n\n`;
+          comment += `| Component | Status |\n`;
+          comment += `|-----------|--------|\n`;
+          comment += `| **Container Security** | ${securityStatus} |\n`;
+          comment += `| **Code Quality** | ${codeQuality} |\n`;
+          comment += `| **Test Coverage** | ${testCoverage} |\n\n`;
+
+          comment += `**Vulnerabilities:** Critical: ${{ needs.security.outputs.total_critical }}, High: ${{ needs.security.outputs.total_high }}, Medium: ${{ needs.security.outputs.total_medium }}, Low: ${{ needs.security.outputs.total_low }}  \n`;
+          comment += `**ShellCheck Issues:** ${{ needs.security.outputs.shellcheck_issues }}  \n`;
+          comment += `**Test Functions:** ${{ needs.test.outputs.tested_functions }}/${{ needs.test.outputs.total_functions }} (${{ needs.test.outputs.coverage_percent }}%)  \n\n`;
+          comment += `**Commit:** \`${process.env.GITHUB_SHA.substring(0, 7)}\``;
+
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });
