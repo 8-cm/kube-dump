@@ -69,7 +69,7 @@ jobs:
         git clone --depth 1 https://github.com/bats-core/bats-file.git
 
         # Verify installations
-        test/bats-core/bin/bats --version
+        bats-core/bin/bats --version
 
         echo "✅ Test dependencies installed successfully"
 
