@@ -3055,6 +3055,23 @@ fi
     fi
   done
 
+  # Download discovery pod logs before cleanup
+  if [[ ${#successful_pods[@]} -gt 0 || ${#failed_pods[@]} -gt 0 ]]; then
+    echo ""
+    format_message_stderr "📋 Downloading discovery pod logs..."
+
+    local all_discovery_pods=("${successful_pods[@]}" "${failed_pods[@]}")
+    for discovery_pod_name in "${all_discovery_pods[@]}"; do
+      local log_file="$OUTPUT_DIR/discovery-${discovery_pod_name}.log"
+      if run_kube_cmd "$discovery_pod_name" "logs" logs "$discovery_pod_name" -n "$debug_ns" > "$log_file" 2>&1; then
+        format_message_stderr "   ✅ ${discovery_pod_name}.log"
+      else
+        format_message_stderr "   ⚠️  Failed to get logs for $discovery_pod_name"
+        rm -f "$log_file" 2>/dev/null
+      fi
+    done
+  fi
+
   # Clean up only successful pods, keep failed ones for inspection
   if [[ ${#successful_pods[@]} -gt 0 ]]; then
     echo ""
