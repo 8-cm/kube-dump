@@ -827,6 +827,9 @@ get_effective_cri_socket() {
       "docker")
         echo "/var/run/cri-dockerd.sock"
         ;;
+      "podman")
+        echo "/run/podman/podman.sock"
+        ;;
       *)
         echo "/run/containerd/containerd.sock"
         ;;
@@ -2002,7 +2005,19 @@ create_debug_pods_for_targets() {
       local detected_socket
       if detected_socket=$(detect_cri_socket_from_node "$first_node"); then
         CRI_SOCKET="$detected_socket"
-        format_message "🔍 Auto-detected CRI socket from node $first_node: $CRI_SOCKET"
+
+        # Auto-detect runtime type from socket path
+        if [[ "$CRI_SOCKET" == *"/containerd/"* ]]; then
+          CRI_RUNTIME="containerd"
+        elif [[ "$CRI_SOCKET" == *"/crio/"* ]]; then
+          CRI_RUNTIME="crio"
+        elif [[ "$CRI_SOCKET" == *"/cri-dockerd"* ]]; then
+          CRI_RUNTIME="docker"
+        elif [[ "$CRI_SOCKET" == *"/podman/"* ]]; then
+          CRI_RUNTIME="podman"
+        fi
+
+        format_message "🔍 Auto-detected CRI socket from node $first_node: $CRI_SOCKET (runtime: $CRI_RUNTIME)"
       else
         format_message "⚠️  Could not auto-detect CRI socket from node $first_node, using defaults based on runtime: $CRI_RUNTIME"
       fi
@@ -2108,7 +2123,19 @@ create_node_debug_pods() {
       local detected_socket
       if detected_socket=$(detect_cri_socket_from_node "$first_node"); then
         CRI_SOCKET="$detected_socket"
-        format_message "🔍 Auto-detected CRI socket from node $first_node: $CRI_SOCKET"
+
+        # Auto-detect runtime type from socket path
+        if [[ "$CRI_SOCKET" == *"/containerd/"* ]]; then
+          CRI_RUNTIME="containerd"
+        elif [[ "$CRI_SOCKET" == *"/crio/"* ]]; then
+          CRI_RUNTIME="crio"
+        elif [[ "$CRI_SOCKET" == *"/cri-dockerd"* ]]; then
+          CRI_RUNTIME="docker"
+        elif [[ "$CRI_SOCKET" == *"/podman/"* ]]; then
+          CRI_RUNTIME="podman"
+        fi
+
+        format_message "🔍 Auto-detected CRI socket from node $first_node: $CRI_SOCKET (runtime: $CRI_RUNTIME)"
       else
         format_message "⚠️  Could not auto-detect CRI socket from node $first_node, using defaults based on runtime: $CRI_RUNTIME"
       fi
@@ -2671,6 +2698,9 @@ configure_crictl_socket() {
         ;;
       "docker")
         socket_path="unix:///host/var/run/cri-dockerd.sock"
+        ;;
+      "podman")
+        socket_path="unix:///host/run/podman/podman.sock"
         ;;
       *)
         socket_path="unix:///host/run/containerd/containerd.sock"
@@ -3849,7 +3879,7 @@ detect_cri_socket_from_node() {
   socket_path="${socket_path#unix://}"
 
   # Validate we got a reasonable path
-  if [[ "$socket_path" == /*.sock ]] || [[ "$socket_path" == */containerd/* ]] || [[ "$socket_path" == */crio/* ]] || [[ "$socket_path" == */cri-dockerd.sock ]]; then
+  if [[ "$socket_path" == /*.sock ]] || [[ "$socket_path" == */containerd/* ]] || [[ "$socket_path" == */crio/* ]] || [[ "$socket_path" == */cri-dockerd.sock ]] || [[ "$socket_path" == */podman/* ]]; then
     echo "$socket_path"
     return 0
   fi
