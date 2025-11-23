@@ -2175,9 +2175,9 @@ create_single_node_debug_pod() {
   node_label_value=$(truncate_label_value_with_hash "$node_name")
 
   # Create pod with embedded script
-  # If NODE_SELECT_COMMAND is set, add file monitor sidecar
+  # If NODE_SELECT_TO_DOWNLOAD_COMMAND is set, add file monitor sidecar
 
-  if [[ -n "$NODE_SELECT_COMMAND" ]]; then
+  if [[ -n "$NODE_SELECT_TO_DOWNLOAD_COMMAND" ]]; then
     # Create pod with both debugger and file monitor containers
     run_kube_cmd "$debug_pod_name" "apply" apply -f - <<EOF
 apiVersion: v1
@@ -2217,8 +2217,10 @@ $(build_node_file_monitor_script "$node_name" | sed 's/^/      /')
     env:
     - name: NODE_NAME
       value: "${node_name}"
-    - name: NODE_SELECT_COMMAND
-      value: "${NODE_SELECT_COMMAND}"
+    - name: ENCODED_NODE_SELECT_COMMAND
+      value: "${ENCODED_NODE_SELECT_COMMAND}"
+    - name: PLACEHOLDER_CHAR
+      value: "${PLACEHOLDER_CHAR}"
     volumeMounts:
     - name: host
       mountPath: /host
@@ -2401,9 +2403,9 @@ create_single_debug_pod() {
   local debug_ns="$5"
 
   # Create pod with embedded script
-  # If SELECT_COMMAND is set, add file monitor sidecar
+  # If SELECT_TO_DOWNLOAD_COMMAND is set, add file monitor sidecar
 
-  if [[ -n "$SELECT_COMMAND" ]]; then
+  if [[ -n "$SELECT_TO_DOWNLOAD_COMMAND" ]]; then
     # Create pod with both debugger and file monitor containers
     run_kube_cmd "$debug_pod_name" "apply" apply -f - <<EOF
 apiVersion: v1
@@ -2430,7 +2432,7 @@ $(build_debug_script "$pod_name" "$container_name" "$node_name" "$debug_pod_name
     command: ["/bin/bash", "-c"]
     args:
     - |
-$(build_file_monitor_script "$pod_name" "$container_name" "$node_name" | sed 's/^/      /')
+$(build_file_monitor_script "$pod_name" "$container_name" "$node_name" "$pod_name" | sed 's/^/      /')
     securityContext:
       privileged: true
       runAsUser: 0
@@ -2439,8 +2441,12 @@ $(build_file_monitor_script "$pod_name" "$container_name" "$node_name" | sed 's/
       value: "${pod_name}"
     - name: CONTAINER_NAME
       value: "${container_name}"
-    - name: SELECT_COMMAND
-      value: "${SELECT_COMMAND}"
+    - name: TARGET_NAME
+      value: "${pod_name}"
+    - name: ENCODED_SELECT_COMMAND
+      value: "${ENCODED_SELECT_COMMAND}"
+    - name: PLACEHOLDER_CHAR
+      value: "${PLACEHOLDER_CHAR}"
     - name: CRI_RUNTIME
       value: "${CRI_RUNTIME}"
     - name: CRI_SOCKET
@@ -4453,51 +4459,61 @@ build_file_monitor_script() {
   local node_name="$3"
 
   cat <<'SCRIPT'
+#!/bin/bash
 set -e
-echo "=== File monitor sidecar started ===" >&2
 
-# Get container ID
-CRI_RUNTIME="${CRI_RUNTIME:-containerd}"
-CRI_SOCKET="${CRI_SOCKET}"
+timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+echo "[$timestamp] File monitor sidecar started" >&2
+echo "[$timestamp] Target: pod=${POD_NAME}, container=${CONTAINER_NAME}" >&2
 
-# Wait for crictl to be available
-for i in {1..30}; do
-  if command -v crictl >/dev/null 2>&1; then
-    break
-  fi
-  echo "Waiting for crictl... ($i/30)" >&2
-  sleep 1
-done
-
-if ! command -v crictl >/dev/null 2>&1; then
-  echo "ERROR: crictl not found after 30 seconds" >&2
+# Decode and prepare selection command
+if [[ -z "${ENCODED_SELECT_COMMAND:-}" ]]; then
+  echo "[$timestamp] ERROR: No ENCODED_SELECT_COMMAND provided" >&2
   exit 1
+fi
+
+select_cmd=$(echo "$ENCODED_SELECT_COMMAND" | base64 -d 2>/dev/null || echo "")
+if [[ -z "$select_cmd" ]]; then
+  echo "[$timestamp] ERROR: Failed to decode selection command" >&2
+  exit 1
+fi
+
+# Apply placeholder substitution using target name
+select_cmd="${select_cmd//${PLACEHOLDER_CHAR:-%}/${TARGET_NAME}}"
+
+echo "[$timestamp] File selection command: $select_cmd" >&2
+echo "[$timestamp] Monitoring interval: 1 second" >&2
+echo "" >&2
+
+# Wait for crictl to be available if needed
+if ! command -v crictl >/dev/null 2>&1; then
+  for i in {1..30}; do
+    if command -v crictl >/dev/null 2>&1; then
+      break
+    fi
+    sleep 1
+  done
 fi
 
 # Set crictl runtime endpoint
-if [[ -n "$CRI_SOCKET" ]]; then
-  export CONTAINER_RUNTIME_ENDPOINT="unix://$CRI_SOCKET"
+if [[ -n "${CRI_SOCKET}" ]]; then
+  export CONTAINER_RUNTIME_ENDPOINT="unix://${CRI_SOCKET}"
 fi
 
-# Find container ID
+# Find container ID and PID
 CONTAINER_ID=$(crictl ps --name="${CONTAINER_NAME}" --pod="${POD_NAME}" -q 2>/dev/null | head -n 1)
 if [[ -z "$CONTAINER_ID" ]]; then
-  echo "ERROR: Could not find container ${CONTAINER_NAME} in pod ${POD_NAME}" >&2
+  echo "[$timestamp] ERROR: Could not find container ${CONTAINER_NAME} in pod ${POD_NAME}" >&2
   exit 1
 fi
 
-echo "Found container ID: $CONTAINER_ID" >&2
-
-# Get container PID
 CONTAINER_PID=$(crictl inspect "$CONTAINER_ID" 2>/dev/null | grep '"pid":' | head -n 1 | sed 's/[^0-9]//g')
 if [[ -z "$CONTAINER_PID" ]]; then
-  echo "ERROR: Could not get PID for container $CONTAINER_ID" >&2
+  echo "[$timestamp] ERROR: Could not get PID for container $CONTAINER_ID" >&2
   exit 1
 fi
 
-echo "Container PID: $CONTAINER_PID" >&2
-echo "File selection command: $SELECT_COMMAND" >&2
-echo "Monitoring interval: 1 second" >&2
+echo "[$timestamp] Container PID: $CONTAINER_PID" >&2
 echo "" >&2
 
 # Print table header
@@ -4508,13 +4524,13 @@ printf "%s\n" "-------------------+---------------------------------------------
 while true; do
   TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 
-  # Run file selection command in container namespace and get file list
-  if file_list=$(nsenter -t "$CONTAINER_PID" -m -p bash -c "$SELECT_COMMAND" 2>/dev/null); then
+  # Run file selection command in container namespace
+  if file_list=$(nsenter -t "$CONTAINER_PID" -m -p bash -c "$select_cmd" 2>/dev/null); then
     if [[ -n "$file_list" ]]; then
       # Process each file
       while IFS= read -r file_path; do
         if [[ -n "$file_path" ]]; then
-          # Get file details using ls -latrh
+          # Get file details using ls -lh
           if file_info=$(nsenter -t "$CONTAINER_PID" -m -p bash -c "ls -lh '$file_path' 2>/dev/null" 2>/dev/null); then
             # Extract size and modification time
             size=$(echo "$file_info" | awk '{print $5}')
@@ -4569,12 +4585,30 @@ build_node_file_monitor_script() {
   local node_name="$1"
 
   cat <<'SCRIPT'
+#!/bin/bash
 set -e
-echo "=== File monitor sidecar started ===" >&2
 
-echo "Node: ${NODE_NAME}" >&2
-echo "File selection command: $NODE_SELECT_COMMAND" >&2
-echo "Monitoring interval: 1 second" >&2
+timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+echo "[$timestamp] File monitor sidecar started" >&2
+echo "[$timestamp] Target: node=${NODE_NAME}" >&2
+
+# Decode and prepare selection command
+if [[ -z "${ENCODED_NODE_SELECT_COMMAND:-}" ]]; then
+  echo "[$timestamp] ERROR: No ENCODED_NODE_SELECT_COMMAND provided" >&2
+  exit 1
+fi
+
+select_cmd=$(echo "$ENCODED_NODE_SELECT_COMMAND" | base64 -d 2>/dev/null || echo "")
+if [[ -z "$select_cmd" ]]; then
+  echo "[$timestamp] ERROR: Failed to decode selection command" >&2
+  exit 1
+fi
+
+# Apply placeholder substitution using node name
+select_cmd="${select_cmd//${PLACEHOLDER_CHAR:-%}/${NODE_NAME}}"
+
+echo "[$timestamp] File selection command: $select_cmd" >&2
+echo "[$timestamp] Monitoring interval: 1 second" >&2
 echo "" >&2
 
 # Print table header
@@ -4586,7 +4620,7 @@ while true; do
   TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 
   # Run file selection command on node filesystem
-  if file_list=$(bash -c "$NODE_SELECT_COMMAND" 2>/dev/null); then
+  if file_list=$(bash -c "$select_cmd" 2>/dev/null); then
     if [[ -n "$file_list" ]]; then
       # Process each file
       while IFS= read -r file_path; do
