@@ -2447,10 +2447,6 @@ $(build_file_monitor_script "$pod_name" "$container_name" "$node_name" "$pod_nam
       value: "${ENCODED_SELECT_COMMAND}"
     - name: PLACEHOLDER_CHAR
       value: "${PLACEHOLDER_CHAR}"
-    - name: CRI_RUNTIME
-      value: "${CRI_RUNTIME}"
-    - name: CRI_SOCKET
-      value: "${CRI_SOCKET}"
     volumeMounts:
     - name: host
       mountPath: /host
@@ -4430,27 +4426,26 @@ SCRIPT
 #   Helps monitor file growth during long-running debugging sessions.
 #
 # Parameters:
-#   $1 - pod_name: Name of the target pod being debugged
+#   $1 - pod_name: Name of the target pod being debugged (used for TARGET_NAME)
 #   $2 - container_name: Name of the target container in the pod
 #   $3 - node_name: Name of the node where the target pod is running
-#   Uses global variables:
-#     $SELECT_COMMAND - File selection command to run
-#     $PLACEHOLDER_CHAR - Character for target substitution
-#     $CRI_RUNTIME - Container runtime (containerd, crio, docker)
-#     $CRI_SOCKET - Container runtime socket path
+#   Uses environment variables passed to container:
+#     ENCODED_SELECT_COMMAND - Base64 encoded file selection command
+#     TARGET_NAME - Pod name for placeholder substitution
+#     PLACEHOLDER_CHAR - Character for target substitution (default: %)
 #
 # Expected Output:
 #   - Complete bash script suitable for execution in file monitor sidecar
-#   - Script runs every 1 second and lists files with ls -latrh
+#   - Script runs every 1 second and lists files with ls -lh
 #   - Outputs timestamped table showing file details
-#   - Uses nsenter to access target container filesystem
+#   - Accesses files directly from /host mount (no nsenter needed)
 #
 # Detailed Behavior:
-#   1. Uses crictl to find container PID
-#   2. Uses nsenter to access container's mount namespace
-#   3. Runs file selection command periodically
-#   4. For each file found, runs ls -latrh to show details
-#   5. Adds timestamps to output for tracking file growth over time
+#   1. Decodes base64-encoded selection command
+#   2. Applies placeholder substitution (% → pod name)
+#   3. Runs file selection command directly on /host mount
+#   4. For each file found, runs ls -lh to show size and modification time
+#   5. Adds 'B' suffix to byte sizes for consistency
 #   6. Outputs table format similar to kill switch monitor
 # -------------------------------------------------------------------------------
 build_file_monitor_script() {
@@ -4485,37 +4480,6 @@ echo "[$timestamp] File selection command: $select_cmd" >&2
 echo "[$timestamp] Monitoring interval: 1 second" >&2
 echo "" >&2
 
-# Wait for crictl to be available if needed
-if ! command -v crictl >/dev/null 2>&1; then
-  for i in {1..30}; do
-    if command -v crictl >/dev/null 2>&1; then
-      break
-    fi
-    sleep 1
-  done
-fi
-
-# Set crictl runtime endpoint
-if [[ -n "${CRI_SOCKET}" ]]; then
-  export CONTAINER_RUNTIME_ENDPOINT="unix://${CRI_SOCKET}"
-fi
-
-# Find container ID and PID
-CONTAINER_ID=$(crictl ps --name="${CONTAINER_NAME}" --pod="${POD_NAME}" -q 2>/dev/null | head -n 1)
-if [[ -z "$CONTAINER_ID" ]]; then
-  echo "[$timestamp] ERROR: Could not find container ${CONTAINER_NAME} in pod ${POD_NAME}" >&2
-  exit 1
-fi
-
-CONTAINER_PID=$(crictl inspect "$CONTAINER_ID" 2>/dev/null | grep '"pid":' | head -n 1 | sed 's/[^0-9]//g')
-if [[ -z "$CONTAINER_PID" ]]; then
-  echo "[$timestamp] ERROR: Could not get PID for container $CONTAINER_ID" >&2
-  exit 1
-fi
-
-echo "[$timestamp] Container PID: $CONTAINER_PID" >&2
-echo "" >&2
-
 # Print table header
 printf "%-19s | %-60s | %-10s | %-19s\n" "Timestamp" "File" "Size" "Modified" >&2
 printf "%s\n" "-------------------+--------------------------------------------------------------+------------+---------------------" >&2
@@ -4524,14 +4488,14 @@ printf "%s\n" "-------------------+---------------------------------------------
 while true; do
   TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 
-  # Run file selection command in container namespace
-  if file_list=$(nsenter -t "$CONTAINER_PID" -m -p bash -c "$select_cmd" 2>/dev/null); then
+  # Run file selection command directly (files are on /host which is mounted)
+  if file_list=$(bash -c "$select_cmd" 2>/dev/null); then
     if [[ -n "$file_list" ]]; then
       # Process each file
       while IFS= read -r file_path; do
         if [[ -n "$file_path" ]]; then
           # Get file details using ls -lh
-          if file_info=$(nsenter -t "$CONTAINER_PID" -m -p bash -c "ls -lh '$file_path' 2>/dev/null" 2>/dev/null); then
+          if file_info=$(ls -lh "$file_path" 2>/dev/null); then
             # Extract size and modification time
             size=$(echo "$file_info" | awk '{print $5}')
             mod_time=$(echo "$file_info" | awk '{print $6, $7, $8}')
