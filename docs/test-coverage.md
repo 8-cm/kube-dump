@@ -7,8 +7,8 @@ Complete test suite coverage analysis for kube-dump.sh.
 <!-- TEST-COVERAGE-START -->
 ## 🧪 Test Suite Status
 
-**Overall Coverage:** ✅ 100% (51/51 functions)
-**Test Cases:** 280+ tests across 8 test files
+**Overall Coverage:** ✅ 100% (52/52 functions)
+**Test Cases:** 285+ tests across 8 test files
 **Framework:** [Bats (Bash Automated Testing System)](https://github.com/bats-core/bats-core)
 **Last Updated:** Automated
 **CI/CD:** [GitHub Actions Workflow](../.github/workflows/tests.yml)
@@ -17,12 +17,12 @@ Complete test suite coverage analysis for kube-dump.sh.
 
 | Metric | Value |
 |--------|-------|
-| **Total Functions** | 51 |
-| **Tested Functions** | 51 |
+| **Total Functions** | 52 |
+| **Tested Functions** | 52 |
 | **Untested Functions** | 0 |
 | **Coverage Percentage** | 100.0% |
 | **Test Files** | 8 |
-| **Test Cases** | 280+ |
+| **Test Cases** | 285+ |
 
 ### Test Suite Breakdown
 
@@ -34,7 +34,7 @@ Complete test suite coverage analysis for kube-dump.sh.
 | `test_file_operations.bats` | 8 | 30+ | File discovery and download |
 | `test_kill_switch.bats` | 7 | 35+ | Kill switch monitoring |
 | `test_file_monitor.bats` | 2 | 40+ | File monitoring sidecar |
-| `test_missing_functions.bats` | 33 | 70+ | All remaining functions |
+| `test_missing_functions.bats` | 34 | 75+ | All remaining functions |
 | `test_integration.bats` | - | 40+ | End-to-end workflows |
 
 ---
@@ -70,7 +70,7 @@ Complete test suite coverage analysis for kube-dump.sh.
 | `build_debug_script` | ✅ | test_missing_functions.bats | Pod debug script generation |
 | `generate_exec_command` | ✅ | test_missing_functions.bats | Execution command generation |
 
-### Node Operations (8/8 - 100%)
+### Node Operations (9/9 - 100%)
 
 | Function | Status | Test File | Description |
 |----------|--------|-----------|-------------|
@@ -79,6 +79,7 @@ Complete test suite coverage analysis for kube-dump.sh.
 | `create_node_debug_pods` | ✅ | test_missing_functions.bats | Multi-node debug creation |
 | `build_node_debug_script` | ✅ | test_node_operations.bats | Node debug script generation |
 | `detect_kubelet_eviction_threshold` | ✅ | test_missing_functions.bats | Kubelet threshold detection |
+| `detect_cri_socket_from_node` | ✅ | test_missing_functions.bats | Auto-detect CRI socket from kubelet |
 | `build_node_file_monitor_script` | ✅ | test_node_operations.bats | Node file monitor script |
 | `configure_crictl_socket` | ✅ | test_missing_functions.bats | CRI socket configuration |
 | `get_effective_cri_socket` | ✅ | test_missing_functions.bats | CRI socket detection |
@@ -207,7 +208,7 @@ See [`.github/workflows/tests.yml`](../.github/workflows/tests.yml) for the comp
 
 | Date | Coverage | Functions | Test Cases | Notes |
 |------|----------|-----------|------------|-------|
-| 2025-11-23 | 100.0% | 51/51 | 280+ | Initial test suite with full coverage |
+| 2025-11-23 | 100.0% | 52/52 | 285+ | Complete test suite with full coverage |
 
 ---
 

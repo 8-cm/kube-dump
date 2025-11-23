@@ -4,7 +4,7 @@ Comprehensive test suite for kube-dump.sh using [Bats (Bash Automated Testing Sy
 
 ## 📋 Test Coverage
 
-The test suite includes **280+ test cases** covering:
+The test suite includes **285+ test cases** covering:
 
 - ✅ Utility functions (hash_input, format_message, validation)
 - ✅ Pod operations (create, wait, cleanup, execute)

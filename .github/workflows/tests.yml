@@ -3,7 +3,7 @@
 # ===============================================================================
 # Description:
 #   Comprehensive test suite for kube-dump.sh using Bats (Bash Automated
-#   Testing System). Runs 280+ test cases covering all 51 functions with
+#   Testing System). Runs 285+ test cases covering all 52 functions with
 #   100% code coverage verification.
 #
 # Workflow Components:
@@ -88,8 +88,8 @@ jobs:
         cat coverage-output.log
 
         # Extract coverage metrics
-        TOTAL_FUNCTIONS=$(grep "Total functions:" coverage-output.log | grep -oP '\d+' || echo "51")
-        TESTED_FUNCTIONS=$(grep "Tested functions:" coverage-output.log | grep -oP '\d+' || echo "51")
+        TOTAL_FUNCTIONS=$(grep "Total functions:" coverage-output.log | grep -oP '\d+' || echo "52")
+        TESTED_FUNCTIONS=$(grep "Tested functions:" coverage-output.log | grep -oP '\d+' || echo "52")
         UNTESTED_FUNCTIONS=$(grep "Untested functions:" coverage-output.log | grep -oP '\d+' || echo "0")
         COVERAGE_PERCENT=$(grep "Coverage:" coverage-output.log | grep -oP '\d+\.\d+' || echo "100.0")
 
@@ -176,7 +176,7 @@ jobs:
           echo "## 🧪 Test Suite Status"
           echo ""
           echo "**Overall Coverage:** $COVERAGE_STATUS"
-          echo "**Test Cases:** 280+ tests across 8 test files"
+          echo "**Test Cases:** 285+ tests across 8 test files"
           echo "**Framework:** [Bats (Bash Automated Testing System)](https://github.com/bats-core/bats-core)"
           echo "**Last Updated:** $TIMESTAMP"
           echo "**CI/CD:** [GitHub Actions Workflow](../.github/workflows/tests.yml)"
@@ -191,7 +191,7 @@ jobs:
           echo "| **Untested Functions** | $UNTESTED_FUNCTIONS |"
           echo "| **Coverage Percentage** | $COVERAGE_PERCENT% |"
           echo "| **Test Files** | 8 |"
-          echo "| **Test Cases** | 280+ |"
+          echo "| **Test Cases** | 285+ |"
           echo ""
 
           # Keep static content (Test Suite Breakdown through Running Tests)
@@ -203,7 +203,7 @@ jobs:
           echo ""
           echo "| Date | Coverage | Functions | Test Cases | Commit | Notes |"
           echo "|------|----------|-----------|------------|--------|-------|"
-          echo "| $TIMESTAMP | $COVERAGE_PERCENT% | $TESTED_FUNCTIONS/$TOTAL_FUNCTIONS | 280+ | [\`${GITHUB_SHA:0:7}\`](https://github.com/${{ github.repository }}/commit/${GITHUB_SHA}) | Automated update |"
+          echo "| $TIMESTAMP | $COVERAGE_PERCENT% | $TESTED_FUNCTIONS/$TOTAL_FUNCTIONS | 285+ | [\`${GITHUB_SHA:0:7}\`](https://github.com/${{ github.repository }}/commit/${GITHUB_SHA}) | Automated update |"
           echo ""
           echo "---"
           echo ""
@@ -286,8 +286,8 @@ jobs:
         script: |
           const testStatus = '${{ steps.run_tests.outcome }}';
           const coverageStatus = '${{ steps.coverage.outcome }}';
-          const totalFunctions = process.env.TOTAL_FUNCTIONS || '51';
-          const testedFunctions = process.env.TESTED_FUNCTIONS || '51';
+          const totalFunctions = process.env.TOTAL_FUNCTIONS || '52';
+          const testedFunctions = process.env.TESTED_FUNCTIONS || '52';
           const coveragePercent = process.env.COVERAGE_PERCENT || '100.0';
           const coverageStatusText = process.env.COVERAGE_STATUS || '✅ 100%';
 
@@ -299,7 +299,7 @@ jobs:
           comment += `| **Total Functions** | ${totalFunctions} |\n`;
           comment += `| **Tested Functions** | ${testedFunctions} |\n`;
           comment += `| **Coverage** | ${coveragePercent}% |\n`;
-          comment += `| **Test Cases** | 280+ |\n\n`;
+          comment += `| **Test Cases** | 285+ |\n\n`;
 
           if (testStatus === 'success' && coverageStatus === 'success') {
             if (coveragePercent === '100.0') {

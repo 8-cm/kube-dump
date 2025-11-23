@@ -288,6 +288,49 @@ teardown() {
 }
 
 # =============================================================================
+# detect_cri_socket_from_node() tests
+# =============================================================================
+
+@test "detect_cri_socket_from_node: extracts socket from kubelet config" {
+  # Mock successful kubelet config response
+  export KUBECTL_MOCK_OUTPUT='{"kubeletconfig":{"containerRuntimeEndpoint":"unix:///run/containerd/containerd.sock"}}'
+
+  run detect_cri_socket_from_node "test-node"
+  assert_success
+  assert_output "/run/containerd/containerd.sock"
+}
+
+@test "detect_cri_socket_from_node: handles crio socket" {
+  export KUBECTL_MOCK_OUTPUT='{"kubeletconfig":{"containerRuntimeEndpoint":"unix:///var/run/crio/crio.sock"}}'
+
+  run detect_cri_socket_from_node "worker-node"
+  assert_success
+  assert_output "/var/run/crio/crio.sock"
+}
+
+@test "detect_cri_socket_from_node: handles docker socket" {
+  export KUBECTL_MOCK_OUTPUT='{"kubeletconfig":{"containerRuntimeEndpoint":"unix:///var/run/cri-dockerd.sock"}}'
+
+  run detect_cri_socket_from_node "docker-node"
+  assert_success
+  assert_output "/var/run/cri-dockerd.sock"
+}
+
+@test "detect_cri_socket_from_node: fails when API unavailable" {
+  export KUBECTL_MOCK_MODE="fail"
+
+  run detect_cri_socket_from_node "test-node"
+  assert_failure
+}
+
+@test "detect_cri_socket_from_node: fails when socket path invalid" {
+  export KUBECTL_MOCK_OUTPUT='{"kubeletconfig":{"containerRuntimeEndpoint":"invalid-path"}}'
+
+  run detect_cri_socket_from_node "test-node"
+  assert_failure
+}
+
+# =============================================================================
 # find_pods_by_label() tests
 # =============================================================================
 
