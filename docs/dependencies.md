@@ -54,7 +54,11 @@ The script tries md5sum first, then md5, then falls back to cksum.
 
 ### Default Debug Image: nicolaka/netshoot
 
-The default image (`nicolaka/netshoot`) includes all necessary tools. If using a custom image via `--image`, it must contain:
+The default image (`nicolaka/netshoot`) includes all necessary tools.
+
+**📦 For building custom images, see [Custom Images Guide](custom-images.md)** for exact package lists and Dockerfile examples.
+
+If using a custom image via `--image`, it must contain:
 
 #### Required Tools in Debug/Discovery Pods
 
