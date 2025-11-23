@@ -4854,6 +4854,12 @@ main() {
     # Create output directory if it doesn't exist
     mkdir -p "$OUTPUT_DIR"
 
+    # Create subdirectory structure for organized output
+    if ! setup_output_directories; then
+      echo "Error: Failed to create output directory structure" >&2
+      exit 1
+    fi
+
     # Initialize log file
     echo "=== Kube-dump session started at $(date) ===" > "$KUBE_DUMP_LOG_FILE"
     echo "Command: $0 $*" >> "$KUBE_DUMP_LOG_FILE"
