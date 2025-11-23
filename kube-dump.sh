@@ -915,8 +915,22 @@ show_configuration() {
   echo "  Include Nodes:     ${INCLUDE_NODES}"
   echo ""
   echo "Commands:"
-  echo "  Pod Command:       ${CUSTOM_COMMAND:-"$CAPTURE_COMMAND"}"
-  echo "  Node Command:      ${CUSTOM_NODE_COMMAND:-"$NODE_COMMAND"}"
+  if [[ ${#CUSTOM_COMMANDS[@]} -gt 0 ]]; then
+    echo "  Pod Commands:      ${#CUSTOM_COMMANDS[@]} custom command(s)"
+    for i in "${!CUSTOM_COMMANDS[@]}"; do
+      echo "    [$i]: ${CUSTOM_COMMANDS[$i]}"
+    done
+  else
+    echo "  Pod Command:       $CAPTURE_COMMAND"
+  fi
+  if [[ ${#CUSTOM_NODE_COMMANDS[@]} -gt 0 ]]; then
+    echo "  Node Commands:     ${#CUSTOM_NODE_COMMANDS[@]} custom command(s)"
+    for i in "${!CUSTOM_NODE_COMMANDS[@]}"; do
+      echo "    [$i]: ${CUSTOM_NODE_COMMANDS[$i]}"
+    done
+  else
+    echo "  Node Command:      $NODE_COMMAND"
+  fi
   echo ""
   echo "Container Settings:"
   echo "  Image:             $DEBUG_IMAGE"
@@ -925,8 +939,22 @@ show_configuration() {
   echo "  Install Deps:      $INSTALL_DEPS"
   echo ""
   echo "File Operations:"
-  echo "  Pod File Cmd:      ${SELECT_TO_DOWNLOAD_COMMAND:-"(not set)"}"
-  echo "  Node File Cmd:     ${NODE_SELECT_TO_DOWNLOAD_COMMAND:-"(not set)"}"
+  if [[ ${#SELECT_TO_DOWNLOAD_COMMANDS[@]} -gt 0 ]]; then
+    echo "  Pod File Commands: ${#SELECT_TO_DOWNLOAD_COMMANDS[@]} command(s)"
+    for i in "${!SELECT_TO_DOWNLOAD_COMMANDS[@]}"; do
+      echo "    [$i]: ${SELECT_TO_DOWNLOAD_COMMANDS[$i]}"
+    done
+  else
+    echo "  Pod File Cmd:      (not set)"
+  fi
+  if [[ ${#NODE_SELECT_TO_DOWNLOAD_COMMANDS[@]} -gt 0 ]]; then
+    echo "  Node File Commands: ${#NODE_SELECT_TO_DOWNLOAD_COMMANDS[@]} command(s)"
+    for i in "${!NODE_SELECT_TO_DOWNLOAD_COMMANDS[@]}"; do
+      echo "    [$i]: ${NODE_SELECT_TO_DOWNLOAD_COMMANDS[$i]}"
+    done
+  else
+    echo "  Node File Cmd:     (not set)"
+  fi
   echo "  Output Dir:        ${OUTPUT_DIR:-"(not set)"}"
   echo "  Placeholder:       $PLACEHOLDER_CHAR"
   echo ""
@@ -1136,14 +1164,14 @@ parse_arguments() {
         if [[ $1 == --node-label=* ]]; then
           NODE_LABELS+=("$val")
           # Clear default pod labels if only node targeting is intended (not explicitly set)
-          if [[ -z "$CUSTOM_COMMAND" && ${#POD_LABELS[@]} -eq 1 && "${POD_LABELS[0]}" == "dumpme=yes" && "$POD_LABEL_EXPLICIT" == "false" ]]; then
+          if [[ ${#CUSTOM_COMMANDS[@]} -eq 0 && ${#POD_LABELS[@]} -eq 1 && "${POD_LABELS[0]}" == "dumpme=yes" && "$POD_LABEL_EXPLICIT" == "false" ]]; then
             POD_LABELS=()
           fi
         else
           validate_option_value "$val" "-L|--node-label"
           NODE_LABELS+=("$val")
           # Clear default pod labels if only node targeting is intended (not explicitly set)
-          if [[ -z "$CUSTOM_COMMAND" && ${#POD_LABELS[@]} -eq 1 && "${POD_LABELS[0]}" == "dumpme=yes" && "$POD_LABEL_EXPLICIT" == "false" ]]; then
+          if [[ ${#CUSTOM_COMMANDS[@]} -eq 0 && ${#POD_LABELS[@]} -eq 1 && "${POD_LABELS[0]}" == "dumpme=yes" && "$POD_LABEL_EXPLICIT" == "false" ]]; then
             POD_LABELS=()
           fi
           shift
@@ -1394,12 +1422,12 @@ validate_arguments() {
       return 1
     fi
     validate_variable "CAPTURE_COMMAND" "$CAPTURE_COMMAND" "string" "" "true"
-    validate_variable "CUSTOM_COMMAND" "$CUSTOM_COMMAND" "string" "" "false"
+    # CUSTOM_COMMANDS is now an array - no string validation needed
   fi
 
   if [[ "$EXECUTION_MODE" == "node" || "$EXECUTION_MODE" == "mixed" ]]; then
     validate_variable "NODE_COMMAND" "$NODE_COMMAND" "string" "" "true"
-    validate_variable "CUSTOM_NODE_COMMAND" "$CUSTOM_NODE_COMMAND" "string" "" "false"
+    # CUSTOM_NODE_COMMANDS is now an array - no string validation needed
 
     # For mixed mode triggered by --include-nodes, NODE_LABELS is optional
     if [[ "$EXECUTION_MODE" == "mixed" && "$INCLUDE_NODES" == "true" && ${#NODE_LABELS[@]} -eq 0 ]]; then
@@ -1415,7 +1443,7 @@ validate_arguments() {
   fi
 
   # Specific validation for --include-nodes
-  if [[ "$INCLUDE_NODES" == "true" && -z "$CUSTOM_NODE_COMMAND" ]]; then
+  if [[ "$INCLUDE_NODES" == "true" && ${#CUSTOM_NODE_COMMANDS[@]} -eq 0 ]]; then
     echo "Error: --include-nodes requires -E/--node-execute to specify what command to run on nodes" >&2
     usage
   fi
@@ -1425,13 +1453,12 @@ validate_arguments() {
   validate_variable "INSTALL_DEPS" "$INSTALL_DEPS" "boolean" "" "true"
 
   # Validate file download related options
-  validate_variable "SELECT_TO_DOWNLOAD_COMMAND" "$SELECT_TO_DOWNLOAD_COMMAND" "string" "" "false"
-  validate_variable "NODE_SELECT_TO_DOWNLOAD_COMMAND" "$NODE_SELECT_TO_DOWNLOAD_COMMAND" "string" "" "false"
+  # SELECT_TO_DOWNLOAD_COMMANDS and NODE_SELECT_TO_DOWNLOAD_COMMANDS are now arrays - no string validation needed
   validate_variable "OUTPUT_DIR" "$OUTPUT_DIR" "string" "" "false"
   validate_variable "PLACEHOLDER_CHAR" "$PLACEHOLDER_CHAR" "string" "" "true"
 
   # Validate file download dependencies
-  if [[ -n "$SELECT_TO_DOWNLOAD_COMMAND" || -n "$NODE_SELECT_TO_DOWNLOAD_COMMAND" ]]; then
+  if [[ ${#SELECT_TO_DOWNLOAD_COMMANDS[@]} -gt 0 || ${#NODE_SELECT_TO_DOWNLOAD_COMMANDS[@]} -gt 0 ]]; then
     if [[ -z "$OUTPUT_DIR" ]]; then
       echo "Error: -o/--output directory must be specified when using -s/-S file download options" >&2
       return 1
@@ -1929,25 +1956,25 @@ validate_all_requirements() {
 # Parameters:
 #   Uses global variables:
 #     $TARGET_PODS[]               - Array of pod info strings (format: pod:container:node:namespace)
-#     $CUSTOM_COMMAND              - Optional custom command to execute in debug pods
-#     $SELECT_TO_DOWNLOAD_COMMAND  - Command to select files for download
-#     $NODE_SELECT_TO_DOWNLOAD_COMMAND - Command to select node files for download
+#     $CUSTOM_COMMANDS[]           - Array of custom commands to execute in debug pod sidecars
+#     $SELECT_TO_DOWNLOAD_COMMANDS[] - Array of commands to select files for download
+#     $NODE_SELECT_TO_DOWNLOAD_COMMANDS[] - Array of commands to select node files for download
 #     $DEBUG_NAMESPACE             - Target namespace for debug pod creation
 #     $NAMESPACE                   - Fallback namespace if DEBUG_NAMESPACE not set
 #     $KUBE_CLI                    - Kubernetes CLI command (kubectl/oc)
 #   Modifies global arrays:
 #     DEBUG_POD_NAMES[]            - Names of successfully created debug pods
 #     POD_DEBUG_HOSTNAMES[]        - Hostnames for file download operations
+#     ENCODED_SELECT_COMMANDS[]    - Base64 encoded select-to-download commands
+#     ENCODED_NODE_SELECT_COMMANDS[] - Base64 encoded node select commands
 #   Sets global variables:
-#     $CAPTURE_COMMAND             - Base64 encoded custom command
-#     $ENCODED_SELECT_COMMAND      - Base64 encoded select-to-download command
-#     $ENCODED_NODE_SELECT_COMMAND - Base64 encoded node select command
+#     $CAPTURE_COMMAND             - Base64 encoded default capture command (if no custom commands)
 #
 # Example Usage:
 #   TARGET_PODS=("nginx-pod:nginx:worker1:default" "app-pod:app:worker2:prod")
-#   CUSTOM_COMMAND="tcpdump -i any -w capture.pcap"
+#   CUSTOM_COMMANDS=("tcpdump -i any -w capture.pcap" "ss -tunap")
 #   create_debug_pods_for_targets
-#   # Creates debug pods for nginx-pod and app-pod with custom tcpdump command
+#   # Creates debug pods with multiple sidecar containers (command-0, command-1)
 #
 # Expected Output:
 #   - Progress messages for each debug pod creation
@@ -1972,21 +1999,30 @@ validate_all_requirements() {
 #   7. Uses MD5 hashing for shorter, predictable pod names (with fallbacks)
 # -------------------------------------------------------------------------------
 create_debug_pods_for_targets() {
-  # Set capture command before creating pods
+  # Encode all custom commands to base64
   local HAS_CUSTOM_CMD="false"
-  if [[ -n "$CUSTOM_COMMAND" ]]; then
-    # Encode custom command to base64
-    CAPTURE_COMMAND=$(echo -n "$CUSTOM_COMMAND" | base64 -w 0)
+  ENCODED_CUSTOM_COMMANDS=()
+  if [[ ${#CUSTOM_COMMANDS[@]} -gt 0 ]]; then
+    for cmd in "${CUSTOM_COMMANDS[@]}"; do
+      ENCODED_CUSTOM_COMMANDS+=("$(echo -n "$cmd" | base64 -w 0)")
+    done
     HAS_CUSTOM_CMD="true"
   fi
 
   # Encode select-to-download commands to base64
-  if [[ -n "$SELECT_TO_DOWNLOAD_COMMAND" ]]; then
-    ENCODED_SELECT_COMMAND=$(echo -n "$SELECT_TO_DOWNLOAD_COMMAND" | base64 -w 0)
+  ENCODED_SELECT_COMMANDS=()
+  if [[ ${#SELECT_TO_DOWNLOAD_COMMANDS[@]} -gt 0 ]]; then
+    for cmd in "${SELECT_TO_DOWNLOAD_COMMANDS[@]}"; do
+      ENCODED_SELECT_COMMANDS+=("$(echo -n "$cmd" | base64 -w 0)")
+    done
   fi
 
-  if [[ -n "$NODE_SELECT_TO_DOWNLOAD_COMMAND" ]]; then
-    ENCODED_NODE_SELECT_COMMAND=$(echo -n "$NODE_SELECT_TO_DOWNLOAD_COMMAND" | base64 -w 0)
+  # Encode node select-to-download commands to base64
+  ENCODED_NODE_SELECT_COMMANDS=()
+  if [[ ${#NODE_SELECT_TO_DOWNLOAD_COMMANDS[@]} -gt 0 ]]; then
+    for cmd in "${NODE_SELECT_TO_DOWNLOAD_COMMANDS[@]}"; do
+      ENCODED_NODE_SELECT_COMMANDS+=("$(echo -n "$cmd" | base64 -w 0)")
+    done
   fi
 
   local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE}}"
@@ -2231,9 +2267,9 @@ create_single_node_debug_pod() {
   node_label_value=$(truncate_label_value_with_hash "$node_name")
 
   # Create pod with embedded script
-  # If NODE_SELECT_TO_DOWNLOAD_COMMAND is set, add file monitor sidecar
+  # If NODE_SELECT_TO_DOWNLOAD_COMMANDS array has entries, add file monitor sidecars
 
-  if [[ -n "$NODE_SELECT_TO_DOWNLOAD_COMMAND" ]]; then
+  if [[ ${#NODE_SELECT_TO_DOWNLOAD_COMMANDS[@]} -gt 0 ]]; then
     # Create pod with both debugger and file monitor containers
     run_kube_cmd "$debug_pod_name" "apply" apply -f - <<EOF
 apiVersion: v1
@@ -2478,9 +2514,9 @@ create_single_debug_pod() {
   local debug_ns="$5"
 
   # Create pod with embedded script
-  # If SELECT_TO_DOWNLOAD_COMMAND is set, add file monitor sidecar
+  # If SELECT_TO_DOWNLOAD_COMMANDS array has entries, add file monitor sidecars
 
-  if [[ -n "$SELECT_TO_DOWNLOAD_COMMAND" ]]; then
+  if [[ ${#SELECT_TO_DOWNLOAD_COMMANDS[@]} -gt 0 ]]; then
     # Create pod with both debugger and file monitor containers
     run_kube_cmd "$debug_pod_name" "apply" apply -f - <<EOF
 apiVersion: v1
@@ -2795,13 +2831,12 @@ SCRIPT
 # Parameters:
 #   $1 - target_pod_name: Name of the target pod for placeholder substitution
 #   Uses global variables:
-#     $CUSTOM_COMMAND    - Boolean/flag indicating custom command usage
-#     $CAPTURE_COMMAND   - Base64 encoded command or default tcpdump command
+#     $ENCODED_CUSTOM_COMMANDS[] - Array of base64 encoded custom commands
+#     $CAPTURE_COMMAND   - Base64 encoded default capture command (if no custom commands)
 #     $PLACEHOLDER_CHAR  - Character used for target substitution (default: %)
 #
 # Example Usage:
-#   CUSTOM_COMMAND="true"
-#   CAPTURE_COMMAND="dGNwZHVtcCAtaSBhbnkgLXcgJS5wY2Fw"  # base64: "tcpdump -i any -w %.pcap"
+#   ENCODED_CUSTOM_COMMANDS=("dGNwZHVtcCAtaSBhbnkgLXcgJS5wY2Fw")  # base64: "tcpdump -i any -w %.pcap"
 #   PLACEHOLDER_CHAR="%"
 #   generate_exec_command "nginx-app-123"
 #   # Returns: DECODED_CMD=$(echo 'dGNw...' | base64 -d)
@@ -2833,8 +2868,9 @@ SCRIPT
 generate_exec_command() {
   local target_pod_name="$1"
 
-  if [[ -n "$CUSTOM_COMMAND" ]]; then
-    printf "DECODED_CMD=\$(echo '%s' | base64 -d | tr -d '\\\\n')\\n" "${CAPTURE_COMMAND}"
+  # Use first custom command if available (backwards compatibility - will be rewritten for multi-sidecar)
+  if [[ ${#ENCODED_CUSTOM_COMMANDS[@]} -gt 0 ]]; then
+    printf "DECODED_CMD=\$(echo '%s' | base64 -d | tr -d '\\\\n')\\n" "${ENCODED_CUSTOM_COMMANDS[0]}"
     echo "FINAL_CMD=\$(echo \"\$DECODED_CMD\" | sed 's/${PLACEHOLDER_CHAR}/${target_pod_name}/g')"
     cat <<'EXECEND'
 # Run command in target pod's network namespace (keep debug pod's mount namespace for /host access)
@@ -2972,8 +3008,8 @@ wait_for_debug_pods_ready() {
 #
 # Parameters:
 #   Uses global variables:
-#     $SELECT_TO_DOWNLOAD_COMMAND      - Command to list files from pod targets
-#     $NODE_SELECT_TO_DOWNLOAD_COMMAND - Command to list files from node targets
+#     $SELECT_TO_DOWNLOAD_COMMANDS[]      - Array of commands to list files from pod targets
+#     $NODE_SELECT_TO_DOWNLOAD_COMMANDS[] - Array of commands to list files from node targets
 #     $POD_DEBUG_HOSTNAMES[]           - Array of pod debug hostnames
 #     $NODE_DEBUG_HOSTNAMES[]          - Array of node debug hostnames
 #     $TARGET_PODS[]                   - Array of target pod information
@@ -2999,14 +3035,14 @@ wait_for_debug_pods_ready() {
 # Detailed Behavior:
 #   1. Determines target namespace for discovery pod creation
 #   2. Generates epoch timestamp for unique pod naming
-#   3. Pod target discovery (if SELECT_TO_DOWNLOAD_COMMAND specified):
+#   3. Pod target discovery (if SELECT_TO_DOWNLOAD_COMMANDS array has entries):
 #      - Iterates through TARGET_PODS array and POD_DEBUG_HOSTNAMES
 #      - Extracts pod name, container name, and node name from target strings
 #      - Generates unique discovery pod names using node+pod hash+timestamp
 #      - Ensures name uniqueness by checking existing pods and incrementing counters
 #      - Creates pod-level discovery pods using create_discovery_pod()
 #      - Maintains mapping between original debug hostnames and discovery pods
-#   4. Node target discovery (if NODE_SELECT_TO_DOWNLOAD_COMMAND specified):
+#   4. Node target discovery (if NODE_SELECT_TO_DOWNLOAD_COMMANDS array has entries):
 #      - Iterates through TARGET_NODES array and NODE_DEBUG_HOSTNAMES
 #      - Generates unique node discovery pod names using node hash+timestamp
 #      - Ensures name uniqueness for node discovery pods
@@ -3023,7 +3059,7 @@ create_file_discovery_pods() {
   echo ""
 
   # Create discovery pods for pod targets (if -s is specified)
-  if [[ -n "$SELECT_TO_DOWNLOAD_COMMAND" && ${#POD_DEBUG_HOSTNAMES[@]} -gt 0 ]]; then
+  if [[ ${#SELECT_TO_DOWNLOAD_COMMANDS[@]} -gt 0 && ${#POD_DEBUG_HOSTNAMES[@]} -gt 0 ]]; then
     format_message "📦 Creating discovery pods for pod targets..."
 
     local pod_index=0
@@ -3072,7 +3108,7 @@ create_file_discovery_pods() {
   fi
 
   # Create discovery pods for node targets (if -S is specified)
-  if [[ -n "$NODE_SELECT_TO_DOWNLOAD_COMMAND" && ${#NODE_DEBUG_HOSTNAMES[@]} -gt 0 ]]; then
+  if [[ ${#NODE_SELECT_TO_DOWNLOAD_COMMANDS[@]} -gt 0 && ${#NODE_DEBUG_HOSTNAMES[@]} -gt 0 ]]; then
     echo ""
     format_message "🖥️  Creating discovery pods for node targets..."
 
@@ -5132,7 +5168,7 @@ main() {
     echo
 
     # Handle file downloads if requested (AFTER debug pods are cleaned up)
-    if [[ -n "$OUTPUT_DIR" && (-n "$SELECT_TO_DOWNLOAD_COMMAND" || -n "$NODE_SELECT_TO_DOWNLOAD_COMMAND") ]]; then
+    if [[ -n "$OUTPUT_DIR" && (${#SELECT_TO_DOWNLOAD_COMMANDS[@]} -gt 0 || ${#NODE_SELECT_TO_DOWNLOAD_COMMANDS[@]} -gt 0) ]]; then
       format_message "📥 PHASE 5: File Discovery & Download"
       format_message "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
@@ -5155,7 +5191,7 @@ main() {
     echo
 
     # Handle file downloads even with --no-cleanup (but don't cleanup debug pods)
-    if [[ -n "$OUTPUT_DIR" && (-n "$SELECT_TO_DOWNLOAD_COMMAND" || -n "$NODE_SELECT_TO_DOWNLOAD_COMMAND") ]]; then
+    if [[ -n "$OUTPUT_DIR" && (${#SELECT_TO_DOWNLOAD_COMMANDS[@]} -gt 0 || ${#NODE_SELECT_TO_DOWNLOAD_COMMANDS[@]} -gt 0) ]]; then
       format_message "📥 PHASE 4: File Discovery & Download"
       format_message "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
