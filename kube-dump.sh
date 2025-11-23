@@ -3453,25 +3453,25 @@ cleanup_debug_pods() {
       format_message_stderr "📋 Downloading debug pod logs..."
 
       for debug_pod_name in "${DEBUG_POD_NAMES[@]}"; do
-        # Download debugger container logs
-        local log_file="${OUTPUT_DIR}/debug-logs/${debug_pod_name}.log"
-        if run_kube_cmd "$debug_pod_name" "logs" logs "$debug_pod_name" -c debugger -n "$debug_ns" > "$log_file" 2>&1; then
-          format_message_stderr "   ✅ ${debug_pod_name}.log"
-        else
-          format_message_stderr "   ⚠️  Failed to get logs for $debug_pod_name"
-          rm -f "$log_file" 2>/dev/null
+        # Dynamically discover all containers in this debug pod
+        local container_names
+        container_names=$($KUBE_CLI get pod "$debug_pod_name" -n "$debug_ns" -o jsonpath='{.spec.containers[*].name}' 2>/dev/null || echo "")
+
+        if [[ -z "$container_names" ]]; then
+          format_message_stderr "   ⚠️  Failed to get container list for $debug_pod_name"
+          continue
         fi
 
-        # Download file-monitor container logs if it exists (when -s or -S is used)
-        if $KUBE_CLI get pod "$debug_pod_name" -n "$debug_ns" -o jsonpath='{.spec.containers[*].name}' 2>/dev/null | grep -q 'file-monitor'; then
-          local monitor_log_file="${OUTPUT_DIR}/debug-logs/${debug_pod_name}-file-monitor.log"
-          if run_kube_cmd "$debug_pod_name-file-monitor" "logs" logs "$debug_pod_name" -c file-monitor -n "$debug_ns" > "$monitor_log_file" 2>&1; then
-            format_message_stderr "   ✅ ${debug_pod_name}-file-monitor.log"
+        # Download logs from each container
+        for container_name in $container_names; do
+          local log_file="${OUTPUT_DIR}/debug-logs/${debug_pod_name}-${container_name}.log"
+          if run_kube_cmd "$debug_pod_name-$container_name" "logs" logs "$debug_pod_name" -c "$container_name" -n "$debug_ns" > "$log_file" 2>&1; then
+            format_message_stderr "   ✅ ${debug_pod_name}-${container_name}.log"
           else
-            format_message_stderr "   ⚠️  Failed to get file-monitor logs for $debug_pod_name"
-            rm -f "$monitor_log_file" 2>/dev/null
+            format_message_stderr "   ⚠️  Failed to get logs for $debug_pod_name container $container_name"
+            rm -f "$log_file" 2>/dev/null
           fi
-        fi
+        done
       done
     fi
 
