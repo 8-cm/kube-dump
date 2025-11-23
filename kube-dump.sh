@@ -173,11 +173,11 @@ initialize_variables() {
   NODE_NAMES=()  # Array for discovered nodes
   NODE_LABELS=()  # Array of label selectors for finding nodes (OR logic)
   NODE_COMMAND="tcpdump -i any -nn -s 0"  # Default tcpdump command (same as pod mode)
-  CUSTOM_NODE_COMMAND=""  # Custom command from -E
-  SELECT_TO_DOWNLOAD_COMMAND=""  # Command to list files to download from -s
-  NODE_SELECT_TO_DOWNLOAD_COMMAND=""  # Command to list files to download from -S
-  ENCODED_SELECT_COMMAND=""  # Base64 encoded select command
-  ENCODED_NODE_SELECT_COMMAND=""  # Base64 encoded node select command
+  CUSTOM_NODE_COMMANDS=()  # Array of custom commands from -E (multiple supported)
+  SELECT_TO_DOWNLOAD_COMMANDS=()  # Array of commands to list files to download from -s
+  NODE_SELECT_TO_DOWNLOAD_COMMANDS=()  # Array of commands to list files to download from -S
+  ENCODED_SELECT_COMMANDS=()  # Array of base64 encoded select commands
+  ENCODED_NODE_SELECT_COMMANDS=()  # Array of base64 encoded node select commands
   OUTPUT_DIR=""  # Output directory for downloaded files from -o
   PLACEHOLDER_CHAR="%"  # Default placeholder character for hostname substitution
   DISCOVERY_POD_NAMES=()  # Array for file discovery pods
@@ -188,7 +188,7 @@ initialize_variables() {
   DEBUG_NAMESPACE=""
   DEBUG_POD_NAMES=()  # Array for multiple debug pods
   CAPTURE_COMMAND="tcpdump -i any -nn -s 0"  # Default tcpdump command
-  CUSTOM_COMMAND=""  # Base64 encoded custom command from -e
+  CUSTOM_COMMANDS=()  # Array of base64 encoded custom commands from -e (multiple supported)
   TARGET_PODS=()  # Array of pod info: "pod_name:container_name:node_name:namespace"
   TARGET_NODES=()  # Array for node info: "node_name"
   CRI_RUNTIME="containerd"  # Default container runtime interface
@@ -1187,39 +1187,37 @@ parse_arguments() {
         ;;
       -e|--execute)
         if [[ $1 == --execute=* ]]; then
-          CUSTOM_COMMAND="$val"
+          CUSTOM_COMMANDS+=("$val")
         else
           validate_option_value "$val" "-e|--execute"
-          CUSTOM_COMMAND="$val"
+          CUSTOM_COMMANDS+=("$val")
           shift
         fi
         ;;
       -E|--node-execute)
         if [[ $1 == --node-execute=* ]]; then
-          CUSTOM_NODE_COMMAND="$val"
-          NODE_COMMAND="$val"
+          CUSTOM_NODE_COMMANDS+=("$val")
         else
           validate_option_value "$val" "-E|--node-execute"
-          CUSTOM_NODE_COMMAND="$val"
-          NODE_COMMAND="$val"
+          CUSTOM_NODE_COMMANDS+=("$val")
           shift
         fi
         ;;
       -s|--select-to-download)
         if [[ $1 == --select-to-download=* ]]; then
-          SELECT_TO_DOWNLOAD_COMMAND="$val"
+          SELECT_TO_DOWNLOAD_COMMANDS+=("$val")
         else
           validate_option_value "$val" "-s|--select-to-download"
-          SELECT_TO_DOWNLOAD_COMMAND="$val"
+          SELECT_TO_DOWNLOAD_COMMANDS+=("$val")
           shift
         fi
         ;;
       -S|--node-select-to-download)
         if [[ $1 == --node-select-to-download=* ]]; then
-          NODE_SELECT_TO_DOWNLOAD_COMMAND="$val"
+          NODE_SELECT_TO_DOWNLOAD_COMMANDS+=("$val")
         else
           validate_option_value "$val" "-S|--node-select-to-download"
-          NODE_SELECT_TO_DOWNLOAD_COMMAND="$val"
+          NODE_SELECT_TO_DOWNLOAD_COMMANDS+=("$val")
           shift
         fi
         ;;
