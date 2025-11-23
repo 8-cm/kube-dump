@@ -1,10 +1,10 @@
 #!/bin/bash
 # Common test helper functions and setup
 
-# Load bats libraries
-load '../bats-support/load'
-load '../bats-assert/load'
-load '../bats-file/load'
+# Load bats libraries (relative to $BATS_TEST_DIRNAME which is test/)
+load 'bats-support/load'
+load 'bats-assert/load'
+load 'bats-file/load'
 
 # Test environment setup
 export BATS_TEST_DIRNAME="${BATS_TEST_DIRNAME:-$(pwd)/test}"
