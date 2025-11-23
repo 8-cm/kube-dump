@@ -2383,67 +2383,31 @@ create_single_node_debug_pod() {
   local node_label_value
   node_label_value=$(truncate_label_value_with_hash "$node_name")
 
-  # Create pod with embedded script
-  # If NODE_SELECT_TO_DOWNLOAD_COMMANDS array has entries, add file monitor sidecars
-
-  if [[ ${#NODE_SELECT_TO_DOWNLOAD_COMMANDS[@]} -gt 0 ]]; then
-    # Create pod with both debugger and file monitor containers
-    run_kube_cmd "$debug_pod_name" "apply" apply -f - <<EOF
-apiVersion: v1
-kind: Pod
-metadata:
-  name: ${debug_pod_name}
-  namespace: ${debug_ns}
-  labels:
-    app: debug
-    node: ${node_label_value}
-spec:
-  hostPID: true
-  hostNetwork: true
-  hostIPC: true
-  containers:
-  - name: debugger
-    image: ${DEBUG_IMAGE}
-    command: ["/bin/bash", "-c"]
-    args:
-    - |
-$(build_node_debug_script "$node_name" "$debug_pod_name" | sed 's/^/      /')
-    securityContext:
-      privileged: true
-      runAsUser: 0
-    volumeMounts:
-    - name: host
-      mountPath: /host
-  - name: file-monitor
-    image: ${DEBUG_IMAGE}
-    command: ["/bin/bash", "-c"]
-    args:
-    - |
-$(build_node_file_monitor_script "$node_name" | sed 's/^/      /')
-    securityContext:
-      privileged: true
-      runAsUser: 0
-    env:
-    - name: NODE_NAME
-      value: "${node_name}"
-    - name: ENCODED_NODE_SELECT_COMMAND
-      value: "${ENCODED_NODE_SELECT_COMMAND}"
-    - name: PLACEHOLDER_CHAR
-      value: "${PLACEHOLDER_CHAR}"
-    volumeMounts:
-    - name: host
-      mountPath: /host
-  volumes:
-  - name: host
-    hostPath:
-      path: /
-      type: Directory
-  nodeSelector:
-    kubernetes.io/hostname: ${node_name}
-EOF
+  # Determine number of command containers to create
+  local num_command_containers
+  if [[ ${#CUSTOM_NODE_COMMANDS[@]} -gt 0 ]]; then
+    num_command_containers=${#CUSTOM_NODE_COMMANDS[@]}
   else
-    # Create pod with only debugger container
-    run_kube_cmd "$debug_pod_name" "apply" apply -f - <<EOF
+    num_command_containers=1  # Default: single container with NODE_COMMAND
+  fi
+
+  # Generate container specifications
+  local container_specs=""
+
+  # Generate command containers (command-0, command-1, ...)
+  for ((i=0; i<num_command_containers; i++)); do
+    container_specs+=$(generate_command_container "command-$i" "$i" "" "" "$node_name" "$debug_pod_name" "build_node_debug_script")
+    container_specs+=$'\n'
+  done
+
+  # Generate file monitor containers (file-monitor-0, file-monitor-1, ...)
+  for ((i=0; i<${#ENCODED_NODE_SELECT_COMMANDS[@]}; i++)); do
+    container_specs+=$(generate_file_monitor_container "file-monitor-$i" "$i" "" "" "$node_name" "$node_name" "build_node_file_monitor_script" "${ENCODED_NODE_SELECT_COMMANDS[$i]}")
+    container_specs+=$'\n'
+  done
+
+  # Create pod with dynamically generated containers
+  run_kube_cmd "$debug_pod_name" "apply" apply -f - <<EOF
 apiVersion: v1
 kind: Pod
 metadata:
@@ -2457,19 +2421,7 @@ spec:
   hostNetwork: true
   hostIPC: true
   containers:
-  - name: debugger
-    image: ${DEBUG_IMAGE}
-    command: ["/bin/bash", "-c"]
-    args:
-    - |
-$(build_node_debug_script "$node_name" "$debug_pod_name" | sed 's/^/      /')
-    securityContext:
-      privileged: true
-      runAsUser: 0
-    volumeMounts:
-    - name: host
-      mountPath: /host
-  volumes:
+${container_specs}  volumes:
   - name: host
     hostPath:
       path: /
@@ -2477,7 +2429,6 @@ $(build_node_debug_script "$node_name" "$debug_pod_name" | sed 's/^/      /')
   nodeSelector:
     kubernetes.io/hostname: ${node_name}
 EOF
-  fi
 }
 
 # -------------------------------------------------------------------------------
@@ -2526,9 +2477,12 @@ EOF
 #   10. Simpler than build_debug_script() as it doesn't require namespace operations
 # -------------------------------------------------------------------------------
 build_node_debug_script() {
-  local node_name="$1"
-  local debug_pod_name="$2"
-  local container_index="${3:-0}"  # Default to 0 for backwards compatibility
+  # Match signature of build_debug_script for consistency with generate_command_container
+  local pod_name="$1"           # Unused for node scripts, but kept for parameter alignment
+  local container_name="$2"      # Unused for node scripts, but kept for parameter alignment
+  local node_name="$3"
+  local debug_pod_name="$4"
+  local container_index="${5:-0}"  # Default to 0 for backwards compatibility
 
   # Determine which command to use
   local cmd_to_use
@@ -2641,68 +2595,31 @@ create_single_debug_pod() {
   local debug_pod_name="$4"
   local debug_ns="$5"
 
-  # Create pod with embedded script
-  # If SELECT_TO_DOWNLOAD_COMMANDS array has entries, add file monitor sidecars
-
-  if [[ ${#SELECT_TO_DOWNLOAD_COMMANDS[@]} -gt 0 ]]; then
-    # Create pod with both debugger and file monitor containers
-    run_kube_cmd "$debug_pod_name" "apply" apply -f - <<EOF
-apiVersion: v1
-kind: Pod
-metadata:
-  name: ${debug_pod_name}
-  namespace: ${debug_ns}
-spec:
-  containers:
-  - name: debugger
-    image: ${DEBUG_IMAGE}
-    command: ["/bin/bash", "-c"]
-    args:
-    - |
-$(build_debug_script "$pod_name" "$container_name" "$node_name" "$debug_pod_name" | sed 's/^/      /')
-    securityContext:
-      privileged: true
-      runAsUser: 0
-    volumeMounts:
-    - name: host
-      mountPath: /host
-  - name: file-monitor
-    image: ${DEBUG_IMAGE}
-    command: ["/bin/bash", "-c"]
-    args:
-    - |
-$(build_file_monitor_script "$pod_name" "$container_name" "$node_name" "$pod_name" | sed 's/^/      /')
-    securityContext:
-      privileged: true
-      runAsUser: 0
-    env:
-    - name: POD_NAME
-      value: "${pod_name}"
-    - name: CONTAINER_NAME
-      value: "${container_name}"
-    - name: TARGET_NAME
-      value: "${pod_name}"
-    - name: ENCODED_SELECT_COMMAND
-      value: "${ENCODED_SELECT_COMMAND}"
-    - name: PLACEHOLDER_CHAR
-      value: "${PLACEHOLDER_CHAR}"
-    volumeMounts:
-    - name: host
-      mountPath: /host
-  hostNetwork: true
-  hostPID: true
-  hostIPC: true
-  nodeName: ${node_name}
-  restartPolicy: Never
-  volumes:
-  - name: host
-    hostPath:
-      path: /
-      type: Directory
-EOF
+  # Determine number of command containers to create
+  local num_command_containers
+  if [[ ${#ENCODED_CUSTOM_COMMANDS[@]} -gt 0 ]]; then
+    num_command_containers=${#ENCODED_CUSTOM_COMMANDS[@]}
   else
-    # Create pod with only debugger container
-    run_kube_cmd "$debug_pod_name" "apply" apply -f - <<EOF
+    num_command_containers=1  # Default: single container with CAPTURE_COMMAND
+  fi
+
+  # Generate container specifications
+  local container_specs=""
+
+  # Generate command containers (command-0, command-1, ...)
+  for ((i=0; i<num_command_containers; i++)); do
+    container_specs+=$(generate_command_container "command-$i" "$i" "$pod_name" "$container_name" "$node_name" "$debug_pod_name" "build_debug_script")
+    container_specs+=$'\n'
+  done
+
+  # Generate file monitor containers (file-monitor-0, file-monitor-1, ...)
+  for ((i=0; i<${#ENCODED_SELECT_COMMANDS[@]}; i++)); do
+    container_specs+=$(generate_file_monitor_container "file-monitor-$i" "$i" "$pod_name" "$container_name" "$node_name" "$pod_name" "build_file_monitor_script" "${ENCODED_SELECT_COMMANDS[$i]}")
+    container_specs+=$'\n'
+  done
+
+  # Create pod with dynamically generated containers
+  run_kube_cmd "$debug_pod_name" "apply" apply -f - <<EOF
 apiVersion: v1
 kind: Pod
 metadata:
@@ -2710,19 +2627,7 @@ metadata:
   namespace: ${debug_ns}
 spec:
   containers:
-  - name: debugger
-    image: ${DEBUG_IMAGE}
-    command: ["/bin/bash", "-c"]
-    args:
-    - |
-$(build_debug_script "$pod_name" "$container_name" "$node_name" "$debug_pod_name" | sed 's/^/      /')
-    securityContext:
-      privileged: true
-      runAsUser: 0
-    volumeMounts:
-    - name: host
-      mountPath: /host
-  hostNetwork: true
+${container_specs}  hostNetwork: true
   hostPID: true
   hostIPC: true
   nodeName: ${node_name}
@@ -2733,7 +2638,6 @@ $(build_debug_script "$pod_name" "$container_name" "$node_name" "$debug_pod_name
       path: /
       type: Directory
 EOF
-  fi
 }
 
 # -------------------------------------------------------------------------------
@@ -4860,7 +4764,12 @@ SCRIPT
 #   4. Outputs table format similar to kill switch monitor
 # -------------------------------------------------------------------------------
 build_node_file_monitor_script() {
-  local node_name="$1"
+  # Match signature of build_file_monitor_script for consistency with generate_file_monitor_container
+  local pod_name="$1"           # Unused for node scripts, but kept for parameter alignment
+  local container_name="$2"      # Unused for node scripts, but kept for parameter alignment
+  local node_name="$3"
+  local target_name="$4"         # Usually same as node_name for nodes
+  local monitor_index="${5:-0}"  # Unused for now, but available for future enhancements
 
   cat <<'SCRIPT'
 #!/bin/bash
