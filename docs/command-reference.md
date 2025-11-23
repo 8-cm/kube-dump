@@ -11,12 +11,13 @@ Complete reference for all kube-dump command-line options and parameters.
 ## Target Selection
 
 ### Pod Selection
-- `-l, --label LABEL` - Target pods by label selector (default: `dumpme=yes`)
-- `-n, --namespace NAMESPACE` - Kubernetes namespace (default: `default`)
+- `-l, --label LABEL` - Target pods by label selector (can be specified multiple times for OR logic, default: `dumpme=yes`)
+- `-n, --namespace NAMESPACE` - Namespace where debug pods should be created
+- `--to-namespace NAMESPACE` - Alias for `-n/--namespace` (deprecated, use `-n` instead)
 
 ### Node Selection
-- `-L, --node-label LABEL` - Target nodes by label selector
-- `--include-nodes` - Auto-include nodes hosting selected pods
+- `-L, --node-label LABEL` - Target nodes by label selector (can be specified multiple times for OR logic)
+- `--include-nodes` - Also run node commands on nodes hosting selected pods
 
 ### Mixed Mode
 Use both `-l` and `-L` together for mixed pod/node operations.
@@ -24,38 +25,35 @@ Use both `-l` and `-L` together for mixed pod/node operations.
 ## Commands
 
 ### Pod Commands
-- `-c, --command COMMAND` - Command to execute in pod context (default: tcpdump)
-- `-s, --select-files COMMAND` - Command to select files for download from pods
+- `-e, --execute COMMAND` - Command to execute in pod network namespace (default: `tcpdump -i any -nn -s 0`)
+- `-s, --select-to-download COMMAND` - Command to list files for download from pods (space-delimited output)
 
 ### Node Commands
-- `-C, --node-command COMMAND` - Command to execute on nodes (default: tcpdump)
-- `-S, --select-node-files COMMAND` - Command to select files for download from nodes
+- `-E, --node-execute COMMAND` - Command to execute on nodes (default: `tcpdump -i any -nn -s 0`)
+- `-S, --node-select-to-download COMMAND` - Command to list node files for download (space-delimited output)
 
 ### Default Commands
 ```bash
 # Pod command (default)
-tcpdump -i any -w /tmp/PLACEHOLDER_CHAR.pcap
+tcpdump -i any -nn -s 0
 
 # Node command (default)
-tcpdump -i any -w /tmp/PLACEHOLDER_CHAR.pcap
+tcpdump -i any -nn -s 0
 ```
 
 ## Container & Runtime
 
 ### Image & Runtime
-- `--image IMAGE` - Debug pod container image (default: `nicolaka/netshoot:latest`)
-- `--cri-runtime RUNTIME` - Container runtime: `auto|containerd|crio|docker` (default: `auto`)
-- `--cri-socket SOCKET` - Container runtime socket path
-- `--install-deps` - Install container runtime tools in debug pods
-
-### Namespace & Placement
-- `-N, --debug-namespace NAMESPACE` - Namespace for debug pods (default: same as target)
+- `--image IMAGE` - Container image for debug/discovery/killswitch pods (default: `nicolaka/netshoot`)
+- `--cri RUNTIME` - Container runtime interface: `containerd|crio|docker` (default: `containerd`)
+- `--cri-socket SOCKET` - Custom CRI socket path (absolute path on node)
+- `--install-deps` - Allow automatic installation of CRI dependencies (crictl only)
 
 ## File Operations
 
 ### Output & Downloads
-- `-o, --output-dir PATH` - Output directory for files and logs
-- `-P, --placeholder-char CHAR` - Character for hostname substitution (default: `%`)
+- `-o, --output PATH` - Output directory for downloaded files
+- `-I, --placeholder CHAR` - Set placeholder character for hostname substitution (default: `%`)
 
 ### File Selection
 File selection commands support placeholder substitution:
@@ -74,9 +72,18 @@ File selection commands support placeholder substitution:
 Automatically terminate debug pods when disk usage exceeds thresholds:
 
 - `--kill-switch-abs SIZE` - Absolute free space threshold (e.g., `1GB`, `500MB`)
-- `--kill-switch-rel PERCENT` - Relative free space threshold (e.g., `10`, `5`)
-- `--kill-switch-pod-volume PATH` - Volume path to monitor in pod debug (default: `/tmp`)
-- `--kill-switch-node-volume PATH` - Volume path to monitor in node debug (default: `/`)
+- `--kill-switch-rel PERCENT` - Relative free space threshold (e.g., `10%`, `5%`)
+  - If omitted, auto-detects from kubelet `nodefs.available` (+5% safety margin)
+  - Falls back to 10% if auto-detection fails
+  - Requires `bc` calculator in the debug image
+- `--pod-volume PATH` - Volume path to monitor for pod-based kill switches (e.g., `/tmp`)
+- `--node-volume PATH` - Volume path to monitor for node-based kill switches (e.g., `/var`)
+
+### Auto-Detection
+When only volume paths are provided without explicit thresholds, the script automatically:
+1. Queries kubelet's eviction threshold via `/api/v1/nodes/{node}/proxy/configz`
+2. Adds 5% safety margin to the detected threshold
+3. Falls back to 10% if detection fails
 
 ### Kill Switch Examples
 ```bash
@@ -87,14 +94,18 @@ Automatically terminate debug pods when disk usage exceeds thresholds:
 ./kube-dump.sh -l app=web --kill-switch-rel 10
 
 # Monitor custom volume path
-./kube-dump.sh -l app=web --kill-switch-abs 500MB --kill-switch-pod-volume /var/tmp
+./kube-dump.sh -l app=web --kill-switch-abs 500MB --pod-volume /var/tmp
+
+# Auto-detect kill switch threshold from kubelet
+./kube-dump.sh -l app=web --pod-volume /tmp
 ```
 
 ## Execution Control
 
 ### Cleanup & Monitoring
-- `--no-cleanup` - Keep debug pods running after execution
-- `--no-glyphs` - Disable emoji/Unicode characters for terminal compatibility
+- `--no-cleanup` - Skip cleanup, leave debug pods running for log inspection
+- `--verbose` - Enable verbose logging (max Kubernetes verbosity, per-pod logs to OUTPUT_DIR/debug/)
+- `--no-glyphs` - Disable emojis and use text labels like [INFO], [ERROR], [OK]
 
 ## Help & Information
 

@@ -40,18 +40,20 @@ git clone <repository-url> && cd kube-dump && chmod +x kube-dump.sh
 |----------|---------|-------------|
 | **Network Debugging** | `./kube-dump.sh -l app=nginx` | Capture network traffic from all nginx pods |
 | **Log Collection** | `./kube-dump.sh -l app=web -o /tmp -s "find /var/log -name '*.log'"` | Collect logs from multiple pods |
-| **Node Analysis** | `./kube-dump.sh -L node-type=worker -c "ss -tuln"` | Analyze network connections on worker nodes |
-| **Disk Space Check** | `./kube-dump.sh -l tier=database -c "df -h"` | Check disk usage across database pods |
-| **Security Audit** | `./kube-dump.sh -L role=master -c "systemctl status kubelet"` | Audit kubelet status on master nodes |
+| **Node Analysis** | `./kube-dump.sh -L node-type=worker -E "ss -tuln"` | Analyze network connections on worker nodes |
+| **Disk Space Check** | `./kube-dump.sh -l tier=database -e "df -h"` | Check disk usage across database pods |
+| **Security Audit** | `./kube-dump.sh -L role=master -E "systemctl status kubelet"` | Audit kubelet status on master nodes |
 
 ## Key Features
 
 - 🎯 **Multi-target execution** - Run commands on multiple pods/nodes simultaneously
 - 🔀 **Flexible modes** - Pod-based, node-based, or mixed operations
 - 📦 **File operations** - Generate and download files from debug sessions
-- 🛡️ **Kill switch protection** - Auto-terminate on disk usage thresholds
+- 🛡️ **Kill switch protection** - Auto-detect kubelet eviction thresholds or set custom limits
 - 🏷️ **Label targeting** - Use Kubernetes labels for precise resource selection
 - ⚙️ **Runtime support** - Works with containerd, crio, and docker
+- 📊 **Verbose logging** - Optional detailed logging with per-pod operation logs
+- 🔇 **Clean output** - PodSecurity warnings suppressed, saved to process logs
 
 ## Documentation
 

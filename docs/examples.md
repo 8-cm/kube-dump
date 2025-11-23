@@ -13,7 +13,7 @@ Real-world examples and use cases for kube-dump.
 ./kube-dump.sh -l app=nginx -n production
 
 # Capture specific port traffic
-./kube-dump.sh -l app=web -c "tcpdump -i any port 8080 -w /tmp/port8080.pcap"
+./kube-dump.sh -l app=web -e "tcpdump -i any port 8080 -w /tmp/port8080.pcap"
 ```
 
 ### Multi-Pod Network Analysis
@@ -22,19 +22,19 @@ Real-world examples and use cases for kube-dump.
 ./kube-dump.sh -l tier=frontend,version=v2
 
 # Monitor inter-service communication
-./kube-dump.sh -l app=api -c "tcpdump -i any host 10.96.0.1 -w /tmp/api-traffic.pcap"
+./kube-dump.sh -l app=api -e "tcpdump -i any host 10.96.0.1 -w /tmp/api-traffic.pcap"
 ```
 
 ### Network Troubleshooting
 ```bash
 # Check network connectivity
-./kube-dump.sh -l app=web -c "ping -c 5 8.8.8.8"
+./kube-dump.sh -l app=web -e "ping -c 5 8.8.8.8"
 
 # Analyze network interfaces
-./kube-dump.sh -l app=web -c "ip addr show"
+./kube-dump.sh -l app=web -e "ip addr show"
 
 # Monitor DNS resolution
-./kube-dump.sh -l app=web -c "nslookup kubernetes.default.svc.cluster.local"
+./kube-dump.sh -l app=web -e "nslookup kubernetes.default.svc.cluster.local"
 ```
 
 ## Log Collection
@@ -65,37 +65,37 @@ Real-world examples and use cases for kube-dump.
 ### Resource Monitoring
 ```bash
 # Check disk usage across pods
-./kube-dump.sh -l tier=database -c "df -h"
+./kube-dump.sh -l tier=database -e "df -h"
 
 # Memory analysis
-./kube-dump.sh -l app=web -c "free -m && ps aux --sort=-%mem | head -10"
+./kube-dump.sh -l app=web -e "free -m && ps aux --sort=-%mem | head -10"
 
 # CPU information
-./kube-dump.sh -L node-type=worker -c "lscpu && top -b -n 1"
+./kube-dump.sh -L node-type=worker -e "lscpu && top -b -n 1"
 ```
 
 ### Performance Analysis
 ```bash
 # Network performance
-./kube-dump.sh -l app=web -c "ss -tuln && netstat -i"
+./kube-dump.sh -l app=web -e "ss -tuln && netstat -i"
 
 # Process monitoring
-./kube-dump.sh -l app=api -c "top -b -n 3 -d 1 > /tmp/performance.txt" -o /tmp/perf
+./kube-dump.sh -l app=api -e "top -b -n 3 -d 1 > /tmp/performance.txt" -o /tmp/perf
 
 # I/O statistics
-./kube-dump.sh -l tier=database -c "iostat -x 1 5 > /tmp/iostat.txt" -o /tmp/io
+./kube-dump.sh -l tier=database -e "iostat -x 1 5 > /tmp/iostat.txt" -o /tmp/io
 ```
 
 ### Security Auditing
 ```bash
 # Check running processes
-./kube-dump.sh -l app=web -c "ps aux && ls -la /proc/*/exe 2>/dev/null"
+./kube-dump.sh -l app=web -e "ps aux && ls -la /proc/*/exe 2>/dev/null"
 
 # Network connections
-./kube-dump.sh -l app=api -c "netstat -antlp && ss -tulpn"
+./kube-dump.sh -l app=api -e "netstat -antlp && ss -tulpn"
 
 # File permissions audit
-./kube-dump.sh -l app=web -c "find /app -type f -perm /u+s,g+s 2>/dev/null" -o /tmp/audit
+./kube-dump.sh -l app=web -e "find /app -type f -perm /u+s,g+s 2>/dev/null" -o /tmp/audit
 ```
 
 ## Advanced Operations
@@ -106,7 +106,7 @@ Real-world examples and use cases for kube-dump.
 ./kube-dump.sh -l app=web -L node-type=worker --include-nodes
 
 # Different commands for pods vs nodes
-./kube-dump.sh -l app=web -c "tcpdump -i any port 8080" -L node-type=worker -C "ss -tulpn | grep 8080"
+./kube-dump.sh -l app=web -e "tcpdump -i any port 8080" -L node-type=worker -E "ss -tulpn | grep 8080"
 
 # Collect files from both pods and nodes
 ./kube-dump.sh -l app=web -s "cp /app/config.yaml /tmp/config-PLACEHOLDER_CHAR.yaml" \
@@ -117,24 +117,24 @@ Real-world examples and use cases for kube-dump.
 ### Kill Switch Protection
 ```bash
 # Protect with absolute disk threshold
-./kube-dump.sh -l app=web --kill-switch-abs 1GB -c "dd if=/dev/zero of=/tmp/testfile bs=1M count=100"
+./kube-dump.sh -l app=web --kill-switch-abs 1GB -e "dd if=/dev/zero of=/tmp/testfile bs=1M count=100"
 
 # Protect with relative threshold
 ./kube-dump.sh -l app=web --kill-switch-rel 10 -o /tmp/safe-debug
 
 # Monitor custom volume
-./kube-dump.sh -l app=database --kill-switch-abs 500MB --kill-switch-pod-volume /data
+./kube-dump.sh -l app=database --kill-switch-abs 500MB --pod-volume /data
 ```
 
 ### Container Runtime Specific
 ```bash
 # Debug with containerd
-./kube-dump.sh -l app=web --cri-runtime containerd --install-deps \
-                -c "crictl ps && crictl images"
+./kube-dump.sh -l app=web --cri containerd --install-deps \
+                -e "crictl ps && crictl images"
 
 # Debug with CRI-O
-./kube-dump.sh -l app=web --cri-runtime crio --cri-socket /var/run/crio/crio.sock \
-                -c "crictl --runtime-endpoint unix:///var/run/crio/crio.sock ps"
+./kube-dump.sh -l app=web --cri crio --cri-socket /var/run/crio/crio.sock \
+                -e "crictl --runtime-endpoint unix:///var/run/crio/crio.sock ps"
 ```
 
 ## Configuration Management
@@ -148,13 +148,13 @@ Real-world examples and use cases for kube-dump.
 ./kube-dump.sh -l app=web -o /tmp/app-configs -s "tar czf /tmp/app-config-PLACEHOLDER_CHAR.tar.gz /etc/app/"
 
 # Environment variables
-./kube-dump.sh -l app=api -c "env | sort > /tmp/env-vars.txt" -o /tmp/env
+./kube-dump.sh -l app=api -e "env | sort > /tmp/env-vars.txt" -o /tmp/env
 ```
 
 ### Backup Operations
 ```bash
 # Database dumps
-./kube-dump.sh -l app=postgres -c "pg_dump -U postgres mydb > /tmp/backup-$(date +%Y%m%d).sql" -o /tmp/backups
+./kube-dump.sh -l app=postgres -e "pg_dump -U postgres mydb > /tmp/backup-$(date +%Y%m%d).sql" -o /tmp/backups
 
 # Configuration backups
 ./kube-dump.sh -l app=web -s "cp -r /app/config /tmp/config-backup-PLACEHOLDER_CHAR" -o /tmp/backups
@@ -168,37 +168,37 @@ Real-world examples and use cases for kube-dump.
 ### Application Issues
 ```bash
 # Debug application startup issues
-./kube-dump.sh -l app=failing-app -c "ps aux && ls -la /app && cat /app/logs/startup.log"
+./kube-dump.sh -l app=failing-app -e "ps aux && ls -la /app && cat /app/logs/startup.log"
 
 # Check connectivity between services
-./kube-dump.sh -l app=frontend -c "nc -zv backend-service 8080"
+./kube-dump.sh -l app=frontend -e "nc -zv backend-service 8080"
 
 # Analyze application dependencies
-./kube-dump.sh -l app=web -c "ldd /app/binary && strace -c /app/binary --check-deps"
+./kube-dump.sh -l app=web -e "ldd /app/binary && strace -e /app/binary --check-deps"
 ```
 
 ### Network Issues
 ```bash
 # Debug DNS issues
-./kube-dump.sh -l app=web -c "nslookup api-service && cat /etc/resolv.conf"
+./kube-dump.sh -l app=web -e "nslookup api-service && cat /etc/resolv.conf"
 
 # Check service mesh connectivity
-./kube-dump.sh -l app=web -c "curl -v http://istio-proxy:15000/stats"
+./kube-dump.sh -l app=web -e "curl -v http://istio-proxy:15000/stats"
 
 # Analyze iptables rules (node-level)
-./kube-dump.sh -L node-type=worker -c "iptables -L -n && iptables -t nat -L -n"
+./kube-dump.sh -L node-type=worker -e "iptables -L -n && iptables -t nat -L -n"
 ```
 
 ### Storage Issues
 ```bash
 # Check volume mounts
-./kube-dump.sh -l app=database -c "mount | grep -E '(nfs|ceph)' && df -h"
+./kube-dump.sh -l app=database -e "mount | grep -E '(nfs|ceph)' && df -h"
 
 # Analyze file system performance
-./kube-dump.sh -l app=web -c "iostat -x 1 3 && lsof +D /app/data"
+./kube-dump.sh -l app=web -e "iostat -x 1 3 && lsof +D /app/data"
 
 # Check storage permissions
-./kube-dump.sh -l app=web -c "ls -la /app/data && id && whoami"
+./kube-dump.sh -l app=web -e "ls -la /app/data && id && whoami"
 ```
 
 ## No-Cleanup Mode
@@ -209,13 +209,13 @@ Real-world examples and use cases for kube-dump.
 ./kube-dump.sh -l app=web --no-cleanup
 
 # Monitor continuously
-./kube-dump.sh -l app=api --no-cleanup -c "while true; do date; ps aux | head -20; sleep 30; done"
+./kube-dump.sh -l app=api --no-cleanup -e "while true; do date; ps aux | head -20; sleep 30; done"
 ```
 
 ### Interactive Debugging
 ```bash
 # Create persistent debug environment
-./kube-dump.sh -l app=web --no-cleanup -c "sleep infinity"
+./kube-dump.sh -l app=web --no-cleanup -e "sleep infinity"
 
 # Then connect manually:
 # kubectl exec -it debug-pod-name -- /bin/bash
@@ -241,7 +241,7 @@ Real-world examples and use cases for kube-dump.
 ./kube-dump.sh -l app=web -s "find /app/logs -name '*.log' -exec grep -l 'ERROR' {} \;"
 
 # Use read-only operations when possible
-./kube-dump.sh -l app=web -c "find /app -type f -readable"
+./kube-dump.sh -l app=web -e "find /app -type f -readable"
 
 # Clean up after debugging
 # (automatic with default behavior, manual with --no-cleanup)
