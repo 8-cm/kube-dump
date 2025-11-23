@@ -30,19 +30,19 @@ Security scan results will appear below when the automated workflows complete th
 
 **Overall Status:** 🔴 CRITICAL ISSUES FOUND  
 **Critical Issues:** 28  
-**High Severity:** 282  
-**Medium Severity:** 376  
-**Low Severity:** 36  
-**Last Updated:** 2025-11-15 03:08:04 UTC  
-**Commit:** [`d8ff094`](https://github.com/8-cm/kube-dump/commit/d8ff094227e515f51f5313462ecf1a8a589e7d3b)  
+**High Severity:** 278  
+**Medium Severity:** 391  
+**Low Severity:** 47  
+**Last Updated:** 2025-11-23 15:01:00 UTC  
+**Commit:** [`6a83b44`](https://github.com/8-cm/kube-dump/commit/6a83b44a7679b4479f4bf528428eb4ba6f913663)  
 
 ### Container Image Vulnerabilities
 
 | Image | Critical | High | Medium | Low | Total |
 |-------|----------|------|--------|-----|-------|
-| `alpine:latest` | 🔴 0 | 🟠 0 | 🟡 0 | 🔵 0 | 0 |
-| `nicolaka/netshoot:latest` | 🔴 14 | 🟠 141 | 🟡 188 | 🔵 18 | 361 |
-| `nicolaka/netshoot` | 🔴 14 | 🟠 141 | 🟡 188 | 🔵 18 | 361 |
+| `alpine:latest` | 🔴 0 | 🟠 0 | 🟡 3 | 🔵 3 | 6 |
+| `nicolaka/netshoot:latest` | 🔴 14 | 🟠 139 | 🟡 194 | 🔵 22 | 369 |
+| `nicolaka/netshoot` | 🔴 14 | 🟠 139 | 🟡 194 | 🔵 22 | 369 |
 
 ### Remediation Steps
 1. **Update Images**: Use latest versions of container images with security patches
@@ -58,14 +58,15 @@ Security scan results will appear below when the automated workflows complete th
 
 **Status:** ✅ PASSED  
 **Issues Found:** 0  
-**Last Updated:** 2025-11-15 03:08:04 UTC  
-**Commit:** [`d8ff094`](https://github.com/8-cm/kube-dump/commit/d8ff094227e515f51f5313462ecf1a8a589e7d3b)  
+**Last Updated:** 2025-11-23 15:01:00 UTC  
+**Commit:** [`6a83b44`](https://github.com/8-cm/kube-dump/commit/6a83b44a7679b4479f4bf528428eb4ba6f913663)  
 
 🎉 **Excellent!** No shellcheck issues found. The script follows shell scripting best practices.
 
 ---
 *This section is automatically updated by the [Comprehensive Security Analysis workflow](.github/workflows/security-analysis.yml)*
 <!-- SHELLCHECK-RESULTS-END -->
+
 
 
 
@@ -789,3 +790,5 @@ If you discover a security vulnerability in kube-dump:
 <sub><i>Last updated: 2025-11-01 03:12:51 UTC</i></sub>
 
 <sub><i>Last updated: 2025-11-15 03:08:04 UTC</i></sub>
+
+<sub><i>Last updated: 2025-11-23 15:01:00 UTC</i></sub>
