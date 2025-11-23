@@ -18,6 +18,8 @@ The test suite includes **280+ test cases** covering:
 
 ### Install Test Dependencies
 
+**Note:** In CI/CD (GitHub Actions), dependencies are automatically installed. For local development:
+
 ```bash
 cd test
 git clone --depth 1 https://github.com/bats-core/bats-core.git
@@ -25,6 +27,8 @@ git clone --depth 1 https://github.com/bats-core/bats-support.git
 git clone --depth 1 https://github.com/bats-core/bats-assert.git
 git clone --depth 1 https://github.com/bats-core/bats-file.git
 ```
+
+These directories are excluded from the repository via `.gitignore`.
 
 ### Run All Tests
 
@@ -289,33 +293,25 @@ bats --verbose-run test/test_pod_operations.bats
 
 ## 🎬 CI/CD Integration
 
-### GitHub Actions Example
+### GitHub Actions
 
-```yaml
-name: Tests
+This repository includes automated testing via GitHub Actions. See `.github/workflows/tests.yml` for the complete workflow.
 
-on: [push, pull_request]
+**The test suite runs automatically on:**
+- Push to `master` or `main` branches
+- Pull requests to `master` or `main` branches
+- Manual workflow dispatch
 
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
+**Features:**
+- ✅ Automatic dependency installation
+- ✅ Parallel test execution
+- ✅ Coverage analysis and reporting
+- ✅ Test artifacts for debugging
+- ✅ PR comments with test results
 
-      - name: Install Bats
-        run: |
-          cd test
-          git clone --depth 1 https://github.com/bats-core/bats-core.git
-          git clone --depth 1 https://github.com/bats-core/bats-support.git
-          git clone --depth 1 https://github.com/bats-core/bats-assert.git
-          git clone --depth 1 https://github.com/bats-core/bats-file.git
+### Workflow File
 
-      - name: Run Tests
-        run: ./test/run_tests.sh
-
-      - name: Check Coverage
-        run: ./test/analyze_coverage.sh
-```
+See [`.github/workflows/tests.yml`](../.github/workflows/tests.yml) for the complete configuration.
 
 ## 📈 Coverage Goals
 
