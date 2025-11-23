@@ -7,24 +7,24 @@ Complete test suite coverage analysis for kube-dump.sh.
 <!-- TEST-COVERAGE-START -->
 ## 🧪 Test Suite Status
 
-**Overall Coverage:** 
+**Overall Coverage:** ✅ 100% (51/51 functions)
 **Test Cases:** 280+ tests across 8 test files
 **Framework:** [Bats (Bash Automated Testing System)](https://github.com/bats-core/bats-core)
-**Last Updated:** 
+**Last Updated:** Automated
 **CI/CD:** [GitHub Actions Workflow](../.github/workflows/tests.yml)
-**Commit:** [`0e1ad22`](https://github.com/8-cm/kube-dump/commit/0e1ad22f4db68ea6ff6266d95da8fe3d11cf9138)
 
 ### Coverage Summary
 
 | Metric | Value |
 |--------|-------|
-| **Total Functions** | 0 |
-| **Tested Functions** |  |
-| **Untested Functions** |  |
-| **Coverage Percentage** | % |
+| **Total Functions** | 51 |
+| **Tested Functions** | 51 |
+| **Untested Functions** | 0 |
+| **Coverage Percentage** | 100.0% |
 | **Test Files** | 8 |
 | **Test Cases** | 280+ |
 
+### Test Suite Breakdown
 
 | Test File | Functions Tested | Test Cases | Description |
 |-----------|-----------------|------------|-------------|
@@ -244,55 +244,6 @@ When adding new functions to kube-dump.sh:
 - [Test Suite README](../test/README.md) - Detailed test documentation
 - [GitHub Actions Workflow](../.github/workflows/tests.yml) - CI/CD configuration
 - [Bats Documentation](https://bats-core.readthedocs.io/) - Framework reference
-
----
-
-*This coverage report is automatically updated by the [Test Suite workflow](../.github/workflows/tests.yml)*
-
-
-## 📈 Coverage History
-
-| Date | Coverage | Functions | Test Cases | Commit | Notes |
-|------|----------|-----------|------------|--------|-------|
-|  | % | /0 | 280+ | [`0e1ad22`](https://github.com/8-cm/kube-dump/commit/0e1ad22f4db68ea6ff6266d95da8fe3d11cf9138) | Automated update |
-## 🛠️ Adding New Tests
-
-When adding new functions to kube-dump.sh:
-
-1. **Identify the function category** (utility, pod ops, node ops, etc.)
-2. **Add tests to appropriate file** (or create new file if needed)
-3. **Follow naming convention**: `@test "function_name: test description"`
-4. **Use assertions**: `assert_success`, `assert_output`, etc.
-5. **Run coverage analysis**: `./test/analyze_coverage.sh`
-
-### Test Template
-
-```bash
-@test "my_function: does something specific" {
-  # Setup
-  export SOME_VAR="value"
-
-  # Execute
-  run my_function "arg1" "arg2"
-
-  # Assert
-  assert_success
-  assert_output "expected output"
-}
-```
-
----
-
-## 📚 Related Documentation
-
-- [Test Suite README](../test/README.md) - Detailed test documentation
-- [GitHub Actions Workflow](../.github/workflows/tests.yml) - CI/CD configuration
-- [Bats Documentation](https://bats-core.readthedocs.io/) - Framework reference
-
----
-
-*This coverage report is automatically updated by the [Test Suite workflow](../.github/workflows/tests.yml)*
-
 
 ---
 

@@ -115,7 +115,7 @@ jobs:
       id: coverage
 
     - name: Update README with test coverage
-      if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+      if: github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.run_tests.outcome == 'success'
       run: |
         echo "Updating README.md with test coverage status..."
 
@@ -145,8 +145,9 @@ jobs:
           sed -n '/\*\*Vulnerability Summary:\*\*/p' README.md.bak
           echo ""
 
-          # Keep report links
+          # Keep report links on separate lines
           sed -n '/📋 \[View Detailed Security Reports\]/p' README.md.bak
+          echo ""
           echo "🧪 [View Test Coverage Report](docs/test-coverage.md) for detailed test suite information and coverage analysis."
           echo ""
           echo "<!-- SECURITY-DASHBOARD-END -->"
@@ -159,7 +160,7 @@ jobs:
         echo "README.md updated successfully!"
 
     - name: Update test coverage documentation
-      if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+      if: github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.run_tests.outcome == 'success'
       run: |
         echo "Updating docs/test-coverage.md with detailed coverage results..."
 
@@ -193,8 +194,8 @@ jobs:
           echo "| **Test Cases** | 280+ |"
           echo ""
 
-          # Keep everything after Coverage Summary until the next section
-          sed -n '/### Test Suite Breakdown/,/<!-- TEST-COVERAGE-END -->/p' docs/test-coverage.md.bak | sed '1d;$d' 2>/dev/null || echo ""
+          # Keep static content (Test Suite Breakdown through Running Tests)
+          sed -n '/### Test Suite Breakdown/,/## 📈 Coverage History/p' docs/test-coverage.md.bak | sed '$d' 2>/dev/null || echo ""
 
           # Add updated coverage history
           echo ""
@@ -203,9 +204,15 @@ jobs:
           echo "| Date | Coverage | Functions | Test Cases | Commit | Notes |"
           echo "|------|----------|-----------|------------|--------|-------|"
           echo "| $TIMESTAMP | $COVERAGE_PERCENT% | $TESTED_FUNCTIONS/$TOTAL_FUNCTIONS | 280+ | [\`${GITHUB_SHA:0:7}\`](https://github.com/${{ github.repository }}/commit/${GITHUB_SHA}) | Automated update |"
+          echo ""
+          echo "---"
+          echo ""
 
-          # Keep static content sections
-          sed -n '/## 🛠️ Adding New Tests/,/<!-- TEST-COVERAGE-END -->/p' docs/test-coverage.md.bak | sed '$d' 2>/dev/null || echo ""
+          # Keep static sections (Adding New Tests and Related Documentation)
+          sed -n '/## 🛠️ Adding New Tests/,/## 📚 Related Documentation/p' docs/test-coverage.md.bak 2>/dev/null || echo ""
+
+          # Output Related Documentation section
+          sed -n '/## 📚 Related Documentation/,/^---$/p' docs/test-coverage.md.bak | grep -v '^---$' 2>/dev/null || echo ""
 
           echo ""
           echo "---"
@@ -219,7 +226,7 @@ jobs:
         echo "Test coverage documentation updated successfully!"
 
     - name: Commit and push coverage updates
-      if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+      if: github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.run_tests.outcome == 'success'
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
