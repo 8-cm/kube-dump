@@ -2320,8 +2320,10 @@ build_node_debug_script() {
   local node_name="$1"
   local debug_pod_name="$2"
 
-  # Substitute placeholder with target node name in node command
-  local final_node_command="${NODE_COMMAND//${PLACEHOLDER_CHAR}/$node_name}"
+  # Substitute placeholder with target node name in node command, strip newlines
+  local node_command_clean
+  node_command_clean=$(echo "$NODE_COMMAND" | tr -d '\n')
+  local final_node_command="${node_command_clean//${PLACEHOLDER_CHAR}/$node_name}"
 
   cat <<SCRIPT
 set -e
@@ -2756,7 +2758,7 @@ generate_exec_command() {
   local target_pod_name="$1"
 
   if [[ -n "$CUSTOM_COMMAND" ]]; then
-    echo "DECODED_CMD=\$(echo '${CAPTURE_COMMAND}' | base64 -d)"
+    printf "DECODED_CMD=\$(echo '%s' | base64 -d | tr -d '\\\\n')\\n" "${CAPTURE_COMMAND}"
     echo "FINAL_CMD=\$(echo \"\$DECODED_CMD\" | sed 's/${PLACEHOLDER_CHAR}/${target_pod_name}/g')"
     cat <<'EXECEND'
 # Run command in target pod's network namespace (keep debug pod's mount namespace for /host access)
