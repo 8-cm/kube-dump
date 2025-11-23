@@ -2175,8 +2175,64 @@ create_single_node_debug_pod() {
   node_label_value=$(truncate_label_value_with_hash "$node_name")
 
   # Create pod with embedded script
+  # If NODE_SELECT_COMMAND is set, add file monitor sidecar
 
-  run_kube_cmd "$debug_pod_name" "apply" apply -f - <<EOF
+  if [[ -n "$NODE_SELECT_COMMAND" ]]; then
+    # Create pod with both debugger and file monitor containers
+    run_kube_cmd "$debug_pod_name" "apply" apply -f - <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${debug_pod_name}
+  namespace: ${debug_ns}
+  labels:
+    app: debug
+    node: ${node_label_value}
+spec:
+  hostPID: true
+  hostNetwork: true
+  hostIPC: true
+  containers:
+  - name: debugger
+    image: ${DEBUG_IMAGE}
+    command: ["/bin/bash", "-c"]
+    args:
+    - |
+$(build_node_debug_script "$node_name" "$debug_pod_name" | sed 's/^/      /')
+    securityContext:
+      privileged: true
+      runAsUser: 0
+    volumeMounts:
+    - name: host
+      mountPath: /host
+  - name: file-monitor
+    image: ${DEBUG_IMAGE}
+    command: ["/bin/bash", "-c"]
+    args:
+    - |
+$(build_node_file_monitor_script "$node_name" | sed 's/^/      /')
+    securityContext:
+      privileged: true
+      runAsUser: 0
+    env:
+    - name: NODE_NAME
+      value: "${node_name}"
+    - name: NODE_SELECT_COMMAND
+      value: "${NODE_SELECT_COMMAND}"
+    volumeMounts:
+    - name: host
+      mountPath: /host
+  volumes:
+  - name: host
+    hostPath:
+      path: /
+      type: Directory
+  nodeSelector:
+    kubernetes.io/hostname: ${node_name}
+EOF
+  else
+    # Create pod with only debugger container
+    run_kube_cmd "$debug_pod_name" "apply" apply -f - <<EOF
 apiVersion: v1
 kind: Pod
 metadata:
@@ -2210,6 +2266,7 @@ $(build_node_debug_script "$node_name" "$debug_pod_name" | sed 's/^/      /')
   nodeSelector:
     kubernetes.io/hostname: ${node_name}
 EOF
+  fi
 }
 
 # -------------------------------------------------------------------------------
@@ -2344,8 +2401,67 @@ create_single_debug_pod() {
   local debug_ns="$5"
 
   # Create pod with embedded script
+  # If SELECT_COMMAND is set, add file monitor sidecar
 
-  run_kube_cmd "$debug_pod_name" "apply" apply -f - <<EOF
+  if [[ -n "$SELECT_COMMAND" ]]; then
+    # Create pod with both debugger and file monitor containers
+    run_kube_cmd "$debug_pod_name" "apply" apply -f - <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${debug_pod_name}
+  namespace: ${debug_ns}
+spec:
+  containers:
+  - name: debugger
+    image: ${DEBUG_IMAGE}
+    command: ["/bin/bash", "-c"]
+    args:
+    - |
+$(build_debug_script "$pod_name" "$container_name" "$node_name" "$debug_pod_name" | sed 's/^/      /')
+    securityContext:
+      privileged: true
+      runAsUser: 0
+    volumeMounts:
+    - name: host
+      mountPath: /host
+  - name: file-monitor
+    image: ${DEBUG_IMAGE}
+    command: ["/bin/bash", "-c"]
+    args:
+    - |
+$(build_file_monitor_script "$pod_name" "$container_name" "$node_name" | sed 's/^/      /')
+    securityContext:
+      privileged: true
+      runAsUser: 0
+    env:
+    - name: POD_NAME
+      value: "${pod_name}"
+    - name: CONTAINER_NAME
+      value: "${container_name}"
+    - name: SELECT_COMMAND
+      value: "${SELECT_COMMAND}"
+    - name: CRI_RUNTIME
+      value: "${CRI_RUNTIME}"
+    - name: CRI_SOCKET
+      value: "${CRI_SOCKET}"
+    volumeMounts:
+    - name: host
+      mountPath: /host
+  hostNetwork: true
+  hostPID: true
+  hostIPC: true
+  nodeName: ${node_name}
+  restartPolicy: Never
+  volumes:
+  - name: host
+    hostPath:
+      path: /
+      type: Directory
+EOF
+  else
+    # Create pod with only debugger container
+    run_kube_cmd "$debug_pod_name" "apply" apply -f - <<EOF
 apiVersion: v1
 kind: Pod
 metadata:
@@ -2376,6 +2492,7 @@ $(build_debug_script "$pod_name" "$container_name" "$node_name" "$debug_pod_name
       path: /
       type: Directory
 EOF
+  fi
 }
 
 # -------------------------------------------------------------------------------
@@ -3178,12 +3295,24 @@ cleanup_debug_pods() {
       format_message_stderr "📋 Downloading debug pod logs..."
 
       for debug_pod_name in "${DEBUG_POD_NAMES[@]}"; do
+        # Download debugger container logs
         local log_file="${OUTPUT_DIR}/debug-logs/${debug_pod_name}.log"
-        if run_kube_cmd "$debug_pod_name" "logs" logs "$debug_pod_name" -n "$debug_ns" > "$log_file" 2>&1; then
+        if run_kube_cmd "$debug_pod_name" "logs" logs "$debug_pod_name" -c debugger -n "$debug_ns" > "$log_file" 2>&1; then
           format_message_stderr "   ✅ ${debug_pod_name}.log"
         else
           format_message_stderr "   ⚠️  Failed to get logs for $debug_pod_name"
           rm -f "$log_file" 2>/dev/null
+        fi
+
+        # Download file-monitor container logs if it exists (when -s or -S is used)
+        if $KUBE_CLI get pod "$debug_pod_name" -n "$debug_ns" -o jsonpath='{.spec.containers[*].name}' 2>/dev/null | grep -q 'file-monitor'; then
+          local monitor_log_file="${OUTPUT_DIR}/debug-logs/${debug_pod_name}-file-monitor.log"
+          if run_kube_cmd "$debug_pod_name-file-monitor" "logs" logs "$debug_pod_name" -c file-monitor -n "$debug_ns" > "$monitor_log_file" 2>&1; then
+            format_message_stderr "   ✅ ${debug_pod_name}-file-monitor.log"
+          else
+            format_message_stderr "   ⚠️  Failed to get file-monitor logs for $debug_pod_name"
+            rm -f "$monitor_log_file" 2>/dev/null
+          fi
         fi
       done
     fi
@@ -4281,6 +4410,207 @@ while true; do
   fi
 
   sleep "\$CHECK_INTERVAL"
+done
+SCRIPT
+}
+
+# -------------------------------------------------------------------------------
+# Function: build_file_monitor_script
+# -------------------------------------------------------------------------------
+# Description:
+#   Generates a bash script for file monitoring sidecar container in pod debug pods.
+#   This sidecar runs alongside the main debugger container and continuously lists
+#   files matching the file selection command, showing file sizes and timestamps.
+#   Helps monitor file growth during long-running debugging sessions.
+#
+# Parameters:
+#   $1 - pod_name: Name of the target pod being debugged
+#   $2 - container_name: Name of the target container in the pod
+#   $3 - node_name: Name of the node where the target pod is running
+#   Uses global variables:
+#     $SELECT_COMMAND - File selection command to run
+#     $PLACEHOLDER_CHAR - Character for target substitution
+#     $CRI_RUNTIME - Container runtime (containerd, crio, docker)
+#     $CRI_SOCKET - Container runtime socket path
+#
+# Expected Output:
+#   - Complete bash script suitable for execution in file monitor sidecar
+#   - Script runs every 1 second and lists files with ls -latrh
+#   - Outputs timestamped table showing file details
+#   - Uses nsenter to access target container filesystem
+#
+# Detailed Behavior:
+#   1. Uses crictl to find container PID
+#   2. Uses nsenter to access container's mount namespace
+#   3. Runs file selection command periodically
+#   4. For each file found, runs ls -latrh to show details
+#   5. Adds timestamps to output for tracking file growth over time
+#   6. Outputs table format similar to kill switch monitor
+# -------------------------------------------------------------------------------
+build_file_monitor_script() {
+  local pod_name="$1"
+  local container_name="$2"
+  local node_name="$3"
+
+  cat <<'SCRIPT'
+set -e
+echo "=== File monitor sidecar started ===" >&2
+
+# Get container ID
+CRI_RUNTIME="${CRI_RUNTIME:-containerd}"
+CRI_SOCKET="${CRI_SOCKET}"
+
+# Wait for crictl to be available
+for i in {1..30}; do
+  if command -v crictl >/dev/null 2>&1; then
+    break
+  fi
+  echo "Waiting for crictl... ($i/30)" >&2
+  sleep 1
+done
+
+if ! command -v crictl >/dev/null 2>&1; then
+  echo "ERROR: crictl not found after 30 seconds" >&2
+  exit 1
+fi
+
+# Set crictl runtime endpoint
+if [[ -n "$CRI_SOCKET" ]]; then
+  export CONTAINER_RUNTIME_ENDPOINT="unix://$CRI_SOCKET"
+fi
+
+# Find container ID
+CONTAINER_ID=$(crictl ps --name="${CONTAINER_NAME}" --pod="${POD_NAME}" -q 2>/dev/null | head -n 1)
+if [[ -z "$CONTAINER_ID" ]]; then
+  echo "ERROR: Could not find container ${CONTAINER_NAME} in pod ${POD_NAME}" >&2
+  exit 1
+fi
+
+echo "Found container ID: $CONTAINER_ID" >&2
+
+# Get container PID
+CONTAINER_PID=$(crictl inspect "$CONTAINER_ID" 2>/dev/null | grep '"pid":' | head -n 1 | sed 's/[^0-9]//g')
+if [[ -z "$CONTAINER_PID" ]]; then
+  echo "ERROR: Could not get PID for container $CONTAINER_ID" >&2
+  exit 1
+fi
+
+echo "Container PID: $CONTAINER_PID" >&2
+echo "File selection command: $SELECT_COMMAND" >&2
+echo "Monitoring interval: 1 second" >&2
+echo "" >&2
+
+# Print table header
+printf "%-19s | %-60s | %-10s | %-19s\n" "Timestamp" "File" "Size" "Modified" >&2
+printf "%s\n" "-------------------+--------------------------------------------------------------+------------+---------------------" >&2
+
+# Monitoring loop
+while true; do
+  TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+
+  # Run file selection command in container namespace and get file list
+  if file_list=$(nsenter -t "$CONTAINER_PID" -m -p bash -c "$SELECT_COMMAND" 2>/dev/null); then
+    if [[ -n "$file_list" ]]; then
+      # Process each file
+      while IFS= read -r file_path; do
+        if [[ -n "$file_path" ]]; then
+          # Get file details using ls -latrh
+          if file_info=$(nsenter -t "$CONTAINER_PID" -m -p bash -c "ls -lh '$file_path' 2>/dev/null" 2>/dev/null); then
+            # Extract size and modification time
+            size=$(echo "$file_info" | awk '{print $5}')
+            mod_time=$(echo "$file_info" | awk '{print $6, $7, $8}')
+
+            # Truncate filename if too long
+            display_file="$file_path"
+            if [[ ${#display_file} -gt 60 ]]; then
+              display_file="...${display_file: -57}"
+            fi
+
+            printf "%-19s | %-60s | %10s | %-19s\n" "$TIMESTAMP" "$display_file" "$size" "$mod_time" >&2
+          fi
+        fi
+      done <<< "$file_list"
+    fi
+  fi
+
+  sleep 1
+done
+SCRIPT
+}
+
+# -------------------------------------------------------------------------------
+# Function: build_node_file_monitor_script
+# -------------------------------------------------------------------------------
+# Description:
+#   Generates a bash script for file monitoring sidecar container in node debug pods.
+#   This sidecar runs alongside the main debugger container and continuously lists
+#   files matching the node file selection command, showing file sizes and timestamps.
+#   Helps monitor file growth during long-running node debugging sessions.
+#
+# Parameters:
+#   $1 - node_name: Name of the target node being debugged
+#   Uses global variables:
+#     $NODE_SELECT_COMMAND - File selection command to run on node
+#     $PLACEHOLDER_CHAR - Character for target substitution
+#
+# Expected Output:
+#   - Complete bash script suitable for execution in file monitor sidecar
+#   - Script runs every 1 second and lists files with ls -latrh
+#   - Outputs timestamped table showing file details
+#   - Accesses node filesystem directly via /host mount
+#
+# Detailed Behavior:
+#   1. Runs file selection command periodically on node filesystem
+#   2. For each file found, runs ls -latrh to show details
+#   3. Adds timestamps to output for tracking file growth over time
+#   4. Outputs table format similar to kill switch monitor
+# -------------------------------------------------------------------------------
+build_node_file_monitor_script() {
+  local node_name="$1"
+
+  cat <<'SCRIPT'
+set -e
+echo "=== File monitor sidecar started ===" >&2
+
+echo "Node: ${NODE_NAME}" >&2
+echo "File selection command: $NODE_SELECT_COMMAND" >&2
+echo "Monitoring interval: 1 second" >&2
+echo "" >&2
+
+# Print table header
+printf "%-19s | %-60s | %-10s | %-19s\n" "Timestamp" "File" "Size" "Modified" >&2
+printf "%s\n" "-------------------+--------------------------------------------------------------+------------+---------------------" >&2
+
+# Monitoring loop
+while true; do
+  TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+
+  # Run file selection command on node filesystem
+  if file_list=$(bash -c "$NODE_SELECT_COMMAND" 2>/dev/null); then
+    if [[ -n "$file_list" ]]; then
+      # Process each file
+      while IFS= read -r file_path; do
+        if [[ -n "$file_path" ]]; then
+          # Get file details using ls -lh
+          if file_info=$(ls -lh "$file_path" 2>/dev/null); then
+            # Extract size and modification time
+            size=$(echo "$file_info" | awk '{print $5}')
+            mod_time=$(echo "$file_info" | awk '{print $6, $7, $8}')
+
+            # Truncate filename if too long
+            display_file="$file_path"
+            if [[ ${#display_file} -gt 60 ]]; then
+              display_file="...${display_file: -57}"
+            fi
+
+            printf "%-19s | %-60s | %10s | %-19s\n" "$TIMESTAMP" "$display_file" "$size" "$mod_time" >&2
+          fi
+        fi
+      done <<< "$file_list"
+    fi
+  fi
+
+  sleep 1
 done
 SCRIPT
 }
