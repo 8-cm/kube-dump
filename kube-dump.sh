@@ -2213,6 +2213,123 @@ create_node_debug_pods() {
 }
 
 # -------------------------------------------------------------------------------
+# Function: generate_command_container
+# -------------------------------------------------------------------------------
+# Description:
+#   Generates a YAML container spec for a command execution sidecar. This function
+#   creates a privileged container that runs custom commands within target pod/node
+#   namespaces. The container spec is designed to be embedded in debug pod definitions
+#   and supports placeholder substitution for target-specific values.
+#
+# Parameters:
+#   $1 - container_name: Name of the container (e.g., "command-0", "command-1")
+#   $2 - container_index: Index of this command in the array (for accessing encoded commands)
+#   $3 - pod_name: Name of the target pod (for pod-level debugging)
+#   $4 - container_name_target: Name of the target container
+#   $5 - node_name: Name of the node where pod runs
+#   $6 - debug_pod_name: Name of the debug pod being created
+#   $7 - script_builder_func: Name of the script builder function to call
+#
+# Global Variables:
+#   Uses: $DEBUG_IMAGE, $ENCODED_CUSTOM_COMMANDS[]
+#
+# Example Usage:
+#   generate_command_container "command-0" 0 "nginx-app" "nginx" "worker1" "debug-abc" "build_debug_script"
+#
+# Expected Output:
+#   YAML container specification (indented for pod spec embedding)
+# -------------------------------------------------------------------------------
+generate_command_container() {
+  local container_name="$1"
+  local container_index="$2"
+  local pod_name="$3"
+  local container_name_target="$4"
+  local node_name="$5"
+  local debug_pod_name="$6"
+  local script_builder_func="$7"
+
+  cat <<EOF
+  - name: ${container_name}
+    image: ${DEBUG_IMAGE}
+    command: ["/bin/bash", "-c"]
+    args:
+    - |
+$($script_builder_func "$pod_name" "$container_name_target" "$node_name" "$debug_pod_name" "$container_index" | sed 's/^/      /')
+    securityContext:
+      privileged: true
+      runAsUser: 0
+    volumeMounts:
+    - name: host
+      mountPath: /host
+EOF
+}
+
+# -------------------------------------------------------------------------------
+# Function: generate_file_monitor_container
+# -------------------------------------------------------------------------------
+# Description:
+#   Generates a YAML container spec for a file monitoring sidecar. This function
+#   creates a privileged container that monitors and collects files from target
+#   pods or nodes based on user-specified selection commands. The container runs
+#   in parallel with command sidecars and logs discovered files.
+#
+# Parameters:
+#   $1 - container_name: Name of the container (e.g., "file-monitor-0", "file-monitor-1")
+#   $2 - monitor_index: Index of this monitor command in the array
+#   $3 - pod_name: Name of the target pod
+#   $4 - container_name_target: Name of the target container
+#   $5 - node_name: Name of the node
+#   $6 - target_name: Target identifier for file naming
+#   $7 - script_builder_func: Name of the script builder function to call
+#   $8 - encoded_command: Base64 encoded selection command
+#
+# Global Variables:
+#   Uses: $DEBUG_IMAGE, $PLACEHOLDER_CHAR
+#
+# Example Usage:
+#   generate_file_monitor_container "file-monitor-0" 0 "nginx-app" "nginx" "worker1" "nginx-app" "build_file_monitor_script" "$ENCODED_CMD"
+#
+# Expected Output:
+#   YAML container specification (indented for pod spec embedding)
+# -------------------------------------------------------------------------------
+generate_file_monitor_container() {
+  local container_name="$1"
+  local monitor_index="$2"
+  local pod_name="$3"
+  local container_name_target="$4"
+  local node_name="$5"
+  local target_name="$6"
+  local script_builder_func="$7"
+  local encoded_command="$8"
+
+  cat <<EOF
+  - name: ${container_name}
+    image: ${DEBUG_IMAGE}
+    command: ["/bin/bash", "-c"]
+    args:
+    - |
+$($script_builder_func "$pod_name" "$container_name_target" "$node_name" "$target_name" "$monitor_index" | sed 's/^/      /')
+    securityContext:
+      privileged: true
+      runAsUser: 0
+    env:
+    - name: POD_NAME
+      value: "${pod_name}"
+    - name: CONTAINER_NAME
+      value: "${container_name_target}"
+    - name: TARGET_NAME
+      value: "${target_name}"
+    - name: ENCODED_SELECT_COMMAND
+      value: "${encoded_command}"
+    - name: PLACEHOLDER_CHAR
+      value: "${PLACEHOLDER_CHAR}"
+    volumeMounts:
+    - name: host
+      mountPath: /host
+EOF
+}
+
+# -------------------------------------------------------------------------------
 # Function: create_single_node_debug_pod
 # -------------------------------------------------------------------------------
 # Description:
