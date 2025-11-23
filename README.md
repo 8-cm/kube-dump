@@ -2,16 +2,18 @@
 
 <!-- SECURITY-DASHBOARD-START -->
 
-## 🛡️ Security Status
+## 🛡️ Security & Quality Status
 
 | Component | Status | Last Updated |
 |-----------|--------|--------------|
 | **Container Security** | 🔴 CRITICAL ISSUES FOUND | 2025-11-15 03:08:04 UTC |
 | **Code Quality** | ✅ PASSED | Automated |
+| **Test Coverage** | ✅ 100% (51/51 functions) | Automated |
 
 **Vulnerability Summary:** Critical: 28, High: 282, Medium: 376, Low: 36
 
 📋 [View Detailed Security Reports](docs/security-reports.md) for complete vulnerability analysis and recommendations.
+🧪 [View Test Coverage Report](docs/test-coverage.md) for detailed test suite information and coverage analysis.
 
 <!-- SECURITY-DASHBOARD-END -->
 
