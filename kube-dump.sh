@@ -3706,9 +3706,73 @@ cleanup_discovery_pods() {
 }
 
 # -------------------------------------------------------------------------------
+# Function: build_single_discovery_script
+# -------------------------------------------------------------------------------
+# Description:
+#   Generates a bash script for a SINGLE file selection command in a discovery
+#   sidecar container. Each container runs one command for parallel execution.
+#
+# Parameters:
+#   $1 - container_index: Index of this container (0, 1, 2...)
+#   $2 - target_name: Target name for placeholder substitution
+#
+# Expected Output:
+#   - Bash script that executes ONE file selection command
+#   - Uses ENCODED_SELECT_COMMAND env var (single, not indexed)
+#   - Outputs file list to stderr and keeps container alive
+# -------------------------------------------------------------------------------
+build_single_discovery_script() {
+  local container_index="$1"
+  local target_name="$2"
+
+  cat <<DISCOVERY_SCRIPT
+#!/bin/bash
+set -e
+
+timestamp="\$(date '+%Y-%m-%d %H:%M:%S')"
+echo "[\$timestamp] Discovery sidecar $container_index starting" >&2
+echo "[\$timestamp] Target: $target_name" >&2
+
+# Execute the select command (single command per container)
+if [[ -n "\${ENCODED_SELECT_COMMAND:-}" ]]; then
+  select_cmd=\$(echo "\$ENCODED_SELECT_COMMAND" | base64 -d 2>/dev/null || echo "")
+  if [[ -n "\$select_cmd" ]]; then
+    # Apply placeholder substitution
+    select_cmd="\${select_cmd//\${PLACEHOLDER_CHAR:-%}/$target_name}"
+
+    echo "[\$timestamp] Running selection command: \$select_cmd" >&2
+
+    # Execute command and capture output
+    if result=\$(bash -c "\$select_cmd" 2>/dev/null); then
+      if [[ -n "\$result" ]]; then
+        echo "[\$timestamp] FILES_FOUND:" >&2
+        echo "\$result" | while IFS= read -r line; do
+          [[ -n "\$line" ]] && echo "[\$timestamp]   \$line" >&2
+        done
+      else
+        echo "[\$timestamp] NO_FILES_FOUND" >&2
+      fi
+    else
+      echo "[\$timestamp] ERROR: Selection command failed" >&2
+    fi
+  fi
+else
+  echo "[\$timestamp] WARNING: No select command configured" >&2
+fi
+
+# Keep container alive
+echo "[\$timestamp] Discovery complete, keeping container alive..." >&2
+tail -f /dev/null
+DISCOVERY_SCRIPT
+}
+
+# -------------------------------------------------------------------------------
 # Function: build_discovery_script
 # -------------------------------------------------------------------------------
 # Description:
+#   DEPRECATED: Kept for backward compatibility. Use build_single_discovery_script
+#   for new multi-container discovery pods.
+#
 #   Generates a complete bash script for execution within discovery pods to perform
 #   one-time file discovery. This function creates a self-contained script that
 #   executes the file selection command once and outputs results. The pod then
@@ -3781,9 +3845,73 @@ DISCOVERY_SCRIPT
 }
 
 # -------------------------------------------------------------------------------
+# Function: build_single_node_discovery_script
+# -------------------------------------------------------------------------------
+# Description:
+#   Generates a bash script for a SINGLE node file selection command in a discovery
+#   sidecar container. Each container runs one command for parallel execution.
+#
+# Parameters:
+#   $1 - container_index: Index of this container (0, 1, 2...)
+#   $2 - target_name: Target node name for placeholder substitution
+#
+# Expected Output:
+#   - Bash script that executes ONE node file selection command
+#   - Uses ENCODED_NODE_SELECT_COMMAND env var (single, not indexed)
+#   - Executes command from /host and outputs file list
+# -------------------------------------------------------------------------------
+build_single_node_discovery_script() {
+  local container_index="$1"
+  local target_name="$2"
+
+  cat <<NODE_DISCOVERY_SCRIPT
+#!/bin/bash
+set -e
+
+timestamp="\$(date '+%Y-%m-%d %H:%M:%S')"
+echo "[\$timestamp] Node discovery sidecar $container_index starting" >&2
+echo "[\$timestamp] Target node: $target_name" >&2
+
+# Execute the node select command (single command per container)
+if [[ -n "\${ENCODED_NODE_SELECT_COMMAND:-}" ]]; then
+  select_cmd=\$(echo "\$ENCODED_NODE_SELECT_COMMAND" | base64 -d 2>/dev/null || echo "")
+  if [[ -n "\$select_cmd" ]]; then
+    # Apply placeholder substitution
+    select_cmd="\${select_cmd//\${PLACEHOLDER_CHAR:-%}/$target_name}"
+
+    echo "[\$timestamp] Running node selection command: \$select_cmd" >&2
+
+    # Execute command on host filesystem and capture output
+    if result=\$(cd /host && bash -c "\$select_cmd" 2>/dev/null); then
+      if [[ -n "\$result" ]]; then
+        echo "[\$timestamp] NODE_FILES_FOUND:" >&2
+        echo "\$result" | while IFS= read -r line; do
+          [[ -n "\$line" ]] && echo "[\$timestamp]   \$line" >&2
+        done
+      else
+        echo "[\$timestamp] NO_NODE_FILES_FOUND" >&2
+      fi
+    else
+      echo "[\$timestamp] ERROR: Node select command failed" >&2
+    fi
+  fi
+else
+  echo "[\$timestamp] WARNING: No node select command configured" >&2
+fi
+
+# Keep container alive
+echo "[\$timestamp] Discovery complete, keeping container alive..." >&2
+tail -f /dev/null
+NODE_DISCOVERY_SCRIPT
+}
+
+# -------------------------------------------------------------------------------
 # Function: build_node_discovery_script
 # -------------------------------------------------------------------------------
 # Description:
+#   DEPRECATED: Kept for backward compatibility. Use build_single_node_discovery_script
+#   for new multi-container discovery pods.
+#
 #   Generates a complete bash script for execution within node discovery pods to
 #   perform one-time file discovery from node filesystem. This function creates a
 #   self-contained script that executes the file selection command once on the host
