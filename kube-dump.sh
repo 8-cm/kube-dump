@@ -48,6 +48,7 @@ usage() {
   echo "  -s, --select-to-download  Command to list files for download (space-delimited output)"
   echo "  -S, --node-select-to-download  Command to list node files for download"
   echo "  -o, --output         Output directory for downloaded files"
+  echo "  --download-verification  Verification method for downloads: hash (MD5), size, none [default: hash]"
   echo "  -I, --placeholder    Set placeholder character for hostname substitution [default: %]"
   echo "  --kill-switch-abs    Kill pods when disk usage exceeds absolute threshold (e.g., 1GB, 500MB)"
   echo "  --kill-switch-rel    Kill pods when free space falls below relative threshold (e.g., 10%) [requires 'bc' in image]"
@@ -215,6 +216,7 @@ initialize_variables() {
   ENCODED_SELECT_COMMANDS=()  # Array of base64 encoded select commands
   ENCODED_NODE_SELECT_COMMANDS=()  # Array of base64 encoded node select commands
   OUTPUT_DIR=""  # Output directory for downloaded files from -o
+  DOWNLOAD_VERIFICATION="hash"  # Download verification method: hash, size, none
   PLACEHOLDER_CHAR="%"  # Default placeholder character for hostname substitution
   DISCOVERY_POD_NAMES=()  # Array for file discovery pods
   DISCOVERY_POD_INFO=()  # Array to track discovery pod info: "discovery_pod_name:node_name:type:target_name"
@@ -1292,6 +1294,21 @@ parse_arguments() {
           validate_option_value "$val" "-o|--output"
           OUTPUT_DIR="$val"
           shift
+        fi
+        ;;
+      --download-verification)
+        if [[ $1 == --download-verification=* ]]; then
+          DOWNLOAD_VERIFICATION="$val"
+        else
+          validate_option_value "$val" "--download-verification"
+          DOWNLOAD_VERIFICATION="$val"
+          shift
+        fi
+        # Validate verification method
+        if [[ "$DOWNLOAD_VERIFICATION" != "hash" && "$DOWNLOAD_VERIFICATION" != "size" && "$DOWNLOAD_VERIFICATION" != "none" ]]; then
+          format_message "❌ ERROR: Invalid --download-verification value: $DOWNLOAD_VERIFICATION"
+          format_message "   Valid values: hash, size, none"
+          exit 1
         fi
         ;;
       -I|--placeholder)
@@ -3397,16 +3414,21 @@ done
           output_file="$OUTPUT_DIR/files/${target_name}_${base_filename}"
         fi
 
-        # Get exact file size in bytes before download
-        # Note: file_path from node discovery already includes /host prefix (e.g., /host/tmp/file.txt)
-        # so we use it directly without prepending another /host
-        local expected_size
-        expected_size=$(run_kube_cmd "$discovery_pod_name" "exec-stat" exec "$discovery_pod_name" -n "$debug_ns" -- stat -c%s "$file_path" 2>/dev/null || echo "0")
-
-        # Download with retry and size verification
+        # Download with retry and verification based on DOWNLOAD_VERIFICATION method
         local download_success=false
         local attempt=1
         local max_attempts=3
+        local expected_value=""
+        local verification_type="$DOWNLOAD_VERIFICATION"
+
+        # Get expected value for verification (before download loop)
+        if [[ "$verification_type" == "hash" ]]; then
+          # Get MD5 hash of source file
+          expected_value=$(run_kube_cmd "$discovery_pod_name" "exec-md5" exec "$discovery_pod_name" -n "$debug_ns" -- md5sum "$file_path" 2>/dev/null | awk '{print $1}' || echo "")
+        elif [[ "$verification_type" == "size" ]]; then
+          # Get file size in bytes
+          expected_value=$(run_kube_cmd "$discovery_pod_name" "exec-stat" exec "$discovery_pod_name" -n "$debug_ns" -- stat -c%s "$file_path" 2>/dev/null || echo "0")
+        fi
 
         while [[ $attempt -le $max_attempts && "$download_success" == "false" ]]; do
           if [[ $attempt -gt 1 ]]; then
@@ -3416,24 +3438,63 @@ done
           # Attempt download
           run_kube_cmd "$discovery_pod_name" "cp" cp "$debug_ns/$discovery_pod_name:$file_path" "$output_file" 2>/dev/null
 
-          # Verify downloaded file size matches exactly (accepts 0-byte files)
+          # Verify downloaded file based on verification method
           if [[ -f "$output_file" ]]; then
-            local actual_size
-            actual_size=$(stat -f%z "$output_file" 2>/dev/null || stat -c%s "$output_file" 2>/dev/null || echo "0")
-            if [[ "$actual_size" -eq "$expected_size" ]]; then
+            local verification_passed=false
+            local actual_value=""
+            local display_info=""
+
+            case "$verification_type" in
+              hash)
+                # Verify by MD5 hash
+                actual_value=$(md5sum "$output_file" 2>/dev/null | awk '{print $1}' || md5 -q "$output_file" 2>/dev/null || echo "")
+                if [[ -n "$expected_value" && "$actual_value" == "$expected_value" ]]; then
+                  verification_passed=true
+                  local file_size
+                  file_size=$(stat -f%z "$output_file" 2>/dev/null || stat -c%s "$output_file" 2>/dev/null || echo "0")
+                  display_info="${file_size} bytes, MD5: ${actual_value:0:8}..."
+                fi
+                ;;
+              size)
+                # Verify by file size
+                actual_value=$(stat -f%z "$output_file" 2>/dev/null || stat -c%s "$output_file" 2>/dev/null || echo "0")
+                if [[ "$actual_value" -eq "$expected_value" ]]; then
+                  verification_passed=true
+                  display_info="${actual_value} bytes"
+                fi
+                ;;
+              none)
+                # No verification - always pass if file exists
+                verification_passed=true
+                local file_size
+                file_size=$(stat -f%z "$output_file" 2>/dev/null || stat -c%s "$output_file" 2>/dev/null || echo "0")
+                display_info="${file_size} bytes"
+                ;;
+            esac
+
+            if [[ "$verification_passed" == "true" ]]; then
               if [[ $attempt -gt 1 ]]; then
-                format_message_stderr "   ✅ $(basename "$file_path") (${actual_size} bytes, attempt $attempt)"
+                format_message_stderr "   ✅ $(basename "$file_path") (${display_info}, attempt $attempt)"
               else
-                format_message_stderr "   ✅ $(basename "$file_path") (${actual_size} bytes)"
+                format_message_stderr "   ✅ $(basename "$file_path") (${display_info})"
               fi
               downloaded_files+=("$file_path")
               download_success=true
             else
               if [[ $attempt -eq $max_attempts ]]; then
-                format_message_stderr "   ❌ $(basename "$file_path") - size mismatch after $max_attempts attempts (expected: ${expected_size}, got: ${actual_size})"
+                if [[ "$verification_type" == "hash" ]]; then
+                  format_message_stderr "   ❌ $(basename "$file_path") - hash mismatch after $max_attempts attempts"
+                  format_message_stderr "      Expected: $expected_value, Got: $actual_value"
+                elif [[ "$verification_type" == "size" ]]; then
+                  format_message_stderr "   ❌ $(basename "$file_path") - size mismatch after $max_attempts attempts (expected: ${expected_value}, got: ${actual_value})"
+                fi
                 pod_had_failure=true
               else
-                format_message_stderr "   ⚠️  Retrying $(basename "$file_path") - size mismatch (attempt $((attempt + 1))/$max_attempts)"
+                if [[ "$verification_type" == "hash" ]]; then
+                  format_message_stderr "   ⚠️  Retrying $(basename "$file_path") - hash mismatch (attempt $((attempt + 1))/$max_attempts)"
+                elif [[ "$verification_type" == "size" ]]; then
+                  format_message_stderr "   ⚠️  Retrying $(basename "$file_path") - size mismatch (attempt $((attempt + 1))/$max_attempts)"
+                fi
               fi
             fi
           else
