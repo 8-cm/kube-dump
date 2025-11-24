@@ -3351,46 +3351,63 @@ handle_file_downloads() {
 
     # Try to execute the command - if it fails due to pod issues, that's an error
     # But if it succeeds with no output, that just means no files to download
-    if ! run_kube_cmd "$discovery_pod_name" "exec-test" exec "$discovery_pod_name" -n "$debug_ns" -- true 2>/dev/null; then
+    # Test discovery-0 container since all discovery pods have at least this container
+    if ! run_kube_cmd "$discovery_pod_name" "exec-test" exec "$discovery_pod_name" -c discovery-0 -n "$debug_ns" -- true 2>/dev/null; then
       # Pod is not accessible - this is a real error
       format_message_stderr "   ❌ Failed to access pod $discovery_pod_name (node $node_name)"
       failed_pods+=("$discovery_pod_name")
       continue
     fi
 
-    # Execute the select command by decoding it from the pod's environment variable
-    # This approach is safer as it avoids passing the command through multiple shell interpretations
-    # which could break on special characters like ; && | etc.
-    local files_list
-    if [[ "$pod_type" == "node" ]]; then
-      # For node discovery pods: loop through all ENCODED_NODE_SELECT_COMMAND_* env vars
-      files_list=$(run_kube_cmd "$discovery_pod_name" "exec-list" exec "$discovery_pod_name" -n "$debug_ns" -- bash -c "
+    # Execute the select commands by aggregating results from all discovery containers
+    # Each container (discovery-0, discovery-1, etc.) runs one select command in parallel
+    local files_list=""
+    local container_index=0
+
+    # Loop through all discovery containers until we find one that doesn't exist
+    while true; do
+      local container_name="discovery-${container_index}"
+
+      # Try to execute in this container - if it doesn't exist, we've checked all containers
+      if ! run_kube_cmd "$discovery_pod_name" "exec-test-$container_name" exec "$discovery_pod_name" -c "$container_name" -n "$debug_ns" -- true 2>/dev/null; then
+        # Container doesn't exist - we've processed all containers
+        break
+      fi
+
+      # Get file list from this container
+      local container_files
+      if [[ "$pod_type" == "node" ]]; then
+        # For node discovery pods: execute the single command in this container
+        container_files=$(run_kube_cmd "$discovery_pod_name" "exec-list-$container_name" exec "$discovery_pod_name" -c "$container_name" -n "$debug_ns" -- bash -c "
 TARGET_NAME='$target_name'
-NUM=\${NUM_NODE_SELECT_COMMANDS:-0}
-for ((i=0; i<\$NUM; i++)); do
-  var_name=\"ENCODED_NODE_SELECT_COMMAND_\${i}\"
-  cmd=\$(eval echo \"\\\$\$var_name\" | base64 -d 2>/dev/null || echo \"\")
-  if [[ -n \"\$cmd\" ]]; then
-    cmd=\"\${cmd//\${PLACEHOLDER_CHAR}/\$TARGET_NAME}\"
-    cd /host && bash -c \"\$cmd\"
-  fi
-done
+cmd=\$(echo \"\$ENCODED_NODE_SELECT_COMMAND\" | base64 -d 2>/dev/null || echo \"\")
+if [[ -n \"\$cmd\" ]]; then
+  cmd=\"\${cmd//\${PLACEHOLDER_CHAR}/\$TARGET_NAME}\"
+  cd /host && bash -c \"\$cmd\"
+fi
 " 2>/dev/null || true)
-    else
-      # For pod discovery pods: loop through all ENCODED_SELECT_COMMAND_* env vars
-      files_list=$(run_kube_cmd "$discovery_pod_name" "exec-list" exec "$discovery_pod_name" -n "$debug_ns" -- bash -c "
+      else
+        # For pod discovery pods: execute the single command in this container
+        container_files=$(run_kube_cmd "$discovery_pod_name" "exec-list-$container_name" exec "$discovery_pod_name" -c "$container_name" -n "$debug_ns" -- bash -c "
 TARGET_NAME='$target_name'
-NUM=\${NUM_SELECT_COMMANDS:-0}
-for ((i=0; i<\$NUM; i++)); do
-  var_name=\"ENCODED_SELECT_COMMAND_\${i}\"
-  cmd=\$(eval echo \"\\\$\$var_name\" | base64 -d 2>/dev/null || echo \"\")
-  if [[ -n \"\$cmd\" ]]; then
-    cmd=\"\${cmd//\${PLACEHOLDER_CHAR}/\$TARGET_NAME}\"
-    bash -c \"\$cmd\"
-  fi
-done
+cmd=\$(echo \"\$ENCODED_SELECT_COMMAND\" | base64 -d 2>/dev/null || echo \"\")
+if [[ -n \"\$cmd\" ]]; then
+  cmd=\"\${cmd//\${PLACEHOLDER_CHAR}/\$TARGET_NAME}\"
+  bash -c \"\$cmd\"
+fi
 " 2>/dev/null || true)
-    fi
+      fi
+
+      # Append this container's files to the aggregated list
+      if [[ -n "$container_files" ]]; then
+        if [[ -n "$files_list" ]]; then
+          files_list+=$'\n'
+        fi
+        files_list+="$container_files"
+      fi
+
+      container_index=$((container_index + 1))
+    done
 
     if [[ -z "$files_list" ]]; then
       # No files found - this is not an error, just skip with info message
@@ -3424,13 +3441,14 @@ done
         local verification_type="$DOWNLOAD_VERIFICATION"
 
         # Get expected value for verification (before download loop)
+        # Use discovery-0 container since all containers have access to the same files
         if [[ "$verification_type" == "hash" ]]; then
           # Get both MD5 and SHA256 hashes of source file (dual hash verification)
-          expected_md5=$(run_kube_cmd "$discovery_pod_name" "exec-md5" exec "$discovery_pod_name" -n "$debug_ns" -- md5sum "$file_path" 2>/dev/null | awk '{print $1}' || echo "")
-          expected_sha256=$(run_kube_cmd "$discovery_pod_name" "exec-sha256" exec "$discovery_pod_name" -n "$debug_ns" -- sha256sum "$file_path" 2>/dev/null | awk '{print $1}' || echo "")
+          expected_md5=$(run_kube_cmd "$discovery_pod_name" "exec-md5" exec "$discovery_pod_name" -c discovery-0 -n "$debug_ns" -- md5sum "$file_path" 2>/dev/null | awk '{print $1}' || echo "")
+          expected_sha256=$(run_kube_cmd "$discovery_pod_name" "exec-sha256" exec "$discovery_pod_name" -c discovery-0 -n "$debug_ns" -- sha256sum "$file_path" 2>/dev/null | awk '{print $1}' || echo "")
         elif [[ "$verification_type" == "size" ]]; then
           # Get file size in bytes
-          expected_value=$(run_kube_cmd "$discovery_pod_name" "exec-stat" exec "$discovery_pod_name" -n "$debug_ns" -- stat -c%s "$file_path" 2>/dev/null || echo "0")
+          expected_value=$(run_kube_cmd "$discovery_pod_name" "exec-stat" exec "$discovery_pod_name" -c discovery-0 -n "$debug_ns" -- stat -c%s "$file_path" 2>/dev/null || echo "0")
         fi
 
         while [[ $attempt -le $max_attempts && "$download_success" == "false" ]]; do
@@ -3438,8 +3456,8 @@ done
             sleep 1  # Brief pause between retries
           fi
 
-          # Attempt download
-          run_kube_cmd "$discovery_pod_name" "cp" cp "$debug_ns/$discovery_pod_name:$file_path" "$output_file" 2>/dev/null
+          # Attempt download - use discovery-0 container since all containers have access to the same files
+          run_kube_cmd "$discovery_pod_name" "cp" cp "$debug_ns/$discovery_pod_name:$file_path" "$output_file" -c discovery-0 2>/dev/null
 
           # Verify downloaded file based on verification method
           if [[ -f "$output_file" ]]; then
@@ -3527,7 +3545,7 @@ done
 
     # Remove successfully downloaded files from the node's persistent filesystem
     for file_path in "${downloaded_files[@]}"; do
-      run_kube_cmd "$discovery_pod_name" "exec-rm" exec "$discovery_pod_name" -n "$debug_ns" -- rm -f "$file_path" 2>/dev/null
+      run_kube_cmd "$discovery_pod_name" "exec-rm" exec "$discovery_pod_name" -c discovery-0 -n "$debug_ns" -- rm -f "$file_path" 2>/dev/null
     done
 
     # Track which pods had issues
@@ -3545,13 +3563,28 @@ done
 
     local all_discovery_pods=("${successful_pods[@]}" "${failed_pods[@]}")
     for discovery_pod_name in "${all_discovery_pods[@]}"; do
-      local log_file="$OUTPUT_DIR/discovery-logs/${discovery_pod_name}.log"
-      if run_kube_cmd "$discovery_pod_name" "logs" logs "$discovery_pod_name" -n "$debug_ns" > "$log_file" 2>&1; then
-        format_message_stderr "   ✅ ${discovery_pod_name}.log"
-      else
-        format_message_stderr "   ⚠️  Failed to get logs for $discovery_pod_name"
-        rm -f "$log_file" 2>/dev/null
-      fi
+      # Download logs from all containers in the discovery pod
+      local container_index=0
+      while true; do
+        local container_name="discovery-${container_index}"
+
+        # Check if this container exists
+        if ! run_kube_cmd "$discovery_pod_name" "exec-test-$container_name" exec "$discovery_pod_name" -c "$container_name" -n "$debug_ns" -- true 2>/dev/null; then
+          # No more containers
+          break
+        fi
+
+        # Download logs from this container
+        local log_file="$OUTPUT_DIR/discovery-logs/${discovery_pod_name}-${container_name}.log"
+        if run_kube_cmd "$discovery_pod_name-$container_name" "logs" logs "$discovery_pod_name" -c "$container_name" -n "$debug_ns" > "$log_file" 2>&1; then
+          format_message_stderr "   ✅ ${discovery_pod_name}-${container_name}.log"
+        else
+          format_message_stderr "   ⚠️  Failed to get logs for $discovery_pod_name container $container_name"
+          rm -f "$log_file" 2>/dev/null
+        fi
+
+        container_index=$((container_index + 1))
+      done
     done
   fi
 
@@ -4020,21 +4053,31 @@ create_discovery_pod() {
   local debug_ns="$5"
   local target_name="${6:-$pod_name}"  # Target pod name for placeholder substitution
 
-  # Build environment variables for all select commands
-  local env_vars=""
-  env_vars+="    - name: CRI_RUNTIME"$'\n'
-  env_vars+="      value: \"${CRI_RUNTIME}\""$'\n'
-  env_vars+="    - name: CRI_SOCKET"$'\n'
-  env_vars+="      value: \"${CRI_SOCKET}\""$'\n'
-  env_vars+="    - name: NUM_SELECT_COMMANDS"$'\n'
-  env_vars+="      value: \"${#ENCODED_SELECT_COMMANDS[@]}\""$'\n'
-  env_vars+="    - name: PLACEHOLDER_CHAR"$'\n'
-  env_vars+="      value: \"${PLACEHOLDER_CHAR}\""$'\n'
-
-  # Add each encoded command as a separate environment variable
+  # Generate containers - one per file selection command (parallel execution)
+  local containers_yaml=""
   for ((i=0; i<${#ENCODED_SELECT_COMMANDS[@]}; i++)); do
-    env_vars+="    - name: ENCODED_SELECT_COMMAND_${i}"$'\n'
-    env_vars+="      value: \"${ENCODED_SELECT_COMMANDS[$i]}\""$'\n'
+    containers_yaml+="  - name: discovery-$i"$'\n'
+    containers_yaml+="    image: ${DEBUG_IMAGE}"$'\n'
+    containers_yaml+="    command: [\"/bin/bash\", \"-c\"]"$'\n'
+    containers_yaml+="    args:"$'\n'
+    containers_yaml+="    - |"$'\n'
+    # Generate single-command script and indent
+    containers_yaml+="$(build_single_discovery_script "$i" "$target_name" | sed 's/^/      /')"$'\n'
+    containers_yaml+="    securityContext:"$'\n'
+    containers_yaml+="      privileged: true"$'\n'
+    containers_yaml+="    env:"$'\n'
+    containers_yaml+="    - name: CRI_RUNTIME"$'\n'
+    containers_yaml+="      value: \"${CRI_RUNTIME}\""$'\n'
+    containers_yaml+="    - name: CRI_SOCKET"$'\n'
+    containers_yaml+="      value: \"${CRI_SOCKET}\""$'\n'
+    containers_yaml+="    - name: ENCODED_SELECT_COMMAND"$'\n'
+    containers_yaml+="      value: \"${ENCODED_SELECT_COMMANDS[$i]}\""$'\n'
+    containers_yaml+="    - name: PLACEHOLDER_CHAR"$'\n'
+    containers_yaml+="      value: \"${PLACEHOLDER_CHAR}\""$'\n'
+    containers_yaml+="    volumeMounts:"$'\n'
+    containers_yaml+="    - name: host-root"$'\n'
+    containers_yaml+="      mountPath: /host"$'\n'
+    containers_yaml+="      readOnly: false"$'\n'
   done
 
   # Create discovery pod using YAML manifest for file discovery
@@ -4051,20 +4094,7 @@ spec:
   nodeSelector:
     kubernetes.io/hostname: ${node_name}
   containers:
-  - name: discovery
-    image: ${DEBUG_IMAGE}
-    command: ["/bin/bash", "-c"]
-    args:
-    - |
-$(build_discovery_script "$pod_name" "$container_name" "$node_name" "$discovery_pod_name" "$target_name" | sed 's/^/      /')
-    securityContext:
-      privileged: true
-    env:
-${env_vars}    volumeMounts:
-    - name: host-root
-      mountPath: /host
-      readOnly: false
-  volumes:
+${containers_yaml}  volumes:
   - name: host-root
     hostPath:
       path: /
@@ -4113,17 +4143,26 @@ create_node_discovery_pod() {
   local debug_ns="$3"
   local target_name="${4:-$node_name}"  # Target node name for placeholder substitution
 
-  # Build environment variables for all node select commands
-  local env_vars=""
-  env_vars+="    - name: NUM_NODE_SELECT_COMMANDS"$'\n'
-  env_vars+="      value: \"${#ENCODED_NODE_SELECT_COMMANDS[@]}\""$'\n'
-  env_vars+="    - name: PLACEHOLDER_CHAR"$'\n'
-  env_vars+="      value: \"${PLACEHOLDER_CHAR}\""$'\n'
-
-  # Add each encoded command as a separate environment variable
+  # Generate containers - one per node file selection command (parallel execution)
+  local containers_yaml=""
   for ((i=0; i<${#ENCODED_NODE_SELECT_COMMANDS[@]}; i++)); do
-    env_vars+="    - name: ENCODED_NODE_SELECT_COMMAND_${i}"$'\n'
-    env_vars+="      value: \"${ENCODED_NODE_SELECT_COMMANDS[$i]}\""$'\n'
+    containers_yaml+="  - name: discovery-$i"$'\n'
+    containers_yaml+="    image: ${DEBUG_IMAGE}"$'\n'
+    containers_yaml+="    command: [\"/bin/bash\", \"-c\"]"$'\n'
+    containers_yaml+="    args:"$'\n'
+    containers_yaml+="    - |"$'\n'
+    containers_yaml+="$(build_single_node_discovery_script "$i" "$target_name" | sed 's/^/      /')"$'\n'
+    containers_yaml+="    securityContext:"$'\n'
+    containers_yaml+="      privileged: true"$'\n'
+    containers_yaml+="    env:"$'\n'
+    containers_yaml+="    - name: PLACEHOLDER_CHAR"$'\n'
+    containers_yaml+="      value: \"${PLACEHOLDER_CHAR}\""$'\n'
+    containers_yaml+="    - name: ENCODED_NODE_SELECT_COMMAND"$'\n'
+    containers_yaml+="      value: \"${ENCODED_NODE_SELECT_COMMANDS[$i]}\""$'\n'
+    containers_yaml+="    volumeMounts:"$'\n'
+    containers_yaml+="    - name: host-root"$'\n'
+    containers_yaml+="      mountPath: /host"$'\n'
+    containers_yaml+="      readOnly: false"$'\n'
   done
 
   # Create node discovery pod using YAML manifest
@@ -4140,20 +4179,7 @@ spec:
   nodeSelector:
     kubernetes.io/hostname: ${node_name}
   containers:
-  - name: discovery
-    image: ${DEBUG_IMAGE}
-    command: ["/bin/bash", "-c"]
-    args:
-    - |
-$(build_node_discovery_script "$node_name" "$discovery_pod_name" "$target_name" | sed 's/^/      /')
-    securityContext:
-      privileged: true
-    env:
-${env_vars}    volumeMounts:
-    - name: host-root
-      mountPath: /host
-      readOnly: false
-  volumes:
+${containers_yaml}  volumes:
   - name: host-root
     hostPath:
       path: /
