@@ -3398,12 +3398,10 @@ done
         fi
 
         # Get exact file size in bytes before download
+        # Note: file_path from node discovery already includes /host prefix (e.g., /host/tmp/file.txt)
+        # so we use it directly without prepending another /host
         local expected_size
-        if [[ "$pod_type" == "node" ]]; then
-          expected_size=$(run_kube_cmd "$discovery_pod_name" "exec-stat" exec "$discovery_pod_name" -n "$debug_ns" -- stat -c%s "/host$file_path" 2>/dev/null || echo "0")
-        else
-          expected_size=$(run_kube_cmd "$discovery_pod_name" "exec-stat" exec "$discovery_pod_name" -n "$debug_ns" -- stat -c%s "$file_path" 2>/dev/null || echo "0")
-        fi
+        expected_size=$(run_kube_cmd "$discovery_pod_name" "exec-stat" exec "$discovery_pod_name" -n "$debug_ns" -- stat -c%s "$file_path" 2>/dev/null || echo "0")
 
         # Download with retry and size verification
         local download_success=false
