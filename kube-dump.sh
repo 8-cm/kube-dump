@@ -3416,11 +3416,11 @@ done
           # Attempt download
           run_kube_cmd "$discovery_pod_name" "cp" cp "$debug_ns/$discovery_pod_name:$file_path" "$output_file" 2>/dev/null
 
-          # Verify downloaded file size matches exactly
+          # Verify downloaded file size matches exactly (accepts 0-byte files)
           if [[ -f "$output_file" ]]; then
             local actual_size
             actual_size=$(stat -f%z "$output_file" 2>/dev/null || stat -c%s "$output_file" 2>/dev/null || echo "0")
-            if [[ "$actual_size" -eq "$expected_size" && "$expected_size" -gt 0 ]]; then
+            if [[ "$actual_size" -eq "$expected_size" ]]; then
               if [[ $attempt -gt 1 ]]; then
                 format_message_stderr "   ✅ $(basename "$file_path") (${actual_size} bytes, attempt $attempt)"
               else
@@ -3666,31 +3666,36 @@ timestamp="\$(date '+%Y-%m-%d %H:%M:%S')"
 echo "[\$timestamp] Discovery pod $discovery_pod_name starting" >&2
 echo "[\$timestamp] Target: pod=$pod_name, container=$container_name, node=$node_name" >&2
 
-# Execute the select command
-if [[ -n "\${ENCODED_SELECT_COMMAND:-}" ]]; then
-  select_cmd=\$(echo "\$ENCODED_SELECT_COMMAND" | base64 -d 2>/dev/null || echo "")
-  if [[ -n "\$select_cmd" ]]; then
-    # Apply placeholder substitution using target pod name
-    select_cmd="\${select_cmd//\${PLACEHOLDER_CHAR:-\%}/$target_name}"
+# Execute all select commands
+NUM=\${NUM_SELECT_COMMANDS:-0}
+if [[ \$NUM -gt 0 ]]; then
+  echo "[\$timestamp] Processing \$NUM select commands" >&2
+  for ((i=0; i<\$NUM; i++)); do
+    var_name="ENCODED_SELECT_COMMAND_\${i}"
+    select_cmd=\$(eval echo "\\\$\$var_name" | base64 -d 2>/dev/null || echo "")
+    if [[ -n "\$select_cmd" ]]; then
+      # Apply placeholder substitution using target pod name
+      select_cmd="\${select_cmd//\${PLACEHOLDER_CHAR:-\%}/$target_name}"
 
-    echo "[\$timestamp] Running selection command: \$select_cmd" >&2
+      echo "[\$timestamp] Running selection command [\$i]: \$select_cmd" >&2
 
-    # Execute command and capture output
-    if result=\$(bash -c "\$select_cmd" 2>/dev/null); then
-      if [[ -n "\$result" ]]; then
-        echo "[\$timestamp] FILES_FOUND:" >&2
-        echo "\$result" | while IFS= read -r line; do
-          [[ -n "\$line" ]] && echo "[\$timestamp]   \$line" >&2
-        done
+      # Execute command and capture output
+      if result=\$(bash -c "\$select_cmd" 2>/dev/null); then
+        if [[ -n "\$result" ]]; then
+          echo "[\$timestamp] FILES_FOUND:" >&2
+          echo "\$result" | while IFS= read -r line; do
+            [[ -n "\$line" ]] && echo "[\$timestamp]   \$line" >&2
+          done
+        else
+          echo "[\$timestamp] NO_FILES_FOUND" >&2
+        fi
       else
-        echo "[\$timestamp] NO_FILES_FOUND" >&2
+        echo "[\$timestamp] ERROR: Selection command [\$i] failed" >&2
       fi
-    else
-      echo "[\$timestamp] ERROR: Selection command failed" >&2
     fi
-  fi
+  done
 else
-  echo "[\$timestamp] WARNING: No select command configured" >&2
+  echo "[\$timestamp] WARNING: No select commands configured" >&2
 fi
 
 # Keep pod alive for file downloads
@@ -3733,31 +3738,36 @@ echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Node discovery pod $discovery_pod_name sta
 # Get current timestamp
 timestamp="\$(date '+%Y-%m-%d %H:%M:%S')"
 
-# Execute the node select command on host filesystem
-if [[ -n "\${ENCODED_NODE_SELECT_COMMAND:-}" ]]; then
-  select_cmd=\$(echo "\$ENCODED_NODE_SELECT_COMMAND" | base64 -d 2>/dev/null || echo "")
-  if [[ -n "\$select_cmd" ]]; then
-    # Apply placeholder substitution using target node name
-    select_cmd="\${select_cmd//\${PLACEHOLDER_CHAR:-\%}/$target_name}"
+# Execute all node select commands on host filesystem
+NUM=\${NUM_NODE_SELECT_COMMANDS:-0}
+if [[ \$NUM -gt 0 ]]; then
+  echo "[\$timestamp] Processing \$NUM node select commands" >&2
+  for ((i=0; i<\$NUM; i++)); do
+    var_name="ENCODED_NODE_SELECT_COMMAND_\${i}"
+    select_cmd=\$(eval echo "\\\$\$var_name" | base64 -d 2>/dev/null || echo "")
+    if [[ -n "\$select_cmd" ]]; then
+      # Apply placeholder substitution using target node name
+      select_cmd="\${select_cmd//\${PLACEHOLDER_CHAR:-\%}/$target_name}"
 
-    echo "[\$timestamp] Running node selection command: \$select_cmd" >&2
+      echo "[\$timestamp] Running node selection command [\$i]: \$select_cmd" >&2
 
-    # Execute command on host filesystem and capture output
-    if result=\$(cd /host && bash -c "\$select_cmd" 2>/dev/null); then
-      if [[ -n "\$result" ]]; then
-        echo "[\$timestamp] NODE_FILES_FOUND:" >&2
-        echo "\$result" | while IFS= read -r line; do
-          [[ -n "\$line" ]] && echo "[\$timestamp]   \$line" >&2
-        done
+      # Execute command on host filesystem and capture output
+      if result=\$(cd /host && bash -c "\$select_cmd" 2>/dev/null); then
+        if [[ -n "\$result" ]]; then
+          echo "[\$timestamp] NODE_FILES_FOUND:" >&2
+          echo "\$result" | while IFS= read -r line; do
+            [[ -n "\$line" ]] && echo "[\$timestamp]   \$line" >&2
+          done
+        else
+          echo "[\$timestamp] NO_NODE_FILES_FOUND" >&2
+        fi
       else
-        echo "[\$timestamp] NO_NODE_FILES_FOUND" >&2
+        echo "[\$timestamp] ERROR: Node select command [\$i] failed: \$select_cmd" >&2
       fi
-    else
-      echo "[\$timestamp] ERROR: Node select command failed: \$select_cmd" >&2
     fi
-  fi
+  done
 else
-  echo "[\$timestamp] WARNING: No node select command configured" >&2
+  echo "[\$timestamp] WARNING: No node select commands configured" >&2
 fi
 
 # Keep pod alive
