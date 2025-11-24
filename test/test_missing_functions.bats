@@ -603,3 +603,234 @@ pod3"
   assert_success
   # Should return fallback value
 }
+
+# =============================================================================
+# generate_command_container() tests
+# =============================================================================
+
+@test "generate_command_container: generates basic container spec" {
+  export DEBUG_IMAGE="busybox:latest"
+  export ENCODED_CUSTOM_COMMANDS=("ZWNobyB0ZXN0")  # "echo test" in base64
+
+  # Mock the script builder function
+  build_debug_script() {
+    echo "#!/bin/bash"
+    echo "echo 'Debug script'"
+  }
+
+  run generate_command_container "command-0" 0 "test-pod" "container1" "node-1" "debug-pod-123" "build_debug_script"
+  assert_success
+
+  # Should contain container name
+  assert_output --partial "command-0"
+  # Should use DEBUG_IMAGE
+  assert_output --partial "busybox:latest"
+  # Should be privileged
+  assert_output --partial "privileged: true"
+}
+
+@test "generate_command_container: includes script builder output" {
+  export DEBUG_IMAGE="alpine:latest"
+  export ENCODED_CUSTOM_COMMANDS=("ZWNobyBoZWxsbw==")
+
+  # Mock script builder with recognizable output
+  build_debug_script() {
+    echo "UNIQUE_SCRIPT_MARKER"
+    echo "echo test"
+  }
+
+  run generate_command_container "command-1" 1 "nginx" "web" "worker-1" "debug-xyz" "build_debug_script"
+  assert_success
+
+  assert_output --partial "UNIQUE_SCRIPT_MARKER"
+}
+
+@test "generate_command_container: sets security context" {
+  export DEBUG_IMAGE="ubuntu:latest"
+  export ENCODED_CUSTOM_COMMANDS=("dGVzdA==")
+
+  build_debug_script() {
+    echo "echo placeholder"
+  }
+
+  run generate_command_container "command-2" 2 "pod" "ctr" "node" "debug" "build_debug_script"
+  assert_success
+
+  assert_output --partial "securityContext:"
+  assert_output --partial "privileged: true"
+  assert_output --partial "runAsUser: 0"
+}
+
+@test "generate_command_container: mounts host volume" {
+  export DEBUG_IMAGE="debian:latest"
+  export ENCODED_CUSTOM_COMMANDS=("Zm9v")
+
+  build_debug_script() {
+    echo "#!/bin/bash"
+  }
+
+  run generate_command_container "cmd-3" 3 "p" "c" "n" "d" "build_debug_script"
+  assert_success
+
+  assert_output --partial "volumeMounts:"
+  assert_output --partial "name: host"
+  assert_output --partial "mountPath: /host"
+}
+
+# =============================================================================
+# generate_file_monitor_container() tests
+# =============================================================================
+
+@test "generate_file_monitor_container: generates pod monitor spec" {
+  export DEBUG_IMAGE="busybox:latest"
+  export PLACEHOLDER_CHAR="%"
+  local encoded_cmd="ZmluZCAvdG1w"  # "find /tmp" in base64
+
+  # Mock pod file monitor script builder
+  build_file_monitor_script() {
+    echo "#!/bin/bash"
+    echo "echo 'File monitor for pod'"
+  }
+
+  run generate_file_monitor_container "file-monitor-0" 0 "nginx-pod" "nginx" "worker-1" "nginx-pod" "build_file_monitor_script" "$encoded_cmd"
+  assert_success
+
+  # Should contain container name
+  assert_output --partial "file-monitor-0"
+  # Should use DEBUG_IMAGE
+  assert_output --partial "busybox:latest"
+  # Should set pod-specific env vars (not node vars)
+  assert_output --partial "POD_NAME"
+  assert_output --partial "CONTAINER_NAME"
+  assert_output --partial "ENCODED_SELECT_COMMAND"
+  # Should NOT have node env vars
+  refute_output --partial "NODE_NAME"
+  refute_output --partial "ENCODED_NODE_SELECT_COMMAND"
+}
+
+@test "generate_file_monitor_container: generates node monitor spec" {
+  export DEBUG_IMAGE="alpine:latest"
+  export PLACEHOLDER_CHAR="%"
+  local encoded_cmd="ZmluZCAvdmFyL2xvZw=="
+
+  # Mock node file monitor script builder (contains "node" in name)
+  build_node_file_monitor_script() {
+    echo "#!/bin/bash"
+    echo "echo 'File monitor for node'"
+  }
+
+  run generate_file_monitor_container "file-monitor-1" 1 "" "" "worker-2" "worker-2" "build_node_file_monitor_script" "$encoded_cmd"
+  assert_success
+
+  # Should contain container name
+  assert_output --partial "file-monitor-1"
+  # Should set node-specific env vars
+  assert_output --partial "NODE_NAME"
+  assert_output --partial "ENCODED_NODE_SELECT_COMMAND"
+  # Should NOT have pod env vars
+  refute_output --partial "POD_NAME"
+  refute_output --partial "CONTAINER_NAME"
+}
+
+@test "generate_file_monitor_container: includes encoded command" {
+  export DEBUG_IMAGE="ubuntu:latest"
+  export PLACEHOLDER_CHAR="%"
+  local test_encoded="VEVTVF9DT01NQU5E"  # "TEST_COMMAND"
+
+  build_file_monitor_script() {
+    echo "echo monitor"
+  }
+
+  run generate_file_monitor_container "monitor-0" 0 "pod" "ctr" "node" "target" "build_file_monitor_script" "$test_encoded"
+  assert_success
+
+  assert_output --partial "VEVTVF9DT01NQU5E"
+}
+
+@test "generate_file_monitor_container: sets privileged security context" {
+  export DEBUG_IMAGE="debian:latest"
+  export PLACEHOLDER_CHAR="%"
+  local encoded="Zm9vYmFy"
+
+  build_file_monitor_script() {
+    echo "#!/bin/bash"
+  }
+
+  run generate_file_monitor_container "mon" 0 "p" "c" "n" "t" "build_file_monitor_script" "$encoded"
+  assert_success
+
+  assert_output --partial "securityContext:"
+  assert_output --partial "privileged: true"
+  assert_output --partial "runAsUser: 0"
+}
+
+@test "generate_file_monitor_container: mounts host volume" {
+  export DEBUG_IMAGE="centos:latest"
+  export PLACEHOLDER_CHAR="%"
+  local encoded="dGVzdA=="
+
+  build_file_monitor_script() {
+    echo "test"
+  }
+
+  run generate_file_monitor_container "fm" 0 "p" "c" "n" "t" "build_file_monitor_script" "$encoded"
+  assert_success
+
+  assert_output --partial "volumeMounts:"
+  assert_output --partial "name: host"
+  assert_output --partial "mountPath: /host"
+}
+
+@test "generate_file_monitor_container: includes placeholder char" {
+  export DEBUG_IMAGE="alpine:latest"
+  export PLACEHOLDER_CHAR="@"
+  local encoded="Y21k"
+
+  build_file_monitor_script() {
+    echo "script"
+  }
+
+  run generate_file_monitor_container "fm" 0 "p" "c" "n" "t" "build_file_monitor_script" "$encoded"
+  assert_success
+
+  assert_output --partial "PLACEHOLDER_CHAR"
+  assert_output --partial "@"
+}
+
+@test "generate_file_monitor_container: detects node monitor by function name" {
+  export DEBUG_IMAGE="busybox:latest"
+  export PLACEHOLDER_CHAR="%"
+  local encoded="test"
+
+  # Function with "node" in name should trigger node monitor mode
+  my_custom_node_monitor_builder() {
+    echo "node monitor"
+  }
+
+  run generate_file_monitor_container "fm" 0 "p" "c" "worker-1" "worker-1" "my_custom_node_monitor_builder" "$encoded"
+  assert_success
+
+  # Should use node env vars
+  assert_output --partial "NODE_NAME"
+  assert_output --partial "ENCODED_NODE_SELECT_COMMAND"
+}
+
+@test "generate_file_monitor_container: uses pod vars for non-node builder" {
+  export DEBUG_IMAGE="busybox:latest"
+  export PLACEHOLDER_CHAR="%"
+  local encoded="test"
+
+  # Function without "node" in name should use pod mode
+  my_custom_pod_monitor_builder() {
+    echo "pod monitor"
+  }
+
+  run generate_file_monitor_container "fm" 0 "nginx-app" "nginx" "node-1" "nginx-app" "my_custom_pod_monitor_builder" "$encoded"
+  assert_success
+
+  # Should use pod env vars
+  assert_output --partial "POD_NAME"
+  assert_output --partial "nginx-app"
+  assert_output --partial "CONTAINER_NAME"
+  assert_output --partial "nginx"
+}
