@@ -3300,7 +3300,7 @@ create_file_discovery_pods() {
 #   2. For each discovery pod:
 #      - Verifies pod accessibility
 #      - Decodes and executes select command with placeholder substitution
-#      - Downloads all files found by the select command with size verification
+#      - Downloads all files found by the select command (3 attempts with size verification)
 #      - Removes downloaded files from node's filesystem
 #      - Tracks success/failure status
 #   3. Cleans up successful pods immediately
@@ -3405,24 +3405,49 @@ done
           expected_size=$(run_kube_cmd "$discovery_pod_name" "exec-stat" exec "$discovery_pod_name" -n "$debug_ns" -- stat -c%s "$file_path" 2>/dev/null || echo "0")
         fi
 
-        # Download file
-        run_kube_cmd "$discovery_pod_name" "cp" cp "$debug_ns/$discovery_pod_name:$file_path" "$output_file" 2>/dev/null
+        # Download with retry and size verification
+        local download_success=false
+        local attempt=1
+        local max_attempts=3
 
-        # Verify downloaded file size matches exactly
-        if [[ -f "$output_file" ]]; then
-          local actual_size
-          actual_size=$(stat -f%z "$output_file" 2>/dev/null || stat -c%s "$output_file" 2>/dev/null || echo "0")
-          if [[ "$actual_size" -eq "$expected_size" && "$expected_size" -gt 0 ]]; then
-            format_message_stderr "   ✅ $(basename "$file_path") (${actual_size} bytes)"
-            downloaded_files+=("$file_path")
-          else
-            format_message_stderr "   ❌ $(basename "$file_path") - size mismatch (expected: ${expected_size}, got: ${actual_size})"
-            pod_had_failure=true
+        while [[ $attempt -le $max_attempts && "$download_success" == "false" ]]; do
+          if [[ $attempt -gt 1 ]]; then
+            sleep 1  # Brief pause between retries
           fi
-        else
-          format_message_stderr "   ❌ $(basename "$file_path") - download failed"
-          pod_had_failure=true
-        fi
+
+          # Attempt download
+          run_kube_cmd "$discovery_pod_name" "cp" cp "$debug_ns/$discovery_pod_name:$file_path" "$output_file" 2>/dev/null
+
+          # Verify downloaded file size matches exactly
+          if [[ -f "$output_file" ]]; then
+            local actual_size
+            actual_size=$(stat -f%z "$output_file" 2>/dev/null || stat -c%s "$output_file" 2>/dev/null || echo "0")
+            if [[ "$actual_size" -eq "$expected_size" && "$expected_size" -gt 0 ]]; then
+              if [[ $attempt -gt 1 ]]; then
+                format_message_stderr "   ✅ $(basename "$file_path") (${actual_size} bytes, attempt $attempt)"
+              else
+                format_message_stderr "   ✅ $(basename "$file_path") (${actual_size} bytes)"
+              fi
+              downloaded_files+=("$file_path")
+              download_success=true
+            else
+              if [[ $attempt -eq $max_attempts ]]; then
+                format_message_stderr "   ❌ $(basename "$file_path") - size mismatch after $max_attempts attempts (expected: ${expected_size}, got: ${actual_size})"
+                pod_had_failure=true
+              else
+                format_message_stderr "   ⚠️  Retrying $(basename "$file_path") - size mismatch (attempt $((attempt + 1))/$max_attempts)"
+              fi
+            fi
+          else
+            if [[ $attempt -eq $max_attempts ]]; then
+              format_message_stderr "   ❌ $(basename "$file_path") - download failed after $max_attempts attempts"
+              pod_had_failure=true
+            else
+              format_message_stderr "   ⚠️  Retrying $(basename "$file_path") - file not created (attempt $((attempt + 1))/$max_attempts)"
+            fi
+          fi
+          ((attempt++))
+        done
       fi
     done <<< "$files_list"
 
