@@ -48,7 +48,7 @@ usage() {
   echo "  -s, --select-to-download  Command to list files for download (space-delimited output)"
   echo "  -S, --node-select-to-download  Command to list node files for download"
   echo "  -o, --output         Output directory for downloaded files"
-  echo "  --download-verification  Verification method for downloads: hash (MD5), size, none [default: hash]"
+  echo "  --download-verification  Verification method for downloads: hash (MD5+SHA256), size, none [default: hash]"
   echo "  -I, --placeholder    Set placeholder character for hostname substitution [default: %]"
   echo "  --kill-switch-abs    Kill pods when disk usage exceeds absolute threshold (e.g., 1GB, 500MB)"
   echo "  --kill-switch-rel    Kill pods when free space falls below relative threshold (e.g., 10%) [requires 'bc' in image]"
@@ -3419,12 +3419,15 @@ done
         local attempt=1
         local max_attempts=3
         local expected_value=""
+        local expected_md5=""
+        local expected_sha256=""
         local verification_type="$DOWNLOAD_VERIFICATION"
 
         # Get expected value for verification (before download loop)
         if [[ "$verification_type" == "hash" ]]; then
-          # Get MD5 hash of source file
-          expected_value=$(run_kube_cmd "$discovery_pod_name" "exec-md5" exec "$discovery_pod_name" -n "$debug_ns" -- md5sum "$file_path" 2>/dev/null | awk '{print $1}' || echo "")
+          # Get both MD5 and SHA256 hashes of source file (dual hash verification)
+          expected_md5=$(run_kube_cmd "$discovery_pod_name" "exec-md5" exec "$discovery_pod_name" -n "$debug_ns" -- md5sum "$file_path" 2>/dev/null | awk '{print $1}' || echo "")
+          expected_sha256=$(run_kube_cmd "$discovery_pod_name" "exec-sha256" exec "$discovery_pod_name" -n "$debug_ns" -- sha256sum "$file_path" 2>/dev/null | awk '{print $1}' || echo "")
         elif [[ "$verification_type" == "size" ]]; then
           # Get file size in bytes
           expected_value=$(run_kube_cmd "$discovery_pod_name" "exec-stat" exec "$discovery_pod_name" -n "$debug_ns" -- stat -c%s "$file_path" 2>/dev/null || echo "0")
@@ -3446,13 +3449,23 @@ done
 
             case "$verification_type" in
               hash)
-                # Verify by MD5 hash
-                actual_value=$(md5sum "$output_file" 2>/dev/null | awk '{print $1}' || md5 -q "$output_file" 2>/dev/null || echo "")
-                if [[ -n "$expected_value" && "$actual_value" == "$expected_value" ]]; then
+                # Verify by dual hash (MD5 + SHA256) to prevent collision attacks
+                local actual_md5
+                local actual_sha256
+                actual_md5=$(md5sum "$output_file" 2>/dev/null | awk '{print $1}' || md5 -q "$output_file" 2>/dev/null || echo "")
+                actual_sha256=$(sha256sum "$output_file" 2>/dev/null | awk '{print $1}' || shasum -a 256 "$output_file" 2>/dev/null | awk '{print $1}' || echo "")
+
+                # Both hashes must match for verification to pass
+                if [[ -n "$expected_md5" && -n "$expected_sha256" && \
+                      "$actual_md5" == "$expected_md5" && \
+                      "$actual_sha256" == "$expected_sha256" ]]; then
                   verification_passed=true
                   local file_size
                   file_size=$(stat -f%z "$output_file" 2>/dev/null || stat -c%s "$output_file" 2>/dev/null || echo "0")
-                  display_info="${file_size} bytes, MD5: ${actual_value:0:8}..."
+                  display_info="${file_size} bytes, MD5: ${actual_md5:0:8}..., SHA256: ${actual_sha256:0:8}..."
+                else
+                  # Store both hashes for error reporting
+                  actual_value="MD5:${actual_md5} SHA256:${actual_sha256}"
                 fi
                 ;;
               size)
@@ -3484,7 +3497,9 @@ done
               if [[ $attempt -eq $max_attempts ]]; then
                 if [[ "$verification_type" == "hash" ]]; then
                   format_message_stderr "   ❌ $(basename "$file_path") - hash mismatch after $max_attempts attempts"
-                  format_message_stderr "      Expected: $expected_value, Got: $actual_value"
+                  format_message_stderr "      Expected MD5: $expected_md5"
+                  format_message_stderr "      Expected SHA256: $expected_sha256"
+                  format_message_stderr "      Got: $actual_value"
                 elif [[ "$verification_type" == "size" ]]; then
                   format_message_stderr "   ❌ $(basename "$file_path") - size mismatch after $max_attempts attempts (expected: ${expected_value}, got: ${actual_value})"
                 fi
