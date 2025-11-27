@@ -44,6 +44,8 @@ usage() {
   echo "  --no-cleanup         Skip cleanup, leave debug pods running for log inspection"
   echo "  --include-nodes      Also run -E on nodes hosting pods selected by -l"
   echo "  -e, --execute        Command to execute [default: tcpdump -i any -nn -s 0]"
+  echo "  --nsenter-params     Comma-separated nsenter namespace flags for corresponding -e command"
+  echo "                       (e.g., '-n,-m' for network+mount). Unspecified commands default to -n."
   echo "  -E, --node-execute   Command to execute on nodes [default: tcpdump -i any -nn -s 0]"
   echo "  -s, --select-to-download  Command to list files for download (space-delimited output)"
   echo "  -S, --node-select-to-download  Command to list node files for download"
@@ -134,6 +136,27 @@ usage() {
   echo "  # Containers: command-0, command-1, file-monitor-0, file-monitor-1"
   echo "  # Logs saved: {pod-name}-command-0.log, {pod-name}-command-1.log, etc."
   echo ""
+  echo "  # Custom nsenter namespaces for accessing container filesystems:"
+  echo "  $0 -l app=web \\"
+  echo "    -e 'tcpdump -i any -w %.pcap' --nsenter-params '-n' \\"
+  echo "    -e 'tar -czf /tmp/%.logs.tar.gz /var/log' --nsenter-params '-n,-m'"
+  echo "  # First command: network namespace only (default)"
+  echo "  # Second command: network + mount namespaces (access container filesystem)"
+  echo ""
+  echo "  # Access different namespaces for different diagnostics:"
+  echo "  $0 -l app=database \\"
+  echo "    -e 'ss -tunap > %.sockets' --nsenter-params '-n' \\"
+  echo "    -e 'ps auxf > %.processes' --nsenter-params '-n,-p' \\"
+  echo "    -e 'df -h > %.disk' --nsenter-params '-n,-m'"
+  echo "  # First: network namespace for sockets"
+  echo "  # Second: network + PID namespace for process tree"
+  echo "  # Third: network + mount namespace for disk usage"
+  echo ""
+  echo "  # Partial nsenter-params specification (unspecified use default -n):"
+  echo "  $0 -l app=web -e 'tcpdump' -e 'date' --nsenter-params '-m'"
+  echo "  # First command: defaults to -n (network namespace)"
+  echo "  # Second command: uses -m (mount namespace)"
+  echo ""
   echo "  # Use custom CRI socket path:"
   echo "  $0 -l app=web --cri-socket /var/run/podman/podman.sock"
   echo ""
@@ -167,6 +190,9 @@ usage() {
   echo "  - All containers in a pod share the same network namespace"
   echo "  - For node commands, debug pods run with host networking and privileged access"
   echo "  - Multiple commands execute in parallel within separate sidecar containers"
+  echo "  - By default, commands execute in network namespace only (-n)"
+  echo "  - Use --nsenter-params to access other namespaces: -m (mount), -p (PID), -u (UTS), etc."
+  echo "  - Debug pod always keeps its own mount namespace to access /host for node access"
   echo "  - No limit on number of sidecars (within Kubernetes pod limits)"
   echo "  - Each file monitor independently monitors ALL files from ALL command containers"
   exit 0
@@ -215,6 +241,8 @@ initialize_variables() {
   NODE_SELECT_TO_DOWNLOAD_COMMANDS=()  # Array of commands to list files to download from -S
   ENCODED_SELECT_COMMANDS=()  # Array of base64 encoded select commands
   ENCODED_NODE_SELECT_COMMANDS=()  # Array of base64 encoded node select commands
+  declare -gA NSENTER_PARAMS_MAP  # Associative array mapping command index to nsenter params
+  LAST_COMMAND_INDEX=-1  # Track the last -e command index for --nsenter-params association
   OUTPUT_DIR=""  # Output directory for downloaded files from -o
   DOWNLOAD_VERIFICATION="hash"  # Download verification method: hash, size, none
   PLACEHOLDER_CHAR="%"  # Default placeholder character for hostname substitution
@@ -1259,6 +1287,23 @@ parse_arguments() {
           CUSTOM_COMMANDS+=("$val")
           shift
         fi
+        # Mark this command index as needing params
+        LAST_COMMAND_INDEX=$((${#CUSTOM_COMMANDS[@]} - 1))
+        ;;
+      --nsenter-params)
+        # Ensure --nsenter-params follows a -e command
+        if [[ $LAST_COMMAND_INDEX -lt 0 ]]; then
+          echo "Error: --nsenter-params must follow a -e/--execute command" >&2
+          usage
+        fi
+        # Associate this param with the last -e command index
+        if [[ $1 == --nsenter-params=* ]]; then
+          NSENTER_PARAMS_MAP[$LAST_COMMAND_INDEX]="$val"
+        else
+          validate_option_value "$val" "--nsenter-params"
+          NSENTER_PARAMS_MAP[$LAST_COMMAND_INDEX]="$val"
+          shift
+        fi
         ;;
       -E|--node-execute)
         if [[ $1 == --node-execute=* ]]; then
@@ -1517,6 +1562,9 @@ validate_arguments() {
       return 1
     fi
   fi
+
+  # Validate --nsenter-params are only specified after -e commands
+  # (validation happens during parsing via LAST_COMMAND_INDEX check)
 
   # Validate kill switch arguments
   validate_variable "KILL_SWITCH_ABS" "$KILL_SWITCH_ABS" "string" "" "false"
@@ -2057,6 +2105,21 @@ create_debug_pods_for_targets() {
   if [[ ${#CUSTOM_COMMANDS[@]} -gt 0 ]]; then
     for cmd in "${CUSTOM_COMMANDS[@]}"; do
       ENCODED_CUSTOM_COMMANDS+=("$(echo -n "$cmd" | base64 -w 0)")
+    done
+  fi
+
+  # Encode nsenter parameters to base64, using associative array mapping
+  # Commands without explicit --nsenter-params get default "-n"
+  ENCODED_NSENTER_PARAMS=()
+  if [[ ${#CUSTOM_COMMANDS[@]} -gt 0 ]]; then
+    for ((i=0; i<${#CUSTOM_COMMANDS[@]}; i++)); do
+      # Use mapped params if specified, otherwise default to "-n"
+      if [[ -n "${NSENTER_PARAMS_MAP[$i]:-}" ]]; then
+        local params="${NSENTER_PARAMS_MAP[$i]}"
+      else
+        local params="-n"
+      fi
+      ENCODED_NSENTER_PARAMS+=("$(echo -n "$params" | base64 -w 0)")
     done
   fi
 
@@ -2783,6 +2846,14 @@ build_debug_script() {
     cmd_to_use="$CAPTURE_COMMAND"
   fi
 
+  # Determine nsenter parameters to use
+  local nsenter_params="-n"  # Default to network namespace only
+  if [[ ${#ENCODED_NSENTER_PARAMS[@]} -gt "$container_index" ]]; then
+    local encoded_params="${ENCODED_NSENTER_PARAMS[$container_index]}"
+    # Decode and convert comma-separated to space-separated
+    nsenter_params=$(echo "$encoded_params" | base64 -d | tr ',' ' ')
+  fi
+
   cat <<SCRIPT
 set -e
 echo "======================================================================" >&2
@@ -2928,7 +2999,7 @@ echo "======================================================================" >&
 
 # Execute in network namespace
 if [[ -d "/host/proc/\$PID" ]]; then
-  $(generate_exec_command "${pod_name}" "${cmd_to_use}" "${is_custom}")
+  $(generate_exec_command "${pod_name}" "${cmd_to_use}" "${is_custom}" "${nsenter_params}")
 else
   echo "ERROR: PID \$PID not found" >&2
   exit 1
@@ -2942,22 +3013,23 @@ SCRIPT
 # -------------------------------------------------------------------------------
 # Description:
 #   Generates the final execution command for running inside debug pods within
-#   target container network namespaces. This function handles both custom commands
-#   and default commands, performs placeholder substitution, and constructs the
-#   proper nsenter command for network namespace execution.
+#   target container namespaces. This function handles both custom commands and
+#   default commands, performs placeholder substitution, and constructs the
+#   proper nsenter command with configurable namespace parameters.
 #
 # Parameters:
 #   $1 - target_pod_name: Name of the target pod for placeholder substitution
 #   $2 - cmd_to_use: Base64 encoded command to execute
 #   $3 - is_custom: "true" if custom command, "false" if default
+#   $4 - nsenter_params: Space-separated nsenter namespace flags (e.g., "-n -m")
 #   Uses global variables:
 #     $PLACEHOLDER_CHAR  - Character used for target substitution (default: %)
 #
 # Example Usage:
-#   generate_exec_command "nginx-app-123" "dGNwZHVtcCAtaSBhbnkgLXcgJS5wY2Fw" "true"
+#   generate_exec_command "nginx-app-123" "dGNwZHVtcCAtaSBhbnkgLXcgJS5wY2Fw" "true" "-n -m"
 #   # Returns: DECODED_CMD=$(echo 'dGNw...' | base64 -d)
 #   #          FINAL_CMD=$(echo "$DECODED_CMD" | sed 's/%/nginx-app-123/g')
-#   #          nsenter -n -t $PID /bin/bash -c "$FINAL_CMD" & ...
+#   #          nsenter -n -m -t $PID /bin/bash -c "$FINAL_CMD" & ...
 #
 # Expected Output:
 #   - Bash command lines for execution within debug pod script
@@ -2967,48 +3039,50 @@ SCRIPT
 #
 # Detailed Behavior:
 #   1. Accepts target pod name for placeholder substitution
-#   2. Branches based on CUSTOM_COMMAND flag:
+#   2. Accepts nsenter parameters to control which namespaces to enter
+#   3. Branches based on CUSTOM_COMMAND flag:
 #      a. Custom command path:
 #         - Generates base64 decode command for CAPTURE_COMMAND
 #         - Creates sed command for placeholder substitution with target pod name
-#         - Wraps in nsenter with network namespace and adds tail to keep pod alive
+#         - Wraps in nsenter with specified namespace flags and adds tail to keep pod alive
 #      b. Default command path:
 #         - Directly substitutes placeholder in CAPTURE_COMMAND with target pod name
 #         - Creates simple nsenter command without bash wrapping
-#   3. Uses nsenter -n -t $PID to enter target container's network namespace
-#   4. For custom commands, appends "tail -f /dev/null" to prevent pod exit
-#   5. Output is embedded directly into generated debug pod scripts
-#   6. Handles complex commands with pipes, redirects, and special characters
-#   7. Ensures proper escaping for shell execution within nsenter context
+#   4. Uses nsenter with dynamic namespace parameters (default: -n for network only)
+#   5. For custom commands, appends "tail -f /dev/null" to prevent pod exit
+#   6. Output is embedded directly into generated debug pod scripts
+#   7. Handles complex commands with pipes, redirects, and special characters
+#   8. Ensures proper escaping for shell execution within nsenter context
 # -------------------------------------------------------------------------------
 generate_exec_command() {
   local target_pod_name="$1"
   local cmd_to_use="$2"
   local is_custom="${3:-true}"
+  local nsenter_params="${4:--n}"  # Default to network namespace only
 
   if [[ "$is_custom" == "true" ]]; then
     printf "DECODED_CMD=\$(echo '%s' | base64 -d | tr -d '\\\\n')\\n" "$cmd_to_use"
     echo "FINAL_CMD=\$(echo \"\$DECODED_CMD\" | sed 's/${PLACEHOLDER_CHAR}/${target_pod_name}/g')"
-    cat <<'EXECEND'
-# Run command in target pod's network namespace (keep debug pod's mount namespace for /host access)
-nsenter -n -t $PID /bin/bash -c "$FINAL_CMD" 2>&1 &
-NSENTER_PID=$!
-echo "Command started in background (PID: $NSENTER_PID)" >&2
+    cat <<EXECEND
+# Run command in target pod's namespaces (keep debug pod's mount namespace for /host access)
+nsenter ${nsenter_params} -t \$PID /bin/bash -c "\$FINAL_CMD" 2>&1 &
+NSENTER_PID=\$!
+echo "Command started in background (PID: \$NSENTER_PID)" >&2
 
 # Keep pod alive and monitor the background process
 tail -f /dev/null &
-TAIL_PID=$!
+TAIL_PID=\$!
 
 # Wait for nsenter process to complete or continue
-wait $NSENTER_PID 2>/dev/null || true
-echo "Command completed with exit code: $?" >&2
+wait \$NSENTER_PID 2>/dev/null || true
+echo "Command completed with exit code: \$?" >&2
 
 # Keep pod alive with tail
-wait $TAIL_PID
+wait \$TAIL_PID
 EXECEND
   else
     local final_capture_cmd="${CAPTURE_COMMAND//${PLACEHOLDER_CHAR}/$target_pod_name}"
-    echo "nsenter -n -t \$PID ${final_capture_cmd} 2>&1 &"
+    echo "nsenter ${nsenter_params} -t \$PID ${final_capture_cmd} 2>&1 &"
     echo "NSENTER_PID=\$!"
     echo "echo \"Command started in background (PID: \$NSENTER_PID)\" >&2"
     echo "tail -f /dev/null"
