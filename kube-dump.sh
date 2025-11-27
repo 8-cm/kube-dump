@@ -243,6 +243,7 @@ initialize_variables() {
   ENCODED_NODE_SELECT_COMMANDS=()  # Array of base64 encoded node select commands
   declare -gA NSENTER_PARAMS_MAP  # Associative array mapping command index to nsenter params
   LAST_COMMAND_INDEX=-1  # Track the last -e command index for --nsenter-params association
+  declare -gA DEBUG_POD_METADATA  # Associative array mapping debug_pod_name to "type:target_name:node_name"
   OUTPUT_DIR=""  # Output directory for downloaded files from -o
   DOWNLOAD_VERIFICATION="hash"  # Download verification method: hash, size, none
   PLACEHOLDER_CHAR="%"  # Default placeholder character for hostname substitution
@@ -2207,6 +2208,8 @@ create_debug_pods_for_targets() {
       DEBUG_POD_NAMES+=("$debug_pod_name")
       # Store debug pod hostname for file download phase
       POD_DEBUG_HOSTNAMES+=("$debug_pod_name")
+      # Store metadata for log filename construction
+      DEBUG_POD_METADATA["$debug_pod_name"]="pod:$pod_name:$node_name"
     else
       format_message "      ❌ Failed to create debug pod for $pod_name"
     fi
@@ -2318,6 +2321,8 @@ create_node_debug_pods() {
       DEBUG_POD_NAMES+=("$debug_pod_name")
       # Store debug pod hostname for file download phase
       NODE_DEBUG_HOSTNAMES+=("$debug_pod_name")
+      # Store metadata for log filename construction
+      DEBUG_POD_METADATA["$debug_pod_name"]="node:$node_name:"
     else
       format_message "      ❌ Failed to create debug pod for node $node_name"
     fi
@@ -3735,12 +3740,23 @@ cleanup_debug_pods() {
 
         # Download logs from each container
         for container_name in $container_names; do
-          local log_file="${OUTPUT_DIR}/debug-logs/${debug_pod_name}-${container_name}.log"
+          # Construct filename with target info
+          local target_suffix=""
+          if [[ -n "${DEBUG_POD_METADATA[$debug_pod_name]}" ]]; then
+            IFS=':' read -r type target_name node_name <<< "${DEBUG_POD_METADATA[$debug_pod_name]}"
+            if [[ "$type" == "pod" ]]; then
+              target_suffix="_${target_name}_${node_name}"
+            elif [[ "$type" == "node" ]]; then
+              target_suffix="_${target_name}"
+            fi
+          fi
+          local log_file="${OUTPUT_DIR}/debug-logs/${debug_pod_name}-${container_name}${target_suffix}.log"
+
           if run_kube_cmd "$debug_pod_name-$container_name" "logs" logs "$debug_pod_name" -c "$container_name" -n "$debug_ns" > "$log_file" 2>&1; then
             # Extract node and nsenter params from log for display
             local node_info=$(grep "Node:" "$log_file" 2>/dev/null | head -1 | sed 's/.*Node: //' || echo "N/A")
             local nsenter_info=$(grep "Nsenter params:" "$log_file" 2>/dev/null | head -1 | sed 's/.*Nsenter params: //' || echo "N/A")
-            format_message_stderr "   ✅ ${debug_pod_name}-${container_name}.log (Node: $node_info, Nsenter: $nsenter_info)"
+            format_message_stderr "   ✅ $(basename "$log_file") (Node: $node_info, Nsenter: $nsenter_info)"
           else
             format_message_stderr "   ⚠️  Failed to get logs for $debug_pod_name container $container_name"
             rm -f "$log_file" 2>/dev/null
@@ -3794,13 +3810,16 @@ cleanup_discovery_pods() {
 
     # Download logs from each discovery pod before deletion (only if -o is specified)
     if [[ -n "$OUTPUT_DIR" ]]; then
-      for discovery_pod in "${DISCOVERY_POD_NAMES[@]}"; do
+      for discovery_info in "${DISCOVERY_POD_INFO[@]}"; do
+        # Parse: "discovery_pod_name:node_name:type:target_name"
+        IFS=':' read -r discovery_pod node_name type target_name <<< "$discovery_info"
         format_message "   📥 Downloading logs from discovery pod: $discovery_pod"
         if $KUBE_CLI get pod "$discovery_pod" -n "${debug_ns}" >/dev/null 2>&1; then
-          local log_file="${OUTPUT_DIR}/discovery-logs/${discovery_pod}.log"
+          # Construct filename with target and node info
+          local log_file="${OUTPUT_DIR}/discovery-logs/${discovery_pod}_${target_name}_${node_name}.log"
           $KUBE_CLI logs "$discovery_pod" -n "${debug_ns}" --ignore-errors > "$log_file" 2>/dev/null || true
           if [[ -s "$log_file" ]]; then
-            format_message "      ✅ Discovery logs saved to: discovery-logs/${discovery_pod}.log"
+            format_message "      ✅ Discovery logs saved to: discovery-logs/$(basename "$log_file")"
           else
             format_message "      ⚠️  No logs available for: $discovery_pod"
             rm -f "$log_file" 2>/dev/null || true
