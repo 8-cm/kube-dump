@@ -2871,6 +2871,7 @@ else
   PREVIEW_CMD="${cmd_to_use//${PLACEHOLDER_CHAR}/${pod_name}}"
   echo "  Command: \$PREVIEW_CMD" >&2
 fi
+echo "  Nsenter params: ${nsenter_params}" >&2
 echo "======================================================================" >&2
 
 # -------------------------------------------------------------------------------
@@ -3736,7 +3737,10 @@ cleanup_debug_pods() {
         for container_name in $container_names; do
           local log_file="${OUTPUT_DIR}/debug-logs/${debug_pod_name}-${container_name}.log"
           if run_kube_cmd "$debug_pod_name-$container_name" "logs" logs "$debug_pod_name" -c "$container_name" -n "$debug_ns" > "$log_file" 2>&1; then
-            format_message_stderr "   ✅ ${debug_pod_name}-${container_name}.log"
+            # Extract node and nsenter params from log for display
+            local node_info=$(grep "Node:" "$log_file" 2>/dev/null | head -1 | sed 's/.*Node: //' || echo "N/A")
+            local nsenter_info=$(grep "Nsenter params:" "$log_file" 2>/dev/null | head -1 | sed 's/.*Nsenter params: //' || echo "N/A")
+            format_message_stderr "   ✅ ${debug_pod_name}-${container_name}.log (Node: $node_info, Nsenter: $nsenter_info)"
           else
             format_message_stderr "   ⚠️  Failed to get logs for $debug_pod_name container $container_name"
             rm -f "$log_file" 2>/dev/null
