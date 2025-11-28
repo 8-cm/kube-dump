@@ -1315,10 +1315,16 @@ parse_arguments() {
           NSENTER_PARAMS_INDICES+=("$LAST_COMMAND_INDEX")
           NSENTER_PARAMS_VALUES+=("$val")
         else
-          # For nsenter-params, values starting with '-' are valid (e.g., '-n', '-p', '-m')
-          # So we only check if the value is empty
+          # Validate nsenter namespace flags: -C -i -m -n -p -u -U -T
+          # This explicit whitelist prevents conflicts with script flags like -l, -e, -E
           if [[ -z "$val" ]]; then
             echo "Error: Argument --nsenter-params requires a value" >&2
+            usage
+          elif [[ ! "$val" =~ ^-[CimnpuUT](,-[CimnpuUT])*$ ]]; then
+            echo "Error: --nsenter-params must be comma-separated nsenter namespace flags" >&2
+            echo "       Valid flags: -C (cgroup) -i (IPC) -m (mount) -n (network) -p (PID) -u (UTS) -U (user) -T (time)" >&2
+            echo "       Examples: '-n' or '-n,-p' or '-n,-p,-m'" >&2
+            echo "       Got: '$val'" >&2
             usage
           fi
           NSENTER_PARAMS_INDICES+=("$LAST_COMMAND_INDEX")
