@@ -2109,7 +2109,7 @@ create_debug_pods_for_targets() {
   ENCODED_CUSTOM_COMMANDS=()
   if [[ ${#CUSTOM_COMMANDS[@]} -gt 0 ]]; then
     for cmd in "${CUSTOM_COMMANDS[@]}"; do
-      ENCODED_CUSTOM_COMMANDS+=("$(echo -n "$cmd" | base64 -w 0)")
+      ENCODED_CUSTOM_COMMANDS+=("$(printf '%s' "$cmd" | base64 | tr -d '\n')")
     done
   fi
 
@@ -2126,7 +2126,7 @@ create_debug_pods_for_targets() {
           break
         fi
       done
-      ENCODED_NSENTER_PARAMS+=("$(echo -n "$params" | base64 -w 0)")
+      ENCODED_NSENTER_PARAMS+=("$(printf '%s' "$params" | base64 | tr -d '\n')")
     done
   fi
 
@@ -2134,7 +2134,7 @@ create_debug_pods_for_targets() {
   ENCODED_SELECT_COMMANDS=()
   if [[ ${#SELECT_TO_DOWNLOAD_COMMANDS[@]} -gt 0 ]]; then
     for cmd in "${SELECT_TO_DOWNLOAD_COMMANDS[@]}"; do
-      ENCODED_SELECT_COMMANDS+=("$(echo -n "$cmd" | base64 -w 0)")
+      ENCODED_SELECT_COMMANDS+=("$(printf '%s' "$cmd" | base64 | tr -d '\n')")
     done
   fi
 
@@ -2142,7 +2142,7 @@ create_debug_pods_for_targets() {
   ENCODED_NODE_SELECT_COMMANDS=()
   if [[ ${#NODE_SELECT_TO_DOWNLOAD_COMMANDS[@]} -gt 0 ]]; then
     for cmd in "${NODE_SELECT_TO_DOWNLOAD_COMMANDS[@]}"; do
-      ENCODED_NODE_SELECT_COMMANDS+=("$(echo -n "$cmd" | base64 -w 0)")
+      ENCODED_NODE_SELECT_COMMANDS+=("$(printf '%s' "$cmd" | base64 | tr -d '\n')")
     done
   fi
 
