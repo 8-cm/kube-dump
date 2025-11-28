@@ -271,6 +271,8 @@ initialize_variables() {
   NODE_VOLUME=""  # Volume path to monitor for node-based kill switches
   DEBUG_IMAGE="nicolaka/netshoot"  # Default container image for debug/discovery/killswitch pods
   KILL_SWITCH_MONITOR_PODS=()  # Array for kill switch monitor pods
+  KILL_SWITCH_MONITOR_NAMES_META=()  # Parallel array: kill switch monitor pod names
+  KILL_SWITCH_MONITOR_METADATA_VALUES=()  # Parallel array: metadata "type:target_name:node_name"
   KUBE_CLI=""  # Will be set to 'oc' or '$KUBE_CLI' based on availability
   VERBOSE="false"  # Default: disable verbose logging
   DEBUG_LOG_DIR=""  # Directory for verbose logs (created as OUTPUT_DIR/debug)
@@ -4618,6 +4620,16 @@ create_kill_switch_monitor_pods() {
 
     if create_kill_switch_monitor_pod "$debug_pod" "$node_name" "$monitor_pod_name" "$debug_ns" "$volume_path"; then
       KILL_SWITCH_MONITOR_PODS+=("$monitor_pod_name")
+
+      # Look up target metadata from DEBUG_POD_METADATA for filename context
+      for ((i=0; i<${#DEBUG_POD_NAMES_META[@]}; i++)); do
+        if [[ "${DEBUG_POD_NAMES_META[$i]}" == "$debug_pod" ]]; then
+          KILL_SWITCH_MONITOR_NAMES_META+=("$monitor_pod_name")
+          KILL_SWITCH_MONITOR_METADATA_VALUES+=("${DEBUG_POD_METADATA_VALUES[$i]}")
+          break
+        fi
+      done
+
       local threshold_display="${kill_switch_threshold_abs:-$kill_switch_threshold_rel}"
       format_message "   ✅ Created kill switch monitor: $monitor_pod_name -> $debug_pod (threshold: $threshold_display, volume: $volume_path)"
     else
@@ -5448,12 +5460,26 @@ cleanup_kill_switch_monitor_pods() {
     # Download logs from each kill switch monitor pod before deletion (only if -o is specified)
     if [[ -n "$OUTPUT_DIR" ]]; then
       for monitor_pod in "${KILL_SWITCH_MONITOR_PODS[@]}"; do
+        # Look up target info from metadata
+        local target_suffix=""
+        for ((i=0; i<${#KILL_SWITCH_MONITOR_NAMES_META[@]}; i++)); do
+          if [[ "${KILL_SWITCH_MONITOR_NAMES_META[$i]}" == "$monitor_pod" ]]; then
+            IFS=':' read -r type target_name node_name <<< "${KILL_SWITCH_MONITOR_METADATA_VALUES[$i]}"
+            if [[ "$type" == "pod" ]]; then
+              target_suffix="_${target_name}_${node_name}"
+            elif [[ "$type" == "node" ]]; then
+              target_suffix="_${target_name}"
+            fi
+            break
+          fi
+        done
+
         format_message "   📥 Downloading logs from kill switch monitor: $monitor_pod"
         if $KUBE_CLI get pod "$monitor_pod" -n "${debug_ns}" >/dev/null 2>&1; then
-          local log_file="${OUTPUT_DIR}/killswitch-logs/${monitor_pod}.log"
+          local log_file="${OUTPUT_DIR}/killswitch-logs/${monitor_pod}${target_suffix}.log"
           $KUBE_CLI logs "$monitor_pod" -n "${debug_ns}" --ignore-errors > "$log_file" 2>/dev/null || true
           if [[ -s "$log_file" ]]; then
-            format_message "      ✅ Kill switch logs saved to: killswitch-logs/${monitor_pod}.log"
+            format_message "      ✅ Kill switch logs saved to: killswitch-logs/$(basename "$log_file")"
           else
             format_message "      ⚠️  No logs available for: $monitor_pod"
             rm -f "$log_file" 2>/dev/null || true
