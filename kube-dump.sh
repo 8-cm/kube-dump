@@ -241,9 +241,11 @@ initialize_variables() {
   NODE_SELECT_TO_DOWNLOAD_COMMANDS=()  # Array of commands to list files to download from -S
   ENCODED_SELECT_COMMANDS=()  # Array of base64 encoded select commands
   ENCODED_NODE_SELECT_COMMANDS=()  # Array of base64 encoded node select commands
-  declare -gA NSENTER_PARAMS_MAP  # Associative array mapping command index to nsenter params
+  NSENTER_PARAMS_INDICES=()  # Parallel array: command indices that have custom nsenter params
+  NSENTER_PARAMS_VALUES=()   # Parallel array: nsenter params values for corresponding indices
   LAST_COMMAND_INDEX=-1  # Track the last -e command index for --nsenter-params association
-  declare -gA DEBUG_POD_METADATA  # Associative array mapping debug_pod_name to "type:target_name:node_name"
+  DEBUG_POD_NAMES_META=()    # Parallel array: debug pod names
+  DEBUG_POD_METADATA_VALUES=()  # Parallel array: metadata "type:target_name:node_name"
   OUTPUT_DIR=""  # Output directory for downloaded files from -o
   DOWNLOAD_VERIFICATION="hash"  # Download verification method: hash, size, none
   PLACEHOLDER_CHAR="%"  # Default placeholder character for hostname substitution
@@ -1297,12 +1299,14 @@ parse_arguments() {
           echo "Error: --nsenter-params must follow a -e/--execute command" >&2
           usage
         fi
-        # Associate this param with the last -e command index
+        # Associate this param with the last -e command index (using parallel arrays)
         if [[ $1 == --nsenter-params=* ]]; then
-          NSENTER_PARAMS_MAP[$LAST_COMMAND_INDEX]="$val"
+          NSENTER_PARAMS_INDICES+=("$LAST_COMMAND_INDEX")
+          NSENTER_PARAMS_VALUES+=("$val")
         else
           validate_option_value "$val" "--nsenter-params"
-          NSENTER_PARAMS_MAP[$LAST_COMMAND_INDEX]="$val"
+          NSENTER_PARAMS_INDICES+=("$LAST_COMMAND_INDEX")
+          NSENTER_PARAMS_VALUES+=("$val")
           shift
         fi
         ;;
@@ -2109,17 +2113,19 @@ create_debug_pods_for_targets() {
     done
   fi
 
-  # Encode nsenter parameters to base64, using associative array mapping
+  # Encode nsenter parameters to base64, using parallel arrays for mapping
   # Commands without explicit --nsenter-params get default "-n"
   ENCODED_NSENTER_PARAMS=()
   if [[ ${#CUSTOM_COMMANDS[@]} -gt 0 ]]; then
     for ((i=0; i<${#CUSTOM_COMMANDS[@]}; i++)); do
-      # Use mapped params if specified, otherwise default to "-n"
-      if [[ -n "${NSENTER_PARAMS_MAP[$i]:-}" ]]; then
-        local params="${NSENTER_PARAMS_MAP[$i]}"
-      else
-        local params="-n"
-      fi
+      # Look up params in parallel arrays, use default "-n" if not found
+      local params="-n"
+      for ((j=0; j<${#NSENTER_PARAMS_INDICES[@]}; j++)); do
+        if [[ "${NSENTER_PARAMS_INDICES[$j]}" == "$i" ]]; then
+          params="${NSENTER_PARAMS_VALUES[$j]}"
+          break
+        fi
+      done
       ENCODED_NSENTER_PARAMS+=("$(echo -n "$params" | base64 -w 0)")
     done
   fi
@@ -2208,8 +2214,9 @@ create_debug_pods_for_targets() {
       DEBUG_POD_NAMES+=("$debug_pod_name")
       # Store debug pod hostname for file download phase
       POD_DEBUG_HOSTNAMES+=("$debug_pod_name")
-      # Store metadata for log filename construction
-      DEBUG_POD_METADATA["$debug_pod_name"]="pod:$pod_name:$node_name"
+      # Store metadata for log filename construction (using parallel arrays)
+      DEBUG_POD_NAMES_META+=("$debug_pod_name")
+      DEBUG_POD_METADATA_VALUES+=("pod:$pod_name:$node_name")
     else
       format_message "      ❌ Failed to create debug pod for $pod_name"
     fi
@@ -2321,8 +2328,9 @@ create_node_debug_pods() {
       DEBUG_POD_NAMES+=("$debug_pod_name")
       # Store debug pod hostname for file download phase
       NODE_DEBUG_HOSTNAMES+=("$debug_pod_name")
-      # Store metadata for log filename construction
-      DEBUG_POD_METADATA["$debug_pod_name"]="node:$node_name:"
+      # Store metadata for log filename construction (using parallel arrays)
+      DEBUG_POD_NAMES_META+=("$debug_pod_name")
+      DEBUG_POD_METADATA_VALUES+=("node:$node_name:")
     else
       format_message "      ❌ Failed to create debug pod for node $node_name"
     fi
@@ -3740,16 +3748,19 @@ cleanup_debug_pods() {
 
         # Download logs from each container
         for container_name in $container_names; do
-          # Construct filename with target info
+          # Construct filename with target info (lookup in parallel arrays)
           local target_suffix=""
-          if [[ -n "${DEBUG_POD_METADATA[$debug_pod_name]}" ]]; then
-            IFS=':' read -r type target_name node_name <<< "${DEBUG_POD_METADATA[$debug_pod_name]}"
-            if [[ "$type" == "pod" ]]; then
-              target_suffix="_${target_name}_${node_name}"
-            elif [[ "$type" == "node" ]]; then
-              target_suffix="_${target_name}"
+          for ((i=0; i<${#DEBUG_POD_NAMES_META[@]}; i++)); do
+            if [[ "${DEBUG_POD_NAMES_META[$i]}" == "$debug_pod_name" ]]; then
+              IFS=':' read -r type target_name node_name <<< "${DEBUG_POD_METADATA_VALUES[$i]}"
+              if [[ "$type" == "pod" ]]; then
+                target_suffix="_${target_name}_${node_name}"
+              elif [[ "$type" == "node" ]]; then
+                target_suffix="_${target_name}"
+              fi
+              break
             fi
-          fi
+          done
           local log_file="${OUTPUT_DIR}/debug-logs/${debug_pod_name}-${container_name}${target_suffix}.log"
 
           if run_kube_cmd "$debug_pod_name-$container_name" "logs" logs "$debug_pod_name" -c "$container_name" -n "$debug_ns" > "$log_file" 2>&1; then
