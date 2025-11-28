@@ -3651,6 +3651,17 @@ fi
 
     local all_discovery_pods=("${successful_pods[@]}" "${failed_pods[@]}")
     for discovery_pod_name in "${all_discovery_pods[@]}"; do
+      # Look up target info from DISCOVERY_POD_INFO array
+      local target_suffix=""
+      for info in "${DISCOVERY_POD_INFO[@]}"; do
+        # Parse: "discovery_pod_name:node_name:type:target_name"
+        IFS=':' read -r pod_name node_name type target_name <<< "$info"
+        if [[ "$pod_name" == "$discovery_pod_name" ]]; then
+          target_suffix="_${target_name}_${node_name}"
+          break
+        fi
+      done
+
       # Download logs from all containers in the discovery pod
       local container_index=0
       while true; do
@@ -3662,10 +3673,10 @@ fi
           break
         fi
 
-        # Download logs from this container
-        local log_file="$OUTPUT_DIR/discovery-logs/${discovery_pod_name}-${container_name}.log"
+        # Download logs from this container with target info in filename
+        local log_file="$OUTPUT_DIR/discovery-logs/${discovery_pod_name}-${container_name}${target_suffix}.log"
         if run_kube_cmd "$discovery_pod_name-$container_name" "logs" logs "$discovery_pod_name" -c "$container_name" -n "$debug_ns" > "$log_file" 2>&1; then
-          format_message_stderr "   ✅ ${discovery_pod_name}-${container_name}.log"
+          format_message_stderr "   ✅ $(basename "$log_file")"
         else
           format_message_stderr "   ⚠️  Failed to get logs for $discovery_pod_name container $container_name"
           rm -f "$log_file" 2>/dev/null
