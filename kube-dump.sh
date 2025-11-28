@@ -2151,12 +2151,12 @@ create_debug_pods_for_targets() {
   fi
 
   # Encode nsenter parameters to base64, using parallel arrays for mapping
-  # Commands without explicit --nsenter-params get default "-n"
+  # Commands without explicit --nsenter-params get default "n" (script adds '-' later)
   ENCODED_NSENTER_PARAMS=()
   if [[ ${#CUSTOM_COMMANDS[@]} -gt 0 ]]; then
     for ((i=0; i<${#CUSTOM_COMMANDS[@]}; i++)); do
-      # Look up params in parallel arrays, use default "-n" if not found
-      local params="-n"
+      # Look up params in parallel arrays, use default "n" if not found
+      local params="n"
       for ((j=0; j<${#NSENTER_PARAMS_INDICES[@]}; j++)); do
         if [[ "${NSENTER_PARAMS_INDICES[$j]}" == "$i" ]]; then
           params="${NSENTER_PARAMS_VALUES[$j]}"
@@ -2896,14 +2896,18 @@ build_debug_script() {
     cmd_to_use="$CAPTURE_COMMAND"
   fi
 
-  # Determine nsenter parameters to use
-  local nsenter_params="-n"  # Default to network namespace only
+  # Determine nsenter parameters to use (format: "n" or "n,p,m" - without dashes)
+  # Default is "n" which will become "-n" after processing
+  local nsenter_params=""
   if [[ ${#ENCODED_NSENTER_PARAMS[@]} -gt "$container_index" ]]; then
     local encoded_params="${ENCODED_NSENTER_PARAMS[$container_index]}"
     # Decode (format: "n" or "n,p,m") and add '-' prefix to each flag
     local decoded_params=$(echo "$encoded_params" | base64 -d)
     # Convert "n,p,m" to "-n -p -m"
     nsenter_params=$(echo "$decoded_params" | tr ',' '\n' | sed 's/^/-/' | tr '\n' ' ' | sed 's/ $//')
+  else
+    # No encoded params means use default
+    nsenter_params="-n"
   fi
 
   cat <<SCRIPT
