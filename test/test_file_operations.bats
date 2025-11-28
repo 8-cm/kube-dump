@@ -276,6 +276,138 @@ teardown() {
 }
 
 # =============================================================================
+# build_single_discovery_script() tests
+# =============================================================================
+
+@test "build_single_discovery_script: generates discovery script" {
+  run build_single_discovery_script "0" "test-pod"
+  assert_success
+
+  assert_output --partial "#!/bin/bash"
+  assert_output --partial "Discovery sidecar 0 starting"
+  assert_output --partial "Target: test-pod"
+}
+
+@test "build_single_discovery_script: includes base64 decode logic" {
+  run build_single_discovery_script "1" "my-pod"
+  assert_success
+
+  assert_output --partial "ENCODED_SELECT_COMMAND"
+  assert_output --partial "base64 -d"
+}
+
+@test "build_single_discovery_script: includes placeholder substitution" {
+  run build_single_discovery_script "0" "target-pod"
+  assert_success
+
+  # Should replace PLACEHOLDER_CHAR (default %) with target_name
+  assert_output --partial "\${PLACEHOLDER_CHAR:-%}"
+  assert_output --partial "target-pod"
+}
+
+@test "build_single_discovery_script: outputs FILES_FOUND marker" {
+  run build_single_discovery_script "0" "test-pod"
+  assert_success
+
+  assert_output --partial "FILES_FOUND:"
+}
+
+@test "build_single_discovery_script: outputs NO_FILES_FOUND marker" {
+  run build_single_discovery_script "0" "test-pod"
+  assert_success
+
+  assert_output --partial "NO_FILES_FOUND"
+}
+
+@test "build_single_discovery_script: keeps container alive" {
+  run build_single_discovery_script "0" "test-pod"
+  assert_success
+
+  assert_output --partial "tail -f /dev/null"
+}
+
+@test "build_single_discovery_script: handles different container indices" {
+  run build_single_discovery_script "5" "test-pod"
+  assert_success
+
+  assert_output --partial "Discovery sidecar 5"
+}
+
+@test "build_single_discovery_script: executes command via bash -c" {
+  run build_single_discovery_script "0" "test-pod"
+  assert_success
+
+  assert_output --partial "bash -c"
+}
+
+# =============================================================================
+# build_single_node_discovery_script() tests
+# =============================================================================
+
+@test "build_single_node_discovery_script: generates node discovery script" {
+  run build_single_node_discovery_script "0" "node-1"
+  assert_success
+
+  assert_output --partial "#!/bin/bash"
+  assert_output --partial "Node discovery sidecar 0 starting"
+  assert_output --partial "Target node: node-1"
+}
+
+@test "build_single_node_discovery_script: includes base64 decode logic" {
+  run build_single_node_discovery_script "1" "node-2"
+  assert_success
+
+  assert_output --partial "ENCODED_NODE_SELECT_COMMAND"
+  assert_output --partial "base64 -d"
+}
+
+@test "build_single_node_discovery_script: includes placeholder substitution" {
+  run build_single_node_discovery_script "0" "target-node"
+  assert_success
+
+  # Should replace PLACEHOLDER_CHAR (default %) with target_name
+  assert_output --partial "\${PLACEHOLDER_CHAR:-%}"
+  assert_output --partial "target-node"
+}
+
+@test "build_single_node_discovery_script: outputs NODE_FILES_FOUND marker" {
+  run build_single_node_discovery_script "0" "node-1"
+  assert_success
+
+  assert_output --partial "NODE_FILES_FOUND:"
+}
+
+@test "build_single_node_discovery_script: outputs NO_NODE_FILES_FOUND marker" {
+  run build_single_node_discovery_script "0" "node-1"
+  assert_success
+
+  assert_output --partial "NO_NODE_FILES_FOUND"
+}
+
+@test "build_single_node_discovery_script: executes on host filesystem" {
+  run build_single_node_discovery_script "0" "node-1"
+  assert_success
+
+  # Should execute in /host directory
+  assert_output --partial "cd /host"
+  assert_output --partial "bash -c"
+}
+
+@test "build_single_node_discovery_script: keeps container alive" {
+  run build_single_node_discovery_script "0" "node-1"
+  assert_success
+
+  assert_output --partial "tail -f /dev/null"
+}
+
+@test "build_single_node_discovery_script: handles different container indices" {
+  run build_single_node_discovery_script "3" "node-1"
+  assert_success
+
+  assert_output --partial "Node discovery sidecar 3"
+}
+
+# =============================================================================
 # get_container_id_from_pod() tests (CRI operations)
 # =============================================================================
 
