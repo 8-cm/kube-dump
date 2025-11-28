@@ -3917,20 +3917,26 @@ build_single_discovery_script() {
   local container_index="$1"
   local target_name="$2"
 
+  # Security: Properly escape parameters to prevent shell injection
+  # Use printf %q to safely quote values for shell
+  local safe_container_index=$(printf %q "$container_index")
+  local safe_target_name=$(printf %q "$target_name")
+
   cat <<DISCOVERY_SCRIPT
 #!/bin/bash
 set -e
 
 timestamp="\$(date '+%Y-%m-%d %H:%M:%S')"
-echo "[\$timestamp] Discovery sidecar $container_index starting" >&2
-echo "[\$timestamp] Target: $target_name" >&2
+echo "[\$timestamp] Discovery sidecar $safe_container_index starting" >&2
+echo "[\$timestamp] Target: $safe_target_name" >&2
 
 # Execute the select command (single command per container)
 if [[ -n "\${ENCODED_SELECT_COMMAND:-}" ]]; then
   select_cmd=\$(echo "\$ENCODED_SELECT_COMMAND" | base64 -d 2>/dev/null || echo "")
   if [[ -n "\$select_cmd" ]]; then
     # Apply placeholder substitution
-    select_cmd="\${select_cmd//\${PLACEHOLDER_CHAR:-%}/$target_name}"
+    # Security: Use safe_target_name (already escaped) for substitution
+    select_cmd="\${select_cmd//\${PLACEHOLDER_CHAR:-%}/$safe_target_name}"
 
     echo "[\$timestamp] Running selection command: \$select_cmd" >&2
 
@@ -4056,20 +4062,26 @@ build_single_node_discovery_script() {
   local container_index="$1"
   local target_name="$2"
 
+  # Security: Properly escape parameters to prevent shell injection
+  # Use printf %q to safely quote values for shell
+  local safe_container_index=$(printf %q "$container_index")
+  local safe_target_name=$(printf %q "$target_name")
+
   cat <<NODE_DISCOVERY_SCRIPT
 #!/bin/bash
 set -e
 
 timestamp="\$(date '+%Y-%m-%d %H:%M:%S')"
-echo "[\$timestamp] Node discovery sidecar $container_index starting" >&2
-echo "[\$timestamp] Target node: $target_name" >&2
+echo "[\$timestamp] Node discovery sidecar $safe_container_index starting" >&2
+echo "[\$timestamp] Target node: $safe_target_name" >&2
 
 # Execute the node select command (single command per container)
 if [[ -n "\${ENCODED_NODE_SELECT_COMMAND:-}" ]]; then
   select_cmd=\$(echo "\$ENCODED_NODE_SELECT_COMMAND" | base64 -d 2>/dev/null || echo "")
   if [[ -n "\$select_cmd" ]]; then
     # Apply placeholder substitution
-    select_cmd="\${select_cmd//\${PLACEHOLDER_CHAR:-%}/$target_name}"
+    # Security: Use safe_target_name (already escaped) for substitution
+    select_cmd="\${select_cmd//\${PLACEHOLDER_CHAR:-%}/$safe_target_name}"
 
     echo "[\$timestamp] Running node selection command: \$select_cmd" >&2
 
