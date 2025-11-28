@@ -2422,6 +2422,10 @@ $($script_builder_func "$pod_name" "$container_name_target" "$node_name" "$debug
     securityContext:
       privileged: true
       runAsUser: 0
+      capabilities:
+        add:
+        - SYS_PTRACE
+        - SYS_ADMIN
     volumeMounts:
     - name: host
       mountPath: /host
@@ -2482,6 +2486,10 @@ $($script_builder_func "$pod_name" "$container_name_target" "$node_name" "$targe
     securityContext:
       privileged: true
       runAsUser: 0
+      capabilities:
+        add:
+        - SYS_PTRACE
+        - SYS_ADMIN
     env:
 EOF
 
@@ -4224,6 +4232,10 @@ create_discovery_pod() {
     containers_yaml+="$(build_single_discovery_script "$i" "$target_name" | sed 's/^/      /')"$'\n'
     containers_yaml+="    securityContext:"$'\n'
     containers_yaml+="      privileged: true"$'\n'
+    containers_yaml+="      capabilities:"$'\n'
+    containers_yaml+="        add:"$'\n'
+    containers_yaml+="        - SYS_PTRACE"$'\n'
+    containers_yaml+="        - SYS_ADMIN"$'\n'
     containers_yaml+="    env:"$'\n'
     containers_yaml+="    - name: CRI_RUNTIME"$'\n'
     containers_yaml+="      value: \"${CRI_RUNTIME}\""$'\n'
@@ -4313,6 +4325,10 @@ create_node_discovery_pod() {
     containers_yaml+="$(build_single_node_discovery_script "$i" "$target_name" | sed 's/^/      /')"$'\n'
     containers_yaml+="    securityContext:"$'\n'
     containers_yaml+="      privileged: true"$'\n'
+    containers_yaml+="      capabilities:"$'\n'
+    containers_yaml+="        add:"$'\n'
+    containers_yaml+="        - SYS_PTRACE"$'\n'
+    containers_yaml+="        - SYS_ADMIN"$'\n'
     containers_yaml+="    env:"$'\n'
     containers_yaml+="    - name: PLACEHOLDER_CHAR"$'\n'
     containers_yaml+="      value: \"${PLACEHOLDER_CHAR}\""$'\n'
@@ -4756,6 +4772,10 @@ spec:
 $(build_kill_switch_monitor_script "$target_debug_pod" "$volume_path" | sed 's/^/      /')
     securityContext:
       privileged: true
+      capabilities:
+        add:
+        - SYS_PTRACE
+        - SYS_ADMIN
     volumeMounts:
     - name: host-root
       mountPath: /host
