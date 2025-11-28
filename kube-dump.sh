@@ -2687,13 +2687,19 @@ build_node_debug_script() {
   node_command_clean=$(echo "$cmd_to_use" | tr -d '\n')
   local final_node_command="${node_command_clean//${PLACEHOLDER_CHAR}/$node_name}"
 
+  # Security: Properly escape parameters to prevent shell injection
+  local safe_container_index=$(printf %q "$container_index")
+  local safe_node_name=$(printf %q "$node_name")
+  local safe_debug_pod_name=$(printf %q "$debug_pod_name")
+  local safe_final_node_command=$(printf %q "$final_node_command")
+
   cat <<SCRIPT
 set -e
 echo "======================================================================" >&2
-echo "Starting command execution (container index: ${container_index})" >&2
-echo "  Target: node=${node_name}" >&2
-echo "  Debug Pod: ${debug_pod_name}" >&2
-echo "  Command: ${final_node_command}" >&2
+echo "Starting command execution (container index: ${safe_container_index})" >&2
+echo "  Target: node=${safe_node_name}" >&2
+echo "  Debug Pod: ${safe_debug_pod_name}" >&2
+echo "  Command: ${safe_final_node_command}" >&2
 echo "======================================================================" >&2
 
 # Install crictl if needed
@@ -2708,7 +2714,7 @@ if [[ "${INSTALL_DEPS}" == "true" ]] && ! command -v crictl >/dev/null 2>&1; the
 fi
 
 echo "======================================================================" >&2
-echo "Executing command on node:${node_name}" >&2
+echo "Executing command on node:${safe_node_name}" >&2
 echo "======================================================================" >&2
 
 # Execute the node command directly on host (with host PID/Network/IPC namespaces)
@@ -2910,24 +2916,32 @@ build_debug_script() {
     nsenter_params="-n"
   fi
 
+  # Security: Properly escape parameters to prevent shell injection
+  local safe_container_index=$(printf %q "$container_index")
+  local safe_pod_name=$(printf %q "$pod_name")
+  local safe_container_name=$(printf %q "$container_name")
+  local safe_node_name=$(printf %q "$node_name")
+  local safe_debug_pod_name=$(printf %q "$debug_pod_name")
+  local safe_nsenter_params=$(printf %q "$nsenter_params")
+
   cat <<SCRIPT
 set -e
 echo "======================================================================" >&2
-echo "Starting command execution (container index: ${container_index})" >&2
-echo "  Target: pod=${pod_name} container=${container_name}" >&2
-echo "  Node: ${node_name}" >&2
-echo "  Debug Pod: ${debug_pod_name}" >&2
+echo "Starting command execution (container index: ${safe_container_index})" >&2
+echo "  Target: pod=${safe_pod_name} container=${safe_container_name}" >&2
+echo "  Node: ${safe_node_name}" >&2
+echo "  Debug Pod: ${safe_debug_pod_name}" >&2
 
 # Show command that will be executed (with placeholder substitution for display)
 if [[ "${is_custom}" == "true" ]]; then
   PREVIEW_CMD=\$(echo '${cmd_to_use}' | base64 -d)
-  PREVIEW_CMD="\${PREVIEW_CMD//${PLACEHOLDER_CHAR}/${pod_name}}"
+  PREVIEW_CMD="\${PREVIEW_CMD//${PLACEHOLDER_CHAR}/${safe_pod_name}}"
   echo "  Command: \$PREVIEW_CMD" >&2
 else
-  PREVIEW_CMD="${cmd_to_use//${PLACEHOLDER_CHAR}/${pod_name}}"
+  PREVIEW_CMD="${cmd_to_use//${PLACEHOLDER_CHAR}/${safe_pod_name}}"
   echo "  Command: \$PREVIEW_CMD" >&2
 fi
-echo "  Nsenter params: ${nsenter_params}" >&2
+echo "  Nsenter params: ${safe_nsenter_params}" >&2
 echo "======================================================================" >&2
 
 # -------------------------------------------------------------------------------
@@ -3996,13 +4010,20 @@ build_discovery_script() {
   local discovery_pod_name="$4"
   local target_name="${5:-$pod_name}"  # Use target pod name for placeholder substitution
 
+  # Security: Properly escape parameters to prevent shell injection
+  local safe_pod_name=$(printf %q "$pod_name")
+  local safe_container_name=$(printf %q "$container_name")
+  local safe_node_name=$(printf %q "$node_name")
+  local safe_discovery_pod_name=$(printf %q "$discovery_pod_name")
+  local safe_target_name=$(printf %q "$target_name")
+
   cat <<DISCOVERY_SCRIPT
 #!/bin/bash
 set -e
 
 timestamp="\$(date '+%Y-%m-%d %H:%M:%S')"
-echo "[\$timestamp] Discovery pod $discovery_pod_name starting" >&2
-echo "[\$timestamp] Target: pod=$pod_name, container=$container_name, node=$node_name" >&2
+echo "[\$timestamp] Discovery pod $safe_discovery_pod_name starting" >&2
+echo "[\$timestamp] Target: pod=$safe_pod_name, container=$safe_container_name, node=$safe_node_name" >&2
 
 # Execute all select commands
 NUM=\${NUM_SELECT_COMMANDS:-0}
@@ -4013,7 +4034,7 @@ if [[ \$NUM -gt 0 ]]; then
     select_cmd=\$(eval echo "\\\$\$var_name" | base64 -d 2>/dev/null || echo "")
     if [[ -n "\$select_cmd" ]]; then
       # Apply placeholder substitution using target pod name
-      select_cmd="\${select_cmd//\${PLACEHOLDER_CHAR:-\%}/$target_name}"
+      select_cmd="\${select_cmd//\${PLACEHOLDER_CHAR:-\%}/$safe_target_name}"
 
       echo "[\$timestamp] Running selection command [\$i]: \$select_cmd" >&2
 
@@ -4137,11 +4158,16 @@ build_node_discovery_script() {
   local discovery_pod_name="$2"
   local target_name="${3:-$node_name}"  # Use target node name for placeholder substitution
 
+  # Security: Properly escape parameters to prevent shell injection
+  local safe_node_name=$(printf %q "$node_name")
+  local safe_discovery_pod_name=$(printf %q "$discovery_pod_name")
+  local safe_target_name=$(printf %q "$target_name")
+
   cat <<NODE_DISCOVERY_SCRIPT
 #!/bin/bash
 set -e
 
-echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Node discovery pod $discovery_pod_name starting on node $node_name" >&2
+echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Node discovery pod $safe_discovery_pod_name starting on node $safe_node_name" >&2
 
 # Get current timestamp
 timestamp="\$(date '+%Y-%m-%d %H:%M:%S')"
@@ -4155,7 +4181,7 @@ if [[ \$NUM -gt 0 ]]; then
     select_cmd=\$(eval echo "\\\$\$var_name" | base64 -d 2>/dev/null || echo "")
     if [[ -n "\$select_cmd" ]]; then
       # Apply placeholder substitution using target node name
-      select_cmd="\${select_cmd//\${PLACEHOLDER_CHAR:-\%}/$target_name}"
+      select_cmd="\${select_cmd//\${PLACEHOLDER_CHAR:-\%}/$safe_target_name}"
 
       echo "[\$timestamp] Running node selection command [\$i]: \$select_cmd" >&2
 
@@ -4832,9 +4858,12 @@ build_kill_switch_monitor_script() {
   local target_debug_pod="$1"
   local volume_path="$2"
 
+  # Security: Properly escape parameters to prevent shell injection
+  local safe_target_debug_pod=$(printf %q "$target_debug_pod")
+
   cat <<SCRIPT
 set -e
-echo "=== Kill switch monitor for ${target_debug_pod} ===" >&2
+echo "=== Kill switch monitor for ${safe_target_debug_pod} ===" >&2
 
 # -------------------------------------------------------------------------------
 # Function: parse_size_to_bytes
