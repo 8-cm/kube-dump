@@ -3764,10 +3764,7 @@ cleanup_debug_pods() {
           local log_file="${OUTPUT_DIR}/debug-logs/${debug_pod_name}-${container_name}${target_suffix}.log"
 
           if run_kube_cmd "$debug_pod_name-$container_name" "logs" logs "$debug_pod_name" -c "$container_name" -n "$debug_ns" > "$log_file" 2>&1; then
-            # Extract node and nsenter params from log for display
-            local node_info=$(grep "Node:" "$log_file" 2>/dev/null | head -1 | sed 's/.*Node: //' || echo "N/A")
-            local nsenter_info=$(grep "Nsenter params:" "$log_file" 2>/dev/null | head -1 | sed 's/.*Nsenter params: //' || echo "N/A")
-            format_message_stderr "   ✅ $(basename "$log_file") (Node: $node_info, Nsenter: $nsenter_info)"
+            format_message_stderr "   ✅ $(basename "$log_file")"
           else
             format_message_stderr "   ⚠️  Failed to get logs for $debug_pod_name container $container_name"
             rm -f "$log_file" 2>/dev/null
