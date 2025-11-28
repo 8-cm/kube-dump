@@ -1315,7 +1315,12 @@ parse_arguments() {
           NSENTER_PARAMS_INDICES+=("$LAST_COMMAND_INDEX")
           NSENTER_PARAMS_VALUES+=("$val")
         else
-          validate_option_value "$val" "--nsenter-params"
+          # For nsenter-params, values starting with '-' are valid (e.g., '-n', '-p', '-m')
+          # So we only check if the value is empty
+          if [[ -z "$val" ]]; then
+            echo "Error: Argument --nsenter-params requires a value" >&2
+            usage
+          fi
           NSENTER_PARAMS_INDICES+=("$LAST_COMMAND_INDEX")
           NSENTER_PARAMS_VALUES+=("$val")
           shift
