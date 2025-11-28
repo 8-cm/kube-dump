@@ -45,8 +45,10 @@ usage() {
   echo "  --include-nodes      Also run -E on nodes hosting pods selected by -l"
   echo "  -e, --execute        Command to execute [default: tcpdump -i any -nn -s 0]"
   echo "  --nsenter-params     Comma-separated nsenter namespace flags for corresponding -e command"
-  echo "                       (e.g., '-n,-m' for network+mount). Unspecified commands default to -n."
-  echo "                       NOTE: When using -p (PID namespace), mount /proc first in your command:"
+  echo "                       Specify WITHOUT leading dashes (e.g., 'n,m' for network+mount)"
+  echo "                       Valid flags: n(network) p(PID) m(mount) i(IPC) u(UTS) C(cgroup) U(user) T(time)"
+  echo "                       Unspecified commands default to 'n'. Script adds '-' automatically."
+  echo "                       NOTE: When using 'p' (PID namespace), mount /proc first in your command:"
   echo "                       'mount -t proc none /proc && ps auxf' to see target container PIDs"
   echo "  -E, --node-execute   Command to execute on nodes [default: tcpdump -i any -nn -s 0]"
   echo "  -s, --select-to-download  Command to list files for download (space-delimited output)"
@@ -140,29 +142,29 @@ usage() {
   echo ""
   echo "  # Custom nsenter namespaces for accessing container filesystems:"
   echo "  $0 -l app=web \\"
-  echo "    -e 'tcpdump -i any -w %.pcap' --nsenter-params '-n' \\"
-  echo "    -e 'tar -czf /tmp/%.logs.tar.gz /var/log' --nsenter-params '-n,-m'"
+  echo "    -e 'tcpdump -i any -w %.pcap' --nsenter-params n \\"
+  echo "    -e 'tar -czf /tmp/%.logs.tar.gz /var/log' --nsenter-params n,m"
   echo "  # First command: network namespace only (default)"
   echo "  # Second command: network + mount namespaces (access container filesystem)"
   echo ""
   echo "  # Access different namespaces for different diagnostics:"
   echo "  $0 -l app=database \\"
-  echo "    -e 'ss -tunap > %.sockets' --nsenter-params '-n' \\"
-  echo "    -e 'mount -t proc none /proc && ps auxf > %.processes' --nsenter-params '-n,-p' \\"
-  echo "    -e 'df -h > %.disk' --nsenter-params '-n,-m'"
+  echo "    -e 'ss -tunap > %.sockets' --nsenter-params n \\"
+  echo "    -e 'mount -t proc none /proc && ps auxf > %.processes' --nsenter-params n,p \\"
+  echo "    -e 'df -h > %.disk' --nsenter-params n,m"
   echo "  # First: network namespace for sockets"
   echo "  # Second: network + PID namespace for process tree (mount /proc to see correct PIDs)"
   echo "  # Third: network + mount namespace for disk usage"
   echo ""
-  echo "  # Partial nsenter-params specification (unspecified use default -n):"
-  echo "  $0 -l app=web -e 'tcpdump' -e 'date' --nsenter-params '-m'"
-  echo "  # First command: defaults to -n (network namespace)"
-  echo "  # Second command: uses -m (mount namespace)"
+  echo "  # Partial nsenter-params specification (unspecified use default n):"
+  echo "  $0 -l app=web -e 'tcpdump' -e 'date' --nsenter-params m"
+  echo "  # First command: defaults to n (network namespace)"
+  echo "  # Second command: uses m (mount namespace)"
   echo ""
   echo "  # Trace all processes in PID namespace (mount /proc for correct PIDs):"
   echo "  $0 -l app=web \\"
   echo "    -e 'mount -t proc none /proc && for pid in /proc/[0-9]*; do strace -f -p \$(basename \$pid) -o /host/tmp/%.\$pid.strace & done; sleep infinity' \\"
-  echo "    --nsenter-params '-n,-p' -s 'ls /host/tmp/%.*.strace'"
+  echo "    --nsenter-params n,p -s 'ls /host/tmp/%.*.strace'"
   echo "  # Mounts /proc in target PID namespace, then traces all processes"
   echo ""
   echo "  # Use custom CRI socket path:"
@@ -198,9 +200,10 @@ usage() {
   echo "  - All containers in a pod share the same network namespace"
   echo "  - For node commands, debug pods run with host networking and privileged access"
   echo "  - Multiple commands execute in parallel within separate sidecar containers"
-  echo "  - By default, commands execute in network namespace only (-n)"
-  echo "  - Use --nsenter-params to access other namespaces: -m (mount), -p (PID), -u (UTS), etc."
-  echo "  - When using -p (PID namespace), run 'mount -t proc none /proc' first to see target PIDs"
+  echo "  - By default, commands execute in network namespace only (n)"
+  echo "  - Use --nsenter-params to access other namespaces: m (mount), p (PID), u (UTS), etc."
+  echo "  - Specify namespace flags WITHOUT dashes: --nsenter-params p (not -p)"
+  echo "  - When using p (PID namespace), run 'mount -t proc none /proc' first to see target PIDs"
   echo "  - Debug pod always keeps its own mount namespace to access /host for node access"
   echo "  - No limit on number of sidecars (within Kubernetes pod limits)"
   echo "  - Each file monitor independently monitors ALL files from ALL command containers"
@@ -1312,18 +1315,30 @@ parse_arguments() {
         fi
         # Associate this param with the last -e command index (using parallel arrays)
         if [[ $1 == --nsenter-params=* ]]; then
+          # Validate: single letters or comma-separated (without leading dashes)
+          if [[ ! "$val" =~ ^[a-zA-Z](,[a-zA-Z])*$ ]]; then
+            echo "Error: --nsenter-params must be comma-separated namespace flags WITHOUT leading dashes" >&2
+            echo "       Valid: 'p' or 'n,p,m' (script adds '-' automatically)" >&2
+            echo "       Got: '$val'" >&2
+            usage
+          fi
           NSENTER_PARAMS_INDICES+=("$LAST_COMMAND_INDEX")
           NSENTER_PARAMS_VALUES+=("$val")
         else
-          # Validate nsenter namespace flags: -C -i -m -n -p -u -U -T
-          # This explicit whitelist prevents conflicts with script flags like -l, -e, -E
+          # Validate: single letters or comma-separated (without leading dashes)
+          # Reject values starting with '-' as they indicate user error
           if [[ -z "$val" ]]; then
             echo "Error: Argument --nsenter-params requires a value" >&2
             usage
-          elif [[ ! "$val" =~ ^-[CimnpuUT](,-[CimnpuUT])*$ ]]; then
-            echo "Error: --nsenter-params must be comma-separated nsenter namespace flags" >&2
-            echo "       Valid flags: -C (cgroup) -i (IPC) -m (mount) -n (network) -p (PID) -u (UTS) -U (user) -T (time)" >&2
-            echo "       Examples: '-n' or '-n,-p' or '-n,-p,-m'" >&2
+          elif [[ "$val" == -* ]]; then
+            echo "Error: --nsenter-params value should NOT start with '-'" >&2
+            echo "       Use: --nsenter-params p (not -p)" >&2
+            echo "       Use: --nsenter-params n,p,m (not -n,-p,-m)" >&2
+            echo "       The script adds '-' automatically" >&2
+            usage
+          elif [[ ! "$val" =~ ^[a-zA-Z](,[a-zA-Z])*$ ]]; then
+            echo "Error: --nsenter-params must be comma-separated namespace flags" >&2
+            echo "       Valid examples: 'p' or 'n,p,m'" >&2
             echo "       Got: '$val'" >&2
             usage
           fi
@@ -2885,8 +2900,10 @@ build_debug_script() {
   local nsenter_params="-n"  # Default to network namespace only
   if [[ ${#ENCODED_NSENTER_PARAMS[@]} -gt "$container_index" ]]; then
     local encoded_params="${ENCODED_NSENTER_PARAMS[$container_index]}"
-    # Decode and convert comma-separated to space-separated
-    nsenter_params=$(echo "$encoded_params" | base64 -d | tr ',' ' ')
+    # Decode (format: "n" or "n,p,m") and add '-' prefix to each flag
+    local decoded_params=$(echo "$encoded_params" | base64 -d)
+    # Convert "n,p,m" to "-n -p -m"
+    nsenter_params=$(echo "$decoded_params" | tr ',' '\n' | sed 's/^/-/' | tr '\n' ' ' | sed 's/ $//')
   fi
 
   cat <<SCRIPT
