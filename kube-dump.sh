@@ -58,7 +58,7 @@ usage() {
   echo "  -I, --placeholder    Set placeholder prefix character [default: %]"
   echo "                       Placeholders: %p = podname, %n = nodename, %f = imported file path"
   echo "                       Example: -I@ makes placeholders @p, @n, @f"
-  echo "  --import-file        Path to local file to import; must precede the -e/-E it applies to"
+  echo "  -f, --import-file    Path to local file to import; must precede the -e/-E it applies to"
   echo "                       The file is base64-encoded and written to temp file in container"
   echo "                       Use %f in command to reference the temp script path"
   echo "  --kill-switch-abs    Kill pods when disk usage exceeds absolute threshold (e.g., 1GB, 500MB)"
@@ -277,10 +277,13 @@ initialize_variables() {
   PLACEHOLDER_CHAR="%"  # Default placeholder prefix character (changeable via -I)
   # Placeholders: %p = podname, %n = nodename, %f = imported file content
   PENDING_IMPORT_FILE=""  # Pending import file for next -e/-E command
+  PENDING_IMPORT_PATH=""  # Original path of the pending import file (for display)
   IMPORT_FILE_INDICES=()  # Parallel array: command indices that have import files (for -e)
   IMPORT_FILE_CONTENTS=()  # Parallel array: base64-encoded import file contents (for -e)
+  IMPORT_FILE_PATHS=()     # Parallel array: original file paths (for -e)
   NODE_IMPORT_FILE_INDICES=()  # Parallel array: command indices that have import files (for -E)
   NODE_IMPORT_FILE_CONTENTS=()  # Parallel array: base64-encoded import file contents (for -E)
+  NODE_IMPORT_FILE_PATHS=()     # Parallel array: original file paths (for -E)
   DISCOVERY_POD_NAMES=()  # Array for file discovery pods
   DISCOVERY_POD_INFO=()  # Array to track discovery pod info: "discovery_pod_name:node_name:type:target_name"
   POD_DEBUG_HOSTNAMES=()     # Array to store debug pod hostnames for pod targets
@@ -1069,6 +1072,12 @@ show_configuration() {
     echo "  Pod Commands:      ${#CUSTOM_COMMANDS[@]} custom command(s)"
     for i in "${!CUSTOM_COMMANDS[@]}"; do
       echo "    [$i]: ${CUSTOM_COMMANDS[$i]}"
+      # Display associated import file if present
+      for j in "${!IMPORT_FILE_INDICES[@]}"; do
+        if [[ "${IMPORT_FILE_INDICES[$j]}" == "$i" ]]; then
+           echo "         (Import: ${IMPORT_FILE_PATHS[$j]})"
+        fi
+      done
     done
   else
     echo "  Pod Command:       $CAPTURE_COMMAND"
@@ -1077,6 +1086,12 @@ show_configuration() {
     echo "  Node Commands:     ${#CUSTOM_NODE_COMMANDS[@]} custom command(s)"
     for i in "${!CUSTOM_NODE_COMMANDS[@]}"; do
       echo "    [$i]: ${CUSTOM_NODE_COMMANDS[$i]}"
+      # Display associated import file if present
+      for j in "${!NODE_IMPORT_FILE_INDICES[@]}"; do
+        if [[ "${NODE_IMPORT_FILE_INDICES[$j]}" == "$i" ]]; then
+           echo "         (Import: ${NODE_IMPORT_FILE_PATHS[$j]})"
+        fi
+      done
     done
   else
     echo "  Node Command:      $NODE_COMMAND"
@@ -1377,7 +1392,9 @@ parse_arguments() {
         if [[ -n "$PENDING_IMPORT_FILE" ]]; then
           IMPORT_FILE_INDICES+=("$LAST_COMMAND_INDEX")
           IMPORT_FILE_CONTENTS+=("$PENDING_IMPORT_FILE")
+          IMPORT_FILE_PATHS+=("$PENDING_IMPORT_PATH")
           PENDING_IMPORT_FILE=""  # Clear pending
+          PENDING_IMPORT_PATH=""
         fi
         ;;
       --nsenter-params)
@@ -1433,7 +1450,9 @@ parse_arguments() {
         if [[ -n "$PENDING_IMPORT_FILE" ]]; then
           NODE_IMPORT_FILE_INDICES+=("$node_cmd_index")
           NODE_IMPORT_FILE_CONTENTS+=("$PENDING_IMPORT_FILE")
+          NODE_IMPORT_FILE_PATHS+=("$PENDING_IMPORT_PATH")
           PENDING_IMPORT_FILE=""  # Clear pending
+          PENDING_IMPORT_PATH=""
         fi
         ;;
       -s|--select-to-download)
@@ -1487,18 +1506,18 @@ parse_arguments() {
           shift
         fi
         ;;
-      --import-file)
+      -f|--import-file)
         # Check if we already have a pending import file (overwrite protection)
         if [[ -n "$PENDING_IMPORT_FILE" ]]; then
-          echo "Error: Multiple --import-file flags specified without intervening -e/-E command." >&2
-          echo "       Each --import-file must be followed by the command it applies to." >&2
+          echo "Error: Multiple -f/--import-file flags specified without intervening -e/-E command." >&2
+          echo "       Each -f/--import-file must be followed by the command it applies to." >&2
           usage
         fi
         local import_file_path=""
         if [[ $1 == --import-file=* ]]; then
           import_file_path="$val"
         else
-          validate_option_value "$val" "--import-file"
+          validate_option_value "$val" "-f|--import-file"
           import_file_path="$val"
           shift
         fi
@@ -1507,9 +1526,11 @@ parse_arguments() {
           echo "Error: Import file not found: $import_file_path" >&2
           exit 1
         fi
+
         # Convert file to base64 and store as pending for next -e/-E
         if command -v base64 &>/dev/null; then
           PENDING_IMPORT_FILE=$(base64 < "$import_file_path" | tr -d '\n')
+          PENDING_IMPORT_PATH="$import_file_path"
         else
           echo "Error: base64 command not found, cannot encode import file" >&2
           exit 1

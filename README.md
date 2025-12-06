@@ -46,6 +46,7 @@ git clone <repository-url> && cd kube-dump && chmod +x kube-dump.sh
 | **Node Analysis** | `./kube-dump.sh -L node-type=worker -E "ss -tuln"` | Analyze network connections on worker nodes |
 | **Disk Space Check** | `./kube-dump.sh -l tier=database -e "df -h"` | Check disk usage across database pods |
 | **Security Audit** | `./kube-dump.sh -L role=master -E "systemctl status kubelet"` | Audit kubelet status on master nodes |
+| **Script Import** | `./kube-dump.sh -l app=web -f ./script.sh -e "bash %f"` | Run local scripts on remote pods |
 
 ## Key Features
 

@@ -53,12 +53,25 @@ tcpdump -i any -nn -s 0
 
 ### Output & Downloads
 - `-o, --output PATH` - Output directory for downloaded files
-- `-I, --placeholder CHAR` - Set placeholder character for hostname substitution (default: `%`)
+- `-I, --placeholder CHAR` - Set placeholder character for hostname/file substitution (default: `%`)
 
-### File Selection
-File selection commands support placeholder substitution:
-- `PLACEHOLDER_CHAR` is replaced with the target pod/node name
+### Script Import
+Run local scripts on remote targets:
+- `-f, --import-file PATH` - Path to local file to import. Must precede the `-e` or `-E` command it applies to. 
+  - Multiple commands can use different import files.
+  - The script is base64 encoded and written to a temp file in the target.
+
+### File Selection & Placeholders
+Commands support the following placeholders (% is default, configurable via `-I`):
+- `%p` - Target pod name
+- `%n` - Target node name
+- `%f` - Path to the imported temporary script file (requires `--import-file`)
+
+Examples:
+- `PLACEHOLDER_CHARp` is replaced with the target pod name
+- `PLACEHOLDER_CHARf` is replaced with the temp file path (e.g. `/tmp/kube-dump-import-PID.sh`)
 - Use single quotes to prevent shell interpretation
+
 
 ```bash
 # Examples
@@ -145,6 +158,11 @@ When only volume paths are provided without explicit thresholds, the script auto
 
 # No cleanup mode
 ./kube-dump.sh -l app=test --no-cleanup
+
+# Script Import (Per-Command)
+./kube-dump.sh -l app=web \
+  -f ./script-A.sh -e 'bash %f' \
+  -f ./script-B.sh -e 'bash %f'
 ```
 
 ## Parameter Validation
