@@ -54,7 +54,7 @@ usage() {
   echo "  -s, --select-to-download  Command to list files for download (space-delimited output)"
   echo "  -S, --node-select-to-download  Command to list node files for download"
   echo "  -o, --output         Output directory for downloaded files"
-  echo "  --download-verification  Verification method for downloads: hash (MD5+SHA256), size, none [default: hash]"
+  echo "  --download-verification  Verification method for downloads: hash (MD5+SHA256), size, none [default: none]"
   echo "  -I, --placeholder    Set placeholder prefix character [default: %]"
   echo "                       Placeholders: %p = podname, %n = nodename, %f = imported file path"
   echo "                       Example: -I@ makes placeholders @p, @n, @f"
@@ -273,7 +273,7 @@ initialize_variables() {
   DEBUG_POD_NAMES_META=()    # Parallel array: debug pod names
   DEBUG_POD_METADATA_VALUES=()  # Parallel array: metadata "type:target_name:node_name"
   OUTPUT_DIR=""  # Output directory for downloaded files from -o
-  DOWNLOAD_VERIFICATION="hash"  # Download verification method: hash, size, none
+  DOWNLOAD_VERIFICATION="none"  # Download verification method: hash, size, none
   PLACEHOLDER_CHAR="%"  # Default placeholder prefix character (changeable via -I)
   # Placeholders: %p = podname, %n = nodename, %f = imported file content
   PENDING_IMPORT_FILE=""  # Pending import file for next -e/-E command
@@ -2836,7 +2836,7 @@ build_node_debug_script() {
   if [[ -n "$import_file_content" ]]; then
     has_import_file="true"
     # Use cat with heredoc to safely embed base64 content (avoids quoting issues)
-    import_file_setup="IMPORT_SCRIPT_FILE=\"/tmp/kube-dump-import-\$\$.sh\"
+    import_file_setup="IMPORT_SCRIPT_FILE=\$(mktemp)
 cat > \"\$IMPORT_SCRIPT_FILE\" << 'KUBEDUMP_SCRIPT_EOF'
 $(echo "${import_file_content}" | base64 -d)
 KUBEDUMP_SCRIPT_EOF
@@ -3320,7 +3320,7 @@ generate_exec_command() {
     if [[ -n "$import_file_content" ]]; then
       # When import file is used: write decoded content to temp file using heredoc
       echo "# Create temp script file from imported content"
-      echo "IMPORT_SCRIPT_FILE=\"/tmp/kube-dump-import-\$\$.sh\""
+      echo "IMPORT_SCRIPT_FILE=\$(mktemp)"
       echo "cat > \"\$IMPORT_SCRIPT_FILE\" << 'KUBEDUMP_SCRIPT_EOF'"
       # Decode and embed the script content directly (expanded at generation time)
       echo "${import_file_content}" | base64 -d
@@ -3360,7 +3360,7 @@ EXECEND
     if [[ -n "$import_file_content" ]]; then
       # When import file is used: write decoded content to temp file using heredoc
       echo "# Create temp script file from imported content"
-      echo "IMPORT_SCRIPT_FILE=\"/tmp/kube-dump-import-\$\$.sh\""
+      echo "IMPORT_SCRIPT_FILE=\$(mktemp)"
       echo "cat > \"\$IMPORT_SCRIPT_FILE\" << 'KUBEDUMP_SCRIPT_EOF'"
       echo "${import_file_content}" | base64 -d
       echo "KUBEDUMP_SCRIPT_EOF"
