@@ -55,7 +55,12 @@ usage() {
   echo "  -S, --node-select-to-download  Command to list node files for download"
   echo "  -o, --output         Output directory for downloaded files"
   echo "  --download-verification  Verification method for downloads: hash (MD5+SHA256), size, none [default: hash]"
-  echo "  -I, --placeholder    Set placeholder character for hostname substitution [default: %]"
+  echo "  -I, --placeholder    Set placeholder prefix character [default: %]"
+  echo "                       Placeholders: %p = podname, %n = nodename, %f = imported file path"
+  echo "                       Example: -I@ makes placeholders @p, @n, @f"
+  echo "  --import-file        Path to local file to import; must precede the -e/-E it applies to"
+  echo "                       The file is base64-encoded and written to temp file in container"
+  echo "                       Use %f in command to reference the temp script path"
   echo "  --kill-switch-abs    Kill pods when disk usage exceeds absolute threshold (e.g., 1GB, 500MB)"
   echo "  --kill-switch-rel    Kill pods when free space falls below relative threshold (e.g., 10%) [requires 'bc' in image]"
   echo "                       If omitted, auto-detects from kubelet nodefs.available (+5% safety), fallback to 10%"
@@ -103,28 +108,37 @@ usage() {
   echo "  # Run command on nodes matching ANY of multiple label selectors (OR logic):"
   echo "  $0 -L zone=us-west -L zone=us-east -E 'ss -tuln'"
   echo ""
-  echo "  # Use placeholder for hostname substitution in commands:"
-  echo "  $0 -l app=web -e 'tcpdump -i any -w %.pcap'"
+  echo "  # Use %p for podname/nodename substitution in commands:"
+  echo "  $0 -l app=web -e 'tcpdump -i any -w %p.pcap'"
   echo ""
-  echo "  # Use custom placeholder character:"
-  echo "  $0 -l app=web -e 'tcpdump -i any | tee @.log' -I@"
+  echo "  # Use custom placeholder prefix character:"
+  echo "  $0 -l app=web -e 'tcpdump -i any | tee @p.log' -I@"
   echo ""
   echo "  # Generate files and download them:"
-  echo "  $0 -l app=web -e 'tcpdump -i any -w %.pcap -c 100' -s 'ls *.pcap' -o ./downloads"
+  echo "  $0 -l app=web -e 'tcpdump -i any -w %p.pcap -c 100' -s 'ls *.pcap' -o ./downloads"
   echo ""
   echo "  # Generate node files with custom placeholder and download:"
-  echo "  $0 -L worker=true -E 'ss -tuln > @-ports.txt' -S 'ls @-ports.txt' -I@ -o ./node-files"
+  echo "  $0 -L worker=true -E 'ss -tuln > @n-ports.txt' -S 'ls @n-ports.txt' -I@ -o ./node-files"
+  echo ""
+  echo "  # Use %p for podname substitution in file names:"
+  echo "  $0 -l app=web -e 'tcpdump -i any -w %p.pcap'"
+  echo ""
+  echo "  # Import a local script and execute it (--import-file before -e):"
+  echo "  $0 -l app=web --import-file ./my-script.sh -e '%f'"
+  echo ""
+  echo "  # Import a script and pass the podname as argument:"
+  echo "  $0 -l app=web --import-file ./diagnostics.sh -e '%f %p'"
   echo ""
   echo "  # Multiple commands run in parallel (multi-sidecar mode):"
   echo "  $0 -l app=web \\"
-  echo "    -e 'tcpdump -i any -w %.pcap' \\"
-  echo "    -e 'ss -tunap > %.sockets' \\"
-  echo "    -e 'netstat -s > %.netstat'"
+  echo "    -e 'tcpdump -i any -w %p.pcap' \\"
+  echo "    -e 'ss -tunap > %p.sockets' \\"
+  echo "    -e 'netstat -s > %p.netstat'"
   echo "  # Creates debug pods with 3 containers: command-0, command-1, command-2"
   echo ""
   echo "  # Multiple file monitors (each monitors ALL files from ALL commands):"
   echo "  $0 -l app=web \\"
-  echo "    -e 'tcpdump -i any -w %.pcap' \\"
+  echo "    -e 'tcpdump -i any -w %p.pcap' \\"
   echo "    -s 'ls *.pcap' \\"
   echo "    -s 'find /tmp -name \"*.log\"' \\"
   echo "    -o ./downloads"
@@ -132,8 +146,8 @@ usage() {
   echo ""
   echo "  # Complex multi-sidecar with downloads:"
   echo "  $0 -l app=nginx \\"
-  echo "    -e 'tcpdump -i any -w /tmp/%.pcap -c 1000' \\"
-  echo "    -e 'ss -tunap > /tmp/%.sockets' \\"
+  echo "    -e 'tcpdump -i any -w /tmp/%p.pcap -c 1000' \\"
+  echo "    -e 'ss -tunap > /tmp/%p.sockets' \\"
   echo "    -s 'ls /tmp/*.pcap' \\"
   echo "    -s 'ls /tmp/*.sockets' \\"
   echo "    -o ./captures"
@@ -142,16 +156,16 @@ usage() {
   echo ""
   echo "  # Custom nsenter namespaces for accessing container filesystems:"
   echo "  $0 -l app=web \\"
-  echo "    -e 'tcpdump -i any -w %.pcap' --nsenter-params n \\"
-  echo "    -e 'tar -czf /tmp/%.logs.tar.gz /var/log' --nsenter-params n,m"
+  echo "    -e 'tcpdump -i any -w %p.pcap' --nsenter-params n \\"
+  echo "    -e 'tar -czf /tmp/%p.logs.tar.gz /var/log' --nsenter-params n,m"
   echo "  # First command: network namespace only (default)"
   echo "  # Second command: network + mount namespaces (access container filesystem)"
   echo ""
   echo "  # Access different namespaces for different diagnostics:"
   echo "  $0 -l app=database \\"
-  echo "    -e 'ss -tunap > %.sockets' --nsenter-params n \\"
-  echo "    -e 'mount -t proc none /proc && ps auxf > %.processes' --nsenter-params n,p \\"
-  echo "    -e 'df -h > %.disk' --nsenter-params n,m"
+  echo "    -e 'ss -tunap > %p.sockets' --nsenter-params n \\"
+  echo "    -e 'mount -t proc none /proc && ps auxf > %p.processes' --nsenter-params n,p \\"
+  echo "    -e 'df -h > %p.disk' --nsenter-params n,m"
   echo "  # First: network namespace for sockets"
   echo "  # Second: network + PID namespace for process tree (mount /proc to see correct PIDs)"
   echo "  # Third: network + mount namespace for disk usage"
@@ -163,8 +177,8 @@ usage() {
   echo ""
   echo "  # Trace all processes in PID namespace (mount /proc for correct PIDs):"
   echo "  $0 -l app=web \\"
-  echo "    -e 'mount -t proc none /proc && for pid in /proc/[0-9]*; do strace -f -p \$(basename \$pid) -o /host/tmp/%.\$pid.strace & done; sleep infinity' \\"
-  echo "    --nsenter-params n,p -s 'ls /host/tmp/%.*.strace'"
+  echo "    -e 'mount -t proc none /proc && for pid in /proc/[0-9]*; do strace -f -p \$(basename \$pid) -o /host/tmp/%p.\$pid.strace & done; sleep infinity' \\"
+  echo "    --nsenter-params n,p -s 'ls /host/tmp/%p.*.strace'"
   echo "  # Mounts /proc in target PID namespace, then traces all processes"
   echo ""
   echo "  # Use custom CRI socket path:"
@@ -260,7 +274,13 @@ initialize_variables() {
   DEBUG_POD_METADATA_VALUES=()  # Parallel array: metadata "type:target_name:node_name"
   OUTPUT_DIR=""  # Output directory for downloaded files from -o
   DOWNLOAD_VERIFICATION="hash"  # Download verification method: hash, size, none
-  PLACEHOLDER_CHAR="%"  # Default placeholder character for hostname substitution
+  PLACEHOLDER_CHAR="%"  # Default placeholder prefix character (changeable via -I)
+  # Placeholders: %p = podname, %n = nodename, %f = imported file content
+  PENDING_IMPORT_FILE=""  # Pending import file for next -e/-E command
+  IMPORT_FILE_INDICES=()  # Parallel array: command indices that have import files (for -e)
+  IMPORT_FILE_CONTENTS=()  # Parallel array: base64-encoded import file contents (for -e)
+  NODE_IMPORT_FILE_INDICES=()  # Parallel array: command indices that have import files (for -E)
+  NODE_IMPORT_FILE_CONTENTS=()  # Parallel array: base64-encoded import file contents (for -E)
   DISCOVERY_POD_NAMES=()  # Array for file discovery pods
   DISCOVERY_POD_INFO=()  # Array to track discovery pod info: "discovery_pod_name:node_name:type:target_name"
   POD_DEBUG_HOSTNAMES=()     # Array to store debug pod hostnames for pod targets
@@ -290,6 +310,53 @@ initialize_variables() {
   DEBUG_LOG_DIR=""  # Directory for verbose logs (created as OUTPUT_DIR/debug)
 }
 
+# -------------------------------------------------------------------------------
+# Function: get_import_file_for_command
+# -------------------------------------------------------------------------------
+# Description:
+#   Looks up the import file content for a given pod command index.
+#   Returns the base64-encoded content if found, empty string otherwise.
+#
+# Parameters:
+#   $1 - command_index: Index of the -e command
+#
+# Returns:
+#   Prints the base64-encoded import file content if found, empty otherwise.
+# -------------------------------------------------------------------------------
+get_import_file_for_command() {
+  local cmd_index="$1"
+  for i in "${!IMPORT_FILE_INDICES[@]}"; do
+    if [[ "${IMPORT_FILE_INDICES[$i]}" == "$cmd_index" ]]; then
+      echo "${IMPORT_FILE_CONTENTS[$i]}"
+      return
+    fi
+  done
+  echo ""  # No import file for this command
+}
+
+# -------------------------------------------------------------------------------
+# Function: get_node_import_file_for_command
+# -------------------------------------------------------------------------------
+# Description:
+#   Looks up the import file content for a given node command index.
+#   Returns the base64-encoded content if found, empty string otherwise.
+#
+# Parameters:
+#   $1 - command_index: Index of the -E command
+#
+# Returns:
+#   Prints the base64-encoded import file content if found, empty otherwise.
+# -------------------------------------------------------------------------------
+get_node_import_file_for_command() {
+  local cmd_index="$1"
+  for i in "${!NODE_IMPORT_FILE_INDICES[@]}"; do
+    if [[ "${NODE_IMPORT_FILE_INDICES[$i]}" == "$cmd_index" ]]; then
+      echo "${NODE_IMPORT_FILE_CONTENTS[$i]}"
+      return
+    fi
+  done
+  echo ""  # No import file for this command
+}
 # -------------------------------------------------------------------------------
 # Function: detect_kube_cli
 # -------------------------------------------------------------------------------
@@ -1304,8 +1371,14 @@ parse_arguments() {
           CUSTOM_COMMANDS+=("$val")
           shift
         fi
-        # Mark this command index as needing params
+        # Mark this command index for --nsenter-params association
         LAST_COMMAND_INDEX=$((${#CUSTOM_COMMANDS[@]} - 1))
+        # Consume pending import file if set
+        if [[ -n "$PENDING_IMPORT_FILE" ]]; then
+          IMPORT_FILE_INDICES+=("$LAST_COMMAND_INDEX")
+          IMPORT_FILE_CONTENTS+=("$PENDING_IMPORT_FILE")
+          PENDING_IMPORT_FILE=""  # Clear pending
+        fi
         ;;
       --nsenter-params)
         # Ensure --nsenter-params follows a -e command
@@ -1354,6 +1427,13 @@ parse_arguments() {
           validate_option_value "$val" "-E|--node-execute"
           CUSTOM_NODE_COMMANDS+=("$val")
           shift
+        fi
+        # Consume pending import file if set
+        local node_cmd_index=$((${#CUSTOM_NODE_COMMANDS[@]} - 1))
+        if [[ -n "$PENDING_IMPORT_FILE" ]]; then
+          NODE_IMPORT_FILE_INDICES+=("$node_cmd_index")
+          NODE_IMPORT_FILE_CONTENTS+=("$PENDING_IMPORT_FILE")
+          PENDING_IMPORT_FILE=""  # Clear pending
         fi
         ;;
       -s|--select-to-download)
@@ -1405,6 +1485,34 @@ parse_arguments() {
           validate_option_value "$val" "-I|--placeholder"
           PLACEHOLDER_CHAR="$val"
           shift
+        fi
+        ;;
+      --import-file)
+        # Check if we already have a pending import file (overwrite protection)
+        if [[ -n "$PENDING_IMPORT_FILE" ]]; then
+          echo "Error: Multiple --import-file flags specified without intervening -e/-E command." >&2
+          echo "       Each --import-file must be followed by the command it applies to." >&2
+          usage
+        fi
+        local import_file_path=""
+        if [[ $1 == --import-file=* ]]; then
+          import_file_path="$val"
+        else
+          validate_option_value "$val" "--import-file"
+          import_file_path="$val"
+          shift
+        fi
+        # Validate file exists
+        if [[ ! -f "$import_file_path" ]]; then
+          echo "Error: Import file not found: $import_file_path" >&2
+          exit 1
+        fi
+        # Convert file to base64 and store as pending for next -e/-E
+        if command -v base64 &>/dev/null; then
+          PENDING_IMPORT_FILE=$(base64 < "$import_file_path" | tr -d '\n')
+        else
+          echo "Error: base64 command not found, cannot encode import file" >&2
+          exit 1
         fi
         ;;
       -h|--help)
@@ -1607,6 +1715,12 @@ validate_arguments() {
 
   # Validate --nsenter-params are only specified after -e commands
   # (validation happens during parsing via LAST_COMMAND_INDEX check)
+
+  # Validate no dangling pending import file (specified at end without following command)
+  if [[ -n "$PENDING_IMPORT_FILE" ]]; then
+    echo "Error: --import-file specified without a following -e/-E command to apply to." >&2
+    return 1
+  fi
 
   # Validate kill switch arguments
   validate_variable "KILL_SWITCH_ABS" "$KILL_SWITCH_ABS" "string" "" "false"
@@ -2685,7 +2799,32 @@ build_node_debug_script() {
   # Substitute placeholder with target node name in node command, strip newlines
   local node_command_clean
   node_command_clean=$(echo "$cmd_to_use" | tr -d '\n')
-  local final_node_command="${node_command_clean//${PLACEHOLDER_CHAR}/$node_name}"
+  # Handle %p placeholder (podname) and %n placeholder (nodename) - in node context both mean nodename
+  local final_node_command="${node_command_clean//${PLACEHOLDER_CHAR}p/$node_name}"
+  final_node_command="${final_node_command//${PLACEHOLDER_CHAR}n/$node_name}"
+  
+  # Variables for temp file handling
+  local has_import_file="false"
+  local import_file_setup=""
+  local import_file_cleanup=""
+  
+  # Get import file content for this command
+  local import_file_content=$(get_node_import_file_for_command "$container_index")
+  
+  # Handle %f placeholder (file content) - write to temp file and execute
+  if [[ -n "$import_file_content" ]]; then
+    has_import_file="true"
+    # Use cat with heredoc to safely embed base64 content (avoids quoting issues)
+    import_file_setup="IMPORT_SCRIPT_FILE=\"/tmp/kube-dump-import-\$\$.sh\"
+cat > \"\$IMPORT_SCRIPT_FILE\" << 'KUBEDUMP_SCRIPT_EOF'
+$(echo "${import_file_content}" | base64 -d)
+KUBEDUMP_SCRIPT_EOF
+chmod +x \"\$IMPORT_SCRIPT_FILE\""
+    import_file_cleanup="rm -f \"\$IMPORT_SCRIPT_FILE\" 2>/dev/null
+echo \"Cleaned up imported script file\" >&2"
+    final_node_command="${final_node_command//${PLACEHOLDER_CHAR}f/\$IMPORT_SCRIPT_FILE}"
+  fi
+  # Note: Only %p, %n, %f are valid placeholders. No backward compat for plain %
 
   # Security: Properly escape parameters to prevent shell injection
   local safe_container_index=$(printf %q "$container_index")
@@ -2717,6 +2856,8 @@ echo "======================================================================" >&
 echo "Executing command on node:${safe_node_name}" >&2
 echo "======================================================================" >&2
 
+${import_file_setup}
+
 # Execute the node command directly on host (with host PID/Network/IPC namespaces)
 ${final_node_command} 2>&1 &
 NODE_CMD_PID=\$!
@@ -2729,6 +2870,8 @@ TAIL_PID=\$!
 # Wait for node command to complete or continue
 wait \$NODE_CMD_PID 2>/dev/null || true
 echo "Command completed with exit code: \$?" >&2
+
+${import_file_cleanup}
 
 # Keep pod alive with tail
 wait \$TAIL_PID
@@ -2916,6 +3059,9 @@ build_debug_script() {
     nsenter_params="-n"
   fi
 
+  # Get import file content for this command if available
+  local import_file_content=$(get_import_file_for_command "$container_index")
+
   # Security: Properly escape parameters to prevent shell injection
   local safe_container_index=$(printf %q "$container_index")
   local safe_pod_name=$(printf %q "$pod_name")
@@ -2935,11 +3081,24 @@ echo "  Debug Pod: ${safe_debug_pod_name}" >&2
 # Show command that will be executed (with placeholder substitution for display)
 if [[ "${is_custom}" == "true" ]]; then
   PREVIEW_CMD=\$(echo '${cmd_to_use}' | base64 -d)
-  PREVIEW_CMD="\${PREVIEW_CMD//${PLACEHOLDER_CHAR}/${safe_pod_name}}"
+  # Replace %p with podname, %n with podname
+  PREVIEW_CMD="\${PREVIEW_CMD//${PLACEHOLDER_CHAR}p/${safe_pod_name}}"
+  PREVIEW_CMD="\${PREVIEW_CMD//${PLACEHOLDER_CHAR}n/${safe_pod_name}}"
+  # Replace %f with script path indicator if import file is used
+  if [[ -n "$import_file_content" ]]; then
+    PREVIEW_CMD="\${PREVIEW_CMD//${PLACEHOLDER_CHAR}f/\\\$IMPORT_SCRIPT_FILE}"
+  fi
+  # Note: Only %p, %n, %f are valid. No backward compat for plain %
   echo "  Command: \$PREVIEW_CMD" >&2
 else
-  PREVIEW_CMD="${cmd_to_use//${PLACEHOLDER_CHAR}/${safe_pod_name}}"
-  echo "  Command: \$PREVIEW_CMD" >&2
+  local preview="${cmd_to_use}"
+  preview="\${preview//${PLACEHOLDER_CHAR}p/${safe_pod_name}}"
+  preview="\${preview//${PLACEHOLDER_CHAR}n/${safe_pod_name}}"
+  if [[ -n "$import_file_content" ]]; then
+    preview="\${preview//${PLACEHOLDER_CHAR}f/\\\$IMPORT_SCRIPT_FILE}"
+  fi
+  # Note: Only %p, %n, %f are valid. No backward compat for plain %
+  echo "  Command: ${preview}" >&2
 fi
 echo "  Nsenter params: ${safe_nsenter_params}" >&2
 echo "======================================================================" >&2
@@ -3070,7 +3229,7 @@ echo "======================================================================" >&
 
 # Execute in network namespace
 if [[ -d "/host/proc/\$PID" ]]; then
-  $(generate_exec_command "${pod_name}" "${cmd_to_use}" "${is_custom}" "${nsenter_params}")
+  $(generate_exec_command "${pod_name}" "${cmd_to_use}" "${is_custom}" "${nsenter_params}" "${import_file_content}")
 else
   echo "ERROR: PID \$PID not found" >&2
   exit 1
@@ -3130,10 +3289,25 @@ generate_exec_command() {
   local cmd_to_use="$2"
   local is_custom="${3:-true}"
   local nsenter_params="${4:--n}"  # Default to network namespace only
+  local import_file_content="${5:-}"  # Optional: base64-encoded import file content
 
   if [[ "$is_custom" == "true" ]]; then
-    printf "DECODED_CMD=\$(echo '%s' | base64 -d | tr -d '\\\\n')\\n" "$cmd_to_use"
-    echo "FINAL_CMD=\$(echo \"\$DECODED_CMD\" | sed 's/${PLACEHOLDER_CHAR}/${target_pod_name}/g')"
+    printf "DECODED_CMD=\$(echo '%s' | base64 -d | tr -d '\\\\n')\n" "$cmd_to_use"
+    # Handle %p placeholder (podname) and %n placeholder (in pod context, use podname)
+    echo "FINAL_CMD=\$(echo \"\$DECODED_CMD\" | sed 's/${PLACEHOLDER_CHAR}p/${target_pod_name}/g')"
+    echo "FINAL_CMD=\$(echo \"\$FINAL_CMD\" | sed 's/${PLACEHOLDER_CHAR}n/${target_pod_name}/g')"
+    if [[ -n "$import_file_content" ]]; then
+      # When import file is used: write decoded content to temp file using heredoc
+      echo "# Create temp script file from imported content"
+      echo "IMPORT_SCRIPT_FILE=\"/tmp/kube-dump-import-\$\$.sh\""
+      echo "cat > \"\$IMPORT_SCRIPT_FILE\" << 'KUBEDUMP_SCRIPT_EOF'"
+      # Decode and embed the script content directly (expanded at generation time)
+      echo "${import_file_content}" | base64 -d
+      echo "KUBEDUMP_SCRIPT_EOF"
+      echo "chmod +x \"\$IMPORT_SCRIPT_FILE\""
+      # Replace %f with the temp script path - use eval-style substitution so path is embedded
+      echo "FINAL_CMD=\$(echo \"\$FINAL_CMD\" | sed \"s|${PLACEHOLDER_CHAR}f|\${IMPORT_SCRIPT_FILE}|g\")"
+    fi
     cat <<EXECEND
 # Run command in target pod's namespaces (keep debug pod's mount namespace for /host access)
 nsenter ${nsenter_params} -t \$PID /bin/bash -c "\$FINAL_CMD" 2>&1 &
@@ -3146,16 +3320,42 @@ TAIL_PID=\$!
 
 # Wait for nsenter process to complete or continue
 wait \$NSENTER_PID 2>/dev/null || true
-echo "Command completed with exit code: \$?" >&2
+CMD_EXIT_CODE=\$?
+echo "Command completed with exit code: \$CMD_EXIT_CODE" >&2
+
+# Cleanup imported script file if it exists
+if [[ -n "\$IMPORT_SCRIPT_FILE" && -f "\$IMPORT_SCRIPT_FILE" ]]; then
+  rm -f "\$IMPORT_SCRIPT_FILE"
+  echo "Cleaned up imported script file" >&2
+fi
 
 # Keep pod alive with tail
 wait \$TAIL_PID
 EXECEND
   else
-    local final_capture_cmd="${CAPTURE_COMMAND//${PLACEHOLDER_CHAR}/$target_pod_name}"
-    echo "nsenter ${nsenter_params} -t \$PID ${final_capture_cmd} 2>&1 &"
+    # Handle %p placeholder (podname) and %n placeholder (in pod context, use podname)
+    local final_capture_cmd="${CAPTURE_COMMAND//${PLACEHOLDER_CHAR}p/$target_pod_name}"
+    final_capture_cmd="${final_capture_cmd//${PLACEHOLDER_CHAR}n/$target_pod_name}"
+    if [[ -n "$import_file_content" ]]; then
+      # When import file is used: write decoded content to temp file using heredoc
+      echo "# Create temp script file from imported content"
+      echo "IMPORT_SCRIPT_FILE=\"/tmp/kube-dump-import-\$\$.sh\""
+      echo "cat > \"\$IMPORT_SCRIPT_FILE\" << 'KUBEDUMP_SCRIPT_EOF'"
+      echo "${import_file_content}" | base64 -d
+      echo "KUBEDUMP_SCRIPT_EOF"
+      echo "chmod +x \"\$IMPORT_SCRIPT_FILE\""
+      # Substitute $IMPORT_SCRIPT_FILE into the command - escape for echo, will expand at runtime
+      local capture_with_placeholder="${final_capture_cmd//${PLACEHOLDER_CHAR}f/\$IMPORT_SCRIPT_FILE}"
+      echo "nsenter ${nsenter_params} -t \$PID ${capture_with_placeholder} 2>&1 &"
+    else
+      echo "nsenter ${nsenter_params} -t \$PID ${final_capture_cmd} 2>&1 &"
+    fi
     echo "NSENTER_PID=\$!"
     echo "echo \"Command started in background (PID: \$NSENTER_PID)\" >&2"
+    if [[ -n "$import_file_content" ]]; then
+      echo "wait \$NSENTER_PID 2>/dev/null || true"
+      echo "rm -f \"\$IMPORT_SCRIPT_FILE\" 2>/dev/null"
+    fi
     echo "tail -f /dev/null"
   fi
 }
