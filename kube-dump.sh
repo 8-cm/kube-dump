@@ -206,7 +206,7 @@ usage() {
   echo "  # Complex example:"
   echo "  $0 -l app=argocd-redis -l app=falcosidekick -n argocd \\"
   echo "    --import-file ./examples/simple-test.sh \\"
-  echo "    -e 'echo \"Pod: \$(hostname)\" > /host/tmp/%p.info' \\"
+  echo "    -e 'echo \"Pod: \$(hostname)\" > /host/tmp/%p.info' --nsenter-params n \\"
   echo "    --import-file ./examples/variant-A.sh \\"
   echo "    -e 'bash %f | tee /host/tmp/%p_A.log' \\"
   echo "    --include-nodes \\"
