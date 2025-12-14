@@ -74,6 +74,9 @@ usage() {
    echo "  --memory-limit       Memory limit for debug/discovery/killswitch containers (optional, affects containers not pods)"
    echo "                       Example values: 128Mi, 256Mi, 512Mi, 1Gi, 2Gi"
    echo "                       Valid units: Ki, Mi, Gi, Ti (binary); K, M, G, T (decimal)"
+   echo "  --service-account    Service account for debug/discovery/killswitch pods (optional, uses default if not specified)"
+   echo "                       Example: my-service-account"
+   echo "                       Pod will verify account exists in target namespace before creation"
    echo "  --image              Container image for debug/discovery/killswitch pods [default: nicolaka/netshoot]"
    echo "  --no-glyphs          Disable emojis and use text labels like [INFO], [ERROR], [OK]"
    echo "  --verbose            Enable verbose logging (max k8s verbosity, per-pod logs to OUTPUT_DIR/debug/)"
@@ -216,6 +219,12 @@ usage() {
    echo "  # Set only memory limit (CPU defaults to unlimited):"
    echo "  $0 -l app=web --memory-limit 1Gi"
    echo ""
+   echo "  # Use custom service account for debug pods:"
+   echo "  $0 -l app=web --service-account my-custom-account"
+   echo ""
+   echo "  # Combine service account with resource limits:"
+   echo "  $0 -l app=web --service-account my-account --cpu-limit 200m --memory-limit 512Mi"
+   echo ""
    echo "  # Enable verbose logging with max Kubernetes verbosity (requires -o):"
    echo "  $0 -l app=web -o ./output --verbose"
   echo ""
@@ -255,6 +264,8 @@ echo "Notes:"
    echo "  - Debug pod always keeps its own mount namespace to access /host for node access"
    echo "  - No limit on number of sidecars (within Kubernetes pod limits)"
    echo "  - Each file monitor independently monitors ALL files from ALL command containers"
+   echo "  - Service account (--service-account) must exist in target namespace before pod creation"
+   echo "  - If no service account specified, pods use the namespace's default service account"
    echo ""
    echo "Resource Limits (Container-based):"
    echo "  - --cpu-limit and --memory-limit apply to containers WITHIN pods, not to pods themselves"
@@ -351,6 +362,7 @@ initialize_variables() {
    WORKDIR_NODE=""  # Working directory override for debug, discovery, and killswitch pods on nodes (optional)
    CPU_LIMIT=""  # CPU limit for debug/discovery/killswitch containers (optional, e.g., 100m, 500m, 1)
    MEMORY_LIMIT=""  # Memory limit for debug/discovery/killswitch containers (optional, e.g., 128Mi, 512Mi, 1Gi)
+   SERVICE_ACCOUNT=""  # Service account to use for all diagnostic, discovery, and kill switch pods (optional)
    DEBUG_IMAGE="nicolaka/netshoot"  # Default container image for debug/discovery/killswitch pods
    KILL_SWITCH_MONITOR_PODS=()  # Array for kill switch monitor pods
   KILL_SWITCH_MONITOR_NAMES_META=()  # Parallel array: kill switch monitor pod names
@@ -1143,12 +1155,13 @@ show_configuration() {
   else
     echo "  Node Command:      $NODE_COMMAND"
   fi
-  echo ""
-   echo "Container Settings:"
-   echo "  Image:             $DEBUG_IMAGE"
-   echo "  CPU Limit:         ${CPU_LIMIT:-"(not set)"}"
-   echo "  Memory Limit:      ${MEMORY_LIMIT:-"(not set)"}"
-   echo "  CRI Runtime:       $CRI_RUNTIME"
+   echo ""
+    echo "Container Settings:"
+    echo "  Image:             $DEBUG_IMAGE"
+    echo "  CPU Limit:         ${CPU_LIMIT:-"(not set)"}"
+    echo "  Memory Limit:      ${MEMORY_LIMIT:-"(not set)"}"
+    echo "  Service Account:   ${SERVICE_ACCOUNT:-"(not set - uses default)"}"
+    echo "  CRI Runtime:       $CRI_RUNTIME"
    echo "  CRI Socket:        $(get_effective_cri_socket)"
    echo "  Install Deps:      $INSTALL_DEPS"
    echo ""
@@ -1669,7 +1682,7 @@ parse_arguments() {
            shift
          fi
          ;;
-       --memory-limit)
+        --memory-limit)
          if [[ $1 == --memory-limit=* ]]; then
            MEMORY_LIMIT="$val"
          else
@@ -1678,7 +1691,16 @@ parse_arguments() {
            shift
          fi
          ;;
-       --no-glyphs)
+        --service-account)
+         if [[ $1 == --service-account=* ]]; then
+           SERVICE_ACCOUNT="$val"
+         else
+           validate_option_value "$val" "--service-account"
+           SERVICE_ACCOUNT="$val"
+           shift
+         fi
+         ;;
+        --no-glyphs)
          NO_GLYPHS=true
          ;;
       --verbose)
@@ -1873,20 +1895,34 @@ validate_arguments() {
      fi
    fi
 
-   if [[ -n "$MEMORY_LIMIT" ]]; then
-     # Validate memory limit format: number + unit (Ki, Mi, Gi, Ti, K, M, G, T)
-     if ! [[ "$MEMORY_LIMIT" =~ ^[0-9]+([.][0-9]+)?([KMGTkmgt]i?)?$ ]]; then
-       echo "Error: Invalid memory limit format: $MEMORY_LIMIT" >&2
-       echo "       Valid examples: 128Mi, 256Mi, 1Gi, 512M" >&2
-       echo "       Binary units (i suffix): Ki, Mi, Gi, Ti" >&2
-       echo "       Decimal units: K, M, G, T" >&2
-       return 1
-     fi
-   fi
+    if [[ -n "$MEMORY_LIMIT" ]]; then
+      # Validate memory limit format: number + unit (Ki, Mi, Gi, Ti, K, M, G, T)
+      if ! [[ "$MEMORY_LIMIT" =~ ^[0-9]+([.][0-9]+)?([KMGTkmgt]i?)?$ ]]; then
+        echo "Error: Invalid memory limit format: $MEMORY_LIMIT" >&2
+        echo "       Valid examples: 128Mi, 256Mi, 1Gi, 512M" >&2
+        echo "       Binary units (i suffix): Ki, Mi, Gi, Ti" >&2
+        echo "       Decimal units: K, M, G, T" >&2
+        return 1
+      fi
+    fi
 
-   # Arrays are initialized in initialize_variables(), no need to validate here
+    # Validate service account if specified
+    if [[ -n "$SERVICE_ACCOUNT" ]]; then
+      # Determine the target namespace to check service account
+      local target_ns="${DEBUG_NAMESPACE:-default}"
+      
+      # Check if service account exists in target namespace
+      if ! $KUBE_CLI get serviceaccount "$SERVICE_ACCOUNT" -n "$target_ns" &>/dev/null; then
+        format_message_stderr "❌ Error: Service account '$SERVICE_ACCOUNT' not found in namespace '$target_ns'"
+        return 1
+      fi
+      
+      format_message "✅ Service account '$SERVICE_ACCOUNT' verified in namespace '$target_ns'"
+    fi
 
-   # Execution mode and command details are shown in configuration summary
+    # Arrays are initialized in initialize_variables(), no need to validate here
+
+    # Execution mode and command details are shown in configuration summary
 }
 
 # -------------------------------------------------------------------------------
@@ -2895,29 +2931,31 @@ create_single_node_debug_pod() {
     container_specs+=$'\n'
   done
 
-  # Create pod with dynamically generated containers
-  run_kube_cmd "$debug_pod_name" "apply" apply -f - <<EOF
+   # Create pod with dynamically generated containers
+   run_kube_cmd "$debug_pod_name" "apply" apply -f - <<EOF
 apiVersion: v1
 kind: Pod
 metadata:
-  name: ${debug_pod_name}
-  namespace: ${debug_ns}
-  labels:
-    app: debug
-    node: ${node_label_value}
+   name: ${debug_pod_name}
+   namespace: ${debug_ns}
+   labels:
+     app: debug
+     node: ${node_label_value}
 spec:
-  hostPID: true
-  hostNetwork: true
-  hostIPC: true
-  containers:
+   hostPID: true
+   hostNetwork: true
+   hostIPC: true
+   containers:
 ${container_specs}
-  volumes:
-  - name: host
-    hostPath:
-      path: /
-      type: Directory
-  nodeSelector:
-    kubernetes.io/hostname: ${node_name}
+   restartPolicy: Never
+   $([ -n "$SERVICE_ACCOUNT" ] && echo "  serviceAccountName: ${SERVICE_ACCOUNT}")
+   volumes:
+   - name: host
+     hostPath:
+       path: /
+       type: Directory
+   nodeSelector:
+     kubernetes.io/hostname: ${node_name}
 EOF
 }
 
@@ -3143,26 +3181,27 @@ create_single_debug_pod() {
     container_specs+=$'\n'
   done
 
-  # Create pod with dynamically generated containers
-  run_kube_cmd "$debug_pod_name" "apply" apply -f - <<EOF
+   # Create pod with dynamically generated containers
+   run_kube_cmd "$debug_pod_name" "apply" apply -f - <<EOF
 apiVersion: v1
 kind: Pod
 metadata:
-  name: ${debug_pod_name}
-  namespace: ${debug_ns}
+   name: ${debug_pod_name}
+   namespace: ${debug_ns}
 spec:
-  containers:
+   containers:
 ${container_specs}
-  hostNetwork: true
-  hostPID: true
-  hostIPC: true
-  nodeName: ${node_name}
-  restartPolicy: Never
-  volumes:
-  - name: host
-    hostPath:
-      path: /
-      type: Directory
+   hostNetwork: true
+   hostPID: true
+   hostIPC: true
+   nodeName: ${node_name}
+   restartPolicy: Never
+   $([ -n "$SERVICE_ACCOUNT" ] && echo "  serviceAccountName: ${SERVICE_ACCOUNT}")
+   volumes:
+   - name: host
+     hostPath:
+       path: /
+       type: Directory
 EOF
 }
 
@@ -4687,26 +4726,27 @@ create_discovery_pod() {
      return 1
    fi
 
-   # Create discovery pod using YAML manifest for file discovery
-   run_kube_cmd "$discovery_pod_name" "apply" apply -f - <<EOF
+    # Create discovery pod using YAML manifest for file discovery
+    run_kube_cmd "$discovery_pod_name" "apply" apply -f - <<EOF
 apiVersion: v1
 kind: Pod
 metadata:
-  name: ${discovery_pod_name}
-  namespace: ${debug_ns}
+   name: ${discovery_pod_name}
+   namespace: ${debug_ns}
 spec:
-  restartPolicy: Never
-  hostNetwork: true
-  hostPID: true
-  nodeSelector:
-    kubernetes.io/hostname: ${node_name}
-  containers:
+   restartPolicy: Never
+   hostNetwork: true
+   hostPID: true
+   $([ -n "$SERVICE_ACCOUNT" ] && echo "  serviceAccountName: ${SERVICE_ACCOUNT}")
+   nodeSelector:
+     kubernetes.io/hostname: ${node_name}
+   containers:
 ${containers_yaml}
-  volumes:
-  - name: host-root
-    hostPath:
-      path: /
-      type: Directory
+   volumes:
+   - name: host-root
+     hostPath:
+       path: /
+       type: Directory
 EOF
 }
 
@@ -4794,26 +4834,27 @@ create_node_discovery_pod() {
      return 1
    fi
 
-   # Create node discovery pod using YAML manifest
-   run_kube_cmd "$discovery_pod_name" "apply" apply -f - <<EOF
+    # Create node discovery pod using YAML manifest
+    run_kube_cmd "$discovery_pod_name" "apply" apply -f - <<EOF
 apiVersion: v1
 kind: Pod
 metadata:
-  name: ${discovery_pod_name}
-  namespace: ${debug_ns}
+   name: ${discovery_pod_name}
+   namespace: ${debug_ns}
 spec:
-  restartPolicy: Never
-  hostNetwork: true
-  hostPID: true
-  nodeSelector:
-    kubernetes.io/hostname: ${node_name}
-  containers:
+   restartPolicy: Never
+   hostNetwork: true
+   hostPID: true
+   $([ -n "$SERVICE_ACCOUNT" ] && echo "  serviceAccountName: ${SERVICE_ACCOUNT}")
+   nodeSelector:
+     kubernetes.io/hostname: ${node_name}
+   containers:
 ${containers_yaml}
-  volumes:
-  - name: host-root
-    hostPath:
-      path: /
-      type: Directory
+   volumes:
+   - name: host-root
+     hostPath:
+       path: /
+       type: Directory
 EOF
 }
 
@@ -5233,34 +5274,35 @@ create_kill_switch_monitor_pod() {
      fi
    fi
 
-  run_kube_cmd "$monitor_pod_name" "apply" apply -f - <<EOF
+   run_kube_cmd "$monitor_pod_name" "apply" apply -f - <<EOF
 apiVersion: v1
 kind: Pod
 metadata:
-  name: ${monitor_pod_name}
-  namespace: ${debug_ns}
-  labels:
-    app: kill-switch-monitor
-    target-pod: ${target_pod_label_value}
+   name: ${monitor_pod_name}
+   namespace: ${debug_ns}
+   labels:
+     app: kill-switch-monitor
+     target-pod: ${target_pod_label_value}
 spec:
-  restartPolicy: Never
-  hostNetwork: true
-  hostPID: true
-  nodeSelector:
-    kubernetes.io/hostname: ${node_name}
-  containers:
-  - name: monitor
-    image: ${DEBUG_IMAGE}
-    command: ["/bin/bash", "-c"]
-    args:
-    - |
+   restartPolicy: Never
+   hostNetwork: true
+   hostPID: true
+   $([ -n "$SERVICE_ACCOUNT" ] && echo "  serviceAccountName: ${SERVICE_ACCOUNT}")
+   nodeSelector:
+     kubernetes.io/hostname: ${node_name}
+   containers:
+   - name: monitor
+     image: ${DEBUG_IMAGE}
+     command: ["/bin/bash", "-c"]
+     args:
+     - |
 $(build_kill_switch_monitor_script "$target_debug_pod" "$volume_path" | sed 's/^/      /')
 ${container_spec}
-  volumes:
-  - name: host-root
-    hostPath:
-      path: /
-      type: Directory
+   volumes:
+   - name: host-root
+     hostPath:
+       path: /
+       type: Directory
 EOF
 }
 
