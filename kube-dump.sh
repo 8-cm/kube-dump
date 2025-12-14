@@ -2946,18 +2946,18 @@ spec:
    hostNetwork: true
    hostIPC: true
    containers:
-${container_specs}
-   restartPolicy: Never
-   $([ -n "$SERVICE_ACCOUNT" ] && echo "  serviceAccountName: ${SERVICE_ACCOUNT}")
-   volumes:
-   - name: host
-     hostPath:
-       path: /
-       type: Directory
-   nodeSelector:
-     kubernetes.io/hostname: ${node_name}
-EOF
-}
+ ${container_specs}
+    restartPolicy: Never
+ $([ -n "$SERVICE_ACCOUNT" ] && echo "    serviceAccountName: ${SERVICE_ACCOUNT}")
+    volumes:
+    - name: host
+      hostPath:
+        path: /
+        type: Directory
+    nodeSelector:
+      kubernetes.io/hostname: ${node_name}
+ EOF
+ }
 
 # -------------------------------------------------------------------------------
 # Function: build_node_debug_script
@@ -3195,9 +3195,9 @@ ${container_specs}
    hostPID: true
    hostIPC: true
    nodeName: ${node_name}
-   restartPolicy: Never
-   $([ -n "$SERVICE_ACCOUNT" ] && echo "  serviceAccountName: ${SERVICE_ACCOUNT}")
-   volumes:
+    restartPolicy: Never
+ $([ -n "$SERVICE_ACCOUNT" ] && echo "    serviceAccountName: ${SERVICE_ACCOUNT}")
+    volumes:
    - name: host
      hostPath:
        path: /
@@ -4727,28 +4727,31 @@ create_discovery_pod() {
    fi
 
     # Create discovery pod using YAML manifest for file discovery
+    local sa_line=""
+    [[ -n "$SERVICE_ACCOUNT" ]] && sa_line=$'  serviceAccountName: '"${SERVICE_ACCOUNT}"$'\n'
+
     run_kube_cmd "$discovery_pod_name" "apply" apply -f - <<EOF
-apiVersion: v1
-kind: Pod
-metadata:
+ apiVersion: v1
+ kind: Pod
+ metadata:
    name: ${discovery_pod_name}
    namespace: ${debug_ns}
-spec:
-   restartPolicy: Never
-   hostNetwork: true
-   hostPID: true
-   $([ -n "$SERVICE_ACCOUNT" ] && echo "  serviceAccountName: ${SERVICE_ACCOUNT}")
-   nodeSelector:
-     kubernetes.io/hostname: ${node_name}
-   containers:
-${containers_yaml}
-   volumes:
-   - name: host-root
-     hostPath:
-       path: /
-       type: Directory
-EOF
-}
+ spec:
+    restartPolicy: Never
+    hostNetwork: true
+    hostPID: true
+ $([ -n "$SERVICE_ACCOUNT" ] && echo "    serviceAccountName: ${SERVICE_ACCOUNT}")
+    nodeSelector:
+      kubernetes.io/hostname: ${node_name}
+    containers:
+ ${containers_yaml}
+    volumes:
+    - name: host-root
+      hostPath:
+        path: /
+        type: Directory
+ EOF
+ }
 
 # -------------------------------------------------------------------------------
 # Function: create_node_discovery_pod
@@ -4835,28 +4838,31 @@ create_node_discovery_pod() {
    fi
 
     # Create node discovery pod using YAML manifest
+    local sa_line=""
+    [[ -n "$SERVICE_ACCOUNT" ]] && sa_line=$'  serviceAccountName: '"${SERVICE_ACCOUNT}"$'\n'
+
     run_kube_cmd "$discovery_pod_name" "apply" apply -f - <<EOF
-apiVersion: v1
-kind: Pod
-metadata:
-   name: ${discovery_pod_name}
-   namespace: ${debug_ns}
-spec:
-   restartPolicy: Never
-   hostNetwork: true
-   hostPID: true
-   $([ -n "$SERVICE_ACCOUNT" ] && echo "  serviceAccountName: ${SERVICE_ACCOUNT}")
-   nodeSelector:
-     kubernetes.io/hostname: ${node_name}
-   containers:
-${containers_yaml}
-   volumes:
-   - name: host-root
-     hostPath:
-       path: /
-       type: Directory
-EOF
-}
+ apiVersion: v1
+ kind: Pod
+ metadata:
+    name: ${discovery_pod_name}
+    namespace: ${debug_ns}
+ spec:
+    restartPolicy: Never
+    hostNetwork: true
+    hostPID: true
+ $([ -n "$SERVICE_ACCOUNT" ] && echo "    serviceAccountName: ${SERVICE_ACCOUNT}")
+    nodeSelector:
+      kubernetes.io/hostname: ${node_name}
+    containers:
+ ${containers_yaml}
+    volumes:
+    - name: host-root
+      hostPath:
+        path: /
+        type: Directory
+ EOF
+ }
 
 # -------------------------------------------------------------------------------
 # Function: wait_for_discovery_pods_ready
@@ -5283,21 +5289,21 @@ metadata:
    labels:
      app: kill-switch-monitor
      target-pod: ${target_pod_label_value}
-spec:
-   restartPolicy: Never
-   hostNetwork: true
-   hostPID: true
-   $([ -n "$SERVICE_ACCOUNT" ] && echo "  serviceAccountName: ${SERVICE_ACCOUNT}")
-   nodeSelector:
-     kubernetes.io/hostname: ${node_name}
-   containers:
-   - name: monitor
-     image: ${DEBUG_IMAGE}
-     command: ["/bin/bash", "-c"]
-     args:
-     - |
-$(build_kill_switch_monitor_script "$target_debug_pod" "$volume_path" | sed 's/^/      /')
-${container_spec}
+ spec:
+    restartPolicy: Never
+    hostNetwork: true
+    hostPID: true
+ $([ -n "$SERVICE_ACCOUNT" ] && echo "    serviceAccountName: ${SERVICE_ACCOUNT}")
+    nodeSelector:
+      kubernetes.io/hostname: ${node_name}
+    containers:
+    - name: monitor
+      image: ${DEBUG_IMAGE}
+      command: ["/bin/bash", "-c"]
+      args:
+      - |
+ $(build_kill_switch_monitor_script "$target_debug_pod" "$volume_path" | sed 's/^/      /')
+ ${container_spec}
    volumes:
    - name: host-root
      hostPath:
