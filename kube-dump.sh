@@ -56,8 +56,8 @@ usage() {
   echo "  -o, --output         Output directory for downloaded files"
   echo "  --download-verification  Verification method for downloads: hash (MD5+SHA256), size, none [default: none]"
   echo "  -I, --placeholder    Set placeholder prefix character [default: %]"
-  echo "                       Placeholders: %p = podname, %n = nodename, %f = imported file path"
-  echo "                       Example: -I@ makes placeholders @p, @n, @f"
+  echo "                       Placeholders: %t = target (pod or node name), %n = nodename, %f = imported file path"
+  echo "                       Example: -I@ makes placeholders @t, @n, @f"
   echo "  -f, --import-file    Path to local file to import; must precede the -e/-E it applies to"
   echo "                       The file is base64-encoded and written to temp file in container"
   echo "                       Use %f in command to reference the temp script path"
@@ -66,6 +66,8 @@ usage() {
   echo "                       If omitted, auto-detects from kubelet nodefs.available (+5% safety), fallback to 10%"
   echo "  --pod-volume         Volume path to monitor for pod-based kill switches (e.g., /tmp)"
   echo "  --node-volume        Volume path to monitor for node-based kill switches (e.g., /var)"
+  echo "  --workdir-pod        Working directory override for all pod-based operations (debug/discovery/killswitch)"
+  echo "  --workdir-node       Working directory override for all node-based operations (debug/discovery/killswitch)"
   echo "  --image              Container image for debug/discovery/killswitch pods [default: nicolaka/netshoot]"
   echo "  --no-glyphs          Disable emojis and use text labels like [INFO], [ERROR], [OK]"
   echo "  --verbose            Enable verbose logging (max k8s verbosity, per-pod logs to OUTPUT_DIR/debug/)"
@@ -108,37 +110,37 @@ usage() {
   echo "  # Run command on nodes matching ANY of multiple label selectors (OR logic):"
   echo "  $0 -L zone=us-west -L zone=us-east -E 'ss -tuln'"
   echo ""
-  echo "  # Use %p for podname/nodename substitution in commands:"
-  echo "  $0 -l app=web -e 'tcpdump -i any -w %p.pcap'"
+  echo "  # Use %t for target (pod or node) name substitution in commands:"
+  echo "  $0 -l app=web -e 'tcpdump -i any -w %t.pcap'"
   echo ""
   echo "  # Use custom placeholder prefix character:"
-  echo "  $0 -l app=web -e 'tcpdump -i any | tee @p.log' -I@"
+  echo "  $0 -l app=web -e 'tcpdump -i any | tee @t.log' -I@"
   echo ""
   echo "  # Generate files and download them:"
-  echo "  $0 -l app=web -e 'tcpdump -i any -w %p.pcap -c 100' -s 'ls *.pcap' -o ./downloads"
+  echo "  $0 -l app=web -e 'tcpdump -i any -w %t.pcap -c 100' -s 'ls *.pcap' -o ./downloads"
   echo ""
   echo "  # Generate node files with custom placeholder and download:"
-  echo "  $0 -L worker=true -E 'ss -tuln > @n-ports.txt' -S 'ls @n-ports.txt' -I@ -o ./node-files"
+  echo "  $0 -L worker=true -E 'ss -tuln > @t-ports.txt' -S 'ls @t-ports.txt' -I@ -o ./node-files"
   echo ""
-  echo "  # Use %p for podname substitution in file names:"
-  echo "  $0 -l app=web -e 'tcpdump -i any -w %p.pcap'"
+  echo "  # Use %t for target name substitution in file names:"
+  echo "  $0 -l app=web -e 'tcpdump -i any -w %t.pcap'"
   echo ""
   echo "  # Import a local script and execute it (--import-file before -e):"
   echo "  $0 -l app=web --import-file ./my-script.sh -e '%f'"
   echo ""
-  echo "  # Import a script and pass the podname as argument:"
-  echo "  $0 -l app=web --import-file ./diagnostics.sh -e '%f %p'"
+  echo "  # Import a script and pass the target name as argument:"
+  echo "  $0 -l app=web --import-file ./diagnostics.sh -e '%f %t'"
   echo ""
   echo "  # Multiple commands run in parallel (multi-sidecar mode):"
   echo "  $0 -l app=web \\"
-  echo "    -e 'tcpdump -i any -w %p.pcap' \\"
-  echo "    -e 'ss -tunap > %p.sockets' \\"
-  echo "    -e 'netstat -s > %p.netstat'"
+  echo "    -e 'tcpdump -i any -w %t.pcap' \\"
+  echo "    -e 'ss -tunap > %t.sockets' \\"
+  echo "    -e 'netstat -s > %t.netstat'"
   echo "  # Creates debug pods with 3 containers: command-0, command-1, command-2"
   echo ""
   echo "  # Multiple file monitors (each monitors ALL files from ALL commands):"
   echo "  $0 -l app=web \\"
-  echo "    -e 'tcpdump -i any -w %p.pcap' \\"
+  echo "    -e 'tcpdump -i any -w %t.pcap' \\"
   echo "    -s 'ls *.pcap' \\"
   echo "    -s 'find /tmp -name \"*.log\"' \\"
   echo "    -o ./downloads"
@@ -146,26 +148,26 @@ usage() {
   echo ""
   echo "  # Complex multi-sidecar with downloads:"
   echo "  $0 -l app=nginx \\"
-  echo "    -e 'tcpdump -i any -w /tmp/%p.pcap -c 1000' \\"
-  echo "    -e 'ss -tunap > /tmp/%p.sockets' \\"
+  echo "    -e 'tcpdump -i any -w /tmp/%t.pcap -c 1000' \\"
+  echo "    -e 'ss -tunap > /tmp/%t.sockets' \\"
   echo "    -s 'ls /tmp/*.pcap' \\"
   echo "    -s 'ls /tmp/*.sockets' \\"
   echo "    -o ./captures"
   echo "  # Containers: command-0, command-1, file-monitor-0, file-monitor-1"
-  echo "  # Logs saved: {pod-name}-command-0.log, {pod-name}-command-1.log, etc."
+  echo "  # Logs saved: {target-name}-command-0.log, {target-name}-command-1.log, etc."
   echo ""
   echo "  # Custom nsenter namespaces for accessing container filesystems:"
   echo "  $0 -l app=web \\"
-  echo "    -e 'tcpdump -i any -w %p.pcap' --nsenter-params n \\"
-  echo "    -e 'tar -czf /tmp/%p.logs.tar.gz /var/log' --nsenter-params n,m"
+  echo "    -e 'tcpdump -i any -w %t.pcap' --nsenter-params n \\"
+  echo "    -e 'tar -czf /tmp/%t.logs.tar.gz /var/log' --nsenter-params n,m"
   echo "  # First command: network namespace only (default)"
   echo "  # Second command: network + mount namespaces (access container filesystem)"
   echo ""
   echo "  # Access different namespaces for different diagnostics:"
   echo "  $0 -l app=database \\"
-  echo "    -e 'ss -tunap > %p.sockets' --nsenter-params n \\"
-  echo "    -e 'mount -t proc none /proc && ps auxf > %p.processes' --nsenter-params n,p \\"
-  echo "    -e 'df -h > %p.disk' --nsenter-params n,m"
+  echo "    -e 'ss -tunap > %t.sockets' --nsenter-params n \\"
+  echo "    -e 'mount -t proc none /proc && ps auxf > %t.processes' --nsenter-params n,p \\"
+  echo "    -e 'df -h > %t.disk' --nsenter-params n,m"
   echo "  # First: network namespace for sockets"
   echo "  # Second: network + PID namespace for process tree (mount /proc to see correct PIDs)"
   echo "  # Third: network + mount namespace for disk usage"
@@ -177,8 +179,8 @@ usage() {
   echo ""
   echo "  # Trace all processes in PID namespace (mount /proc for correct PIDs):"
   echo "  $0 -l app=web \\"
-  echo "    -e 'mount -t proc none /proc && for pid in /proc/[0-9]*; do strace -f -p \$(basename \$pid) -o /host/tmp/%p.\$pid.strace & done; sleep infinity' \\"
-  echo "    --nsenter-params n,p -s 'ls /host/tmp/%p.*.strace'"
+  echo "    -e 'mount -t proc none /proc && for pid in /proc/[0-9]*; do strace -f -p \$(basename \$pid) -o /host/tmp/%t.\$pid.strace & done; sleep infinity' \\"
+  echo "    --nsenter-params n,p -s 'ls /host/tmp/%t.*.strace'"
   echo "  # Mounts /proc in target PID namespace, then traces all processes"
   echo ""
   echo "  # Use custom CRI socket path:"
@@ -292,7 +294,7 @@ initialize_variables() {
   OUTPUT_DIR=""  # Output directory for downloaded files from -o
   DOWNLOAD_VERIFICATION="none"  # Download verification method: hash, size, none
   PLACEHOLDER_CHAR="%"  # Default placeholder prefix character (changeable via -I)
-  # Placeholders: %p = podname, %n = nodename, %f = imported file content
+  # Placeholders: %t = target (pod or node name), %n = nodename, %f = imported file content
   PENDING_IMPORT_FILE=""  # Pending import file for next -e/-E command
   PENDING_IMPORT_PATH=""  # Original path of the pending import file (for display)
   IMPORT_FILE_INDICES=()  # Parallel array: command indices that have import files (for -e)
@@ -321,6 +323,8 @@ initialize_variables() {
   KILL_SWITCH_REL=""  # Kill switch relative threshold (e.g., 10%)
   POD_VOLUME=""  # Volume path to monitor for pod-based kill switches
   NODE_VOLUME=""  # Volume path to monitor for node-based kill switches
+  WORKDIR_POD=""  # Working directory override for debug, discovery, and killswitch pods (optional)
+  WORKDIR_NODE=""  # Working directory override for debug, discovery, and killswitch pods on nodes (optional)
   DEBUG_IMAGE="nicolaka/netshoot"  # Default container image for debug/discovery/killswitch pods
   KILL_SWITCH_MONITOR_PODS=()  # Array for kill switch monitor pods
   KILL_SWITCH_MONITOR_NAMES_META=()  # Parallel array: kill switch monitor pod names
@@ -1592,16 +1596,34 @@ parse_arguments() {
           shift
         fi
         ;;
-      --node-volume)
-        if [[ $1 == --node-volume=* ]]; then
-          NODE_VOLUME="$val"
-        else
-          validate_option_value "$val" "--node-volume"
-          NODE_VOLUME="$val"
-          shift
-        fi
-        ;;
-      --image)
+       --node-volume)
+         if [[ $1 == --node-volume=* ]]; then
+           NODE_VOLUME="$val"
+         else
+           validate_option_value "$val" "--node-volume"
+           NODE_VOLUME="$val"
+           shift
+         fi
+         ;;
+       --workdir-pod)
+         if [[ $1 == --workdir-pod=* ]]; then
+           WORKDIR_POD="$val"
+         else
+           validate_option_value "$val" "--workdir-pod"
+           WORKDIR_POD="$val"
+           shift
+         fi
+         ;;
+       --workdir-node)
+         if [[ $1 == --workdir-node=* ]]; then
+           WORKDIR_NODE="$val"
+         else
+           validate_option_value "$val" "--workdir-node"
+           WORKDIR_NODE="$val"
+           shift
+         fi
+         ;;
+       --image)
         if [[ $1 == --image=* ]]; then
           DEBUG_IMAGE="$val"
         else
@@ -2571,6 +2593,7 @@ generate_command_container() {
   local node_name="$5"
   local debug_pod_name="$6"
   local script_builder_func="$7"
+  local workdir="${8:-}"  # Optional working directory parameter
 
   cat <<EOF
   - name: ${container_name}
@@ -2586,6 +2609,13 @@ $($script_builder_func "$pod_name" "$container_name_target" "$node_name" "$debug
     - name: host
       mountPath: /host
 EOF
+
+  # Add workingDir if provided
+  if [[ -n "$workdir" ]]; then
+    cat <<EOF
+    workingDir: ${workdir}
+EOF
+  fi
 }
 
 # -------------------------------------------------------------------------------
@@ -2625,6 +2655,7 @@ generate_file_monitor_container() {
   local target_name="$6"
   local script_builder_func="$7"
   local encoded_command="$8"
+  local workdir="${9:-}"  # Optional working directory parameter
 
   # Detect if this is a node file monitor (script builder contains "node")
   local is_node_monitor=false
@@ -2675,6 +2706,13 @@ EOF
     - name: host
       mountPath: /host
 EOF
+
+  # Add workingDir if provided
+  if [[ -n "$workdir" ]]; then
+    cat <<EOF
+    workingDir: ${workdir}
+EOF
+  fi
 }
 
 # -------------------------------------------------------------------------------
@@ -2744,13 +2782,13 @@ create_single_node_debug_pod() {
 
   # Generate command containers (command-0, command-1, ...)
   for ((i=0; i<num_command_containers; i++)); do
-    container_specs+=$(generate_command_container "command-$i" "$i" "" "" "$node_name" "$debug_pod_name" "build_node_debug_script")
+    container_specs+=$(generate_command_container "command-$i" "$i" "" "" "$node_name" "$debug_pod_name" "build_node_debug_script" "$WORKDIR_NODE")
     container_specs+=$'\n'
   done
 
   # Generate file monitor containers (file-monitor-0, file-monitor-1, ...)
   for ((i=0; i<${#ENCODED_NODE_SELECT_COMMANDS[@]}; i++)); do
-    container_specs+=$(generate_file_monitor_container "file-monitor-$i" "$i" "" "" "$node_name" "$node_name" "build_node_file_monitor_script" "${ENCODED_NODE_SELECT_COMMANDS[$i]}")
+    container_specs+=$(generate_file_monitor_container "file-monitor-$i" "$i" "" "" "$node_name" "$node_name" "build_node_file_monitor_script" "${ENCODED_NODE_SELECT_COMMANDS[$i]}" "$WORKDIR_NODE")
     container_specs+=$'\n'
   done
 
@@ -2846,8 +2884,8 @@ build_node_debug_script() {
   # Substitute placeholder with target node name in node command, strip newlines
   local node_command_clean
   node_command_clean=$(echo "$cmd_to_use" | tr -d '\n')
-  # Handle %p placeholder (podname) and %n placeholder (nodename) - in node context both mean nodename
-  local final_node_command="${node_command_clean//${PLACEHOLDER_CHAR}p/$node_name}"
+  # Handle %t placeholder (target name) and %n placeholder (nodename) - in node context both mean nodename
+  local final_node_command="${node_command_clean//${PLACEHOLDER_CHAR}t/$node_name}"
   final_node_command="${final_node_command//${PLACEHOLDER_CHAR}n/$node_name}"
   
   # Variables for temp file handling
@@ -2869,9 +2907,9 @@ KUBEDUMP_SCRIPT_EOF
 chmod +x \"\$IMPORT_SCRIPT_FILE\""
     import_file_cleanup="rm -f \"\$IMPORT_SCRIPT_FILE\" 2>/dev/null
 echo \"Cleaned up imported script file\" >&2"
-    final_node_command="${final_node_command//${PLACEHOLDER_CHAR}f/\$IMPORT_SCRIPT_FILE}"
-  fi
-  # Note: Only %p, %n, %f are valid placeholders. No backward compat for plain %
+     final_node_command="${final_node_command//${PLACEHOLDER_CHAR}f/\$IMPORT_SCRIPT_FILE}"
+   fi
+   # Note: Only %t, %n, %f are valid placeholders. No backward compat for plain %
 
   # Security: Properly escape parameters to prevent shell injection
   local safe_container_index=$(printf %q "$container_index")
@@ -2992,13 +3030,13 @@ create_single_debug_pod() {
 
   # Generate command containers (command-0, command-1, ...)
   for ((i=0; i<num_command_containers; i++)); do
-    container_specs+=$(generate_command_container "command-$i" "$i" "$pod_name" "$container_name" "$node_name" "$debug_pod_name" "build_debug_script")
+    container_specs+=$(generate_command_container "command-$i" "$i" "$pod_name" "$container_name" "$node_name" "$debug_pod_name" "build_debug_script" "$WORKDIR_POD")
     container_specs+=$'\n'
   done
 
   # Generate file monitor containers (file-monitor-0, file-monitor-1, ...)
   for ((i=0; i<${#ENCODED_SELECT_COMMANDS[@]}; i++)); do
-    container_specs+=$(generate_file_monitor_container "file-monitor-$i" "$i" "$pod_name" "$container_name" "$node_name" "$pod_name" "build_file_monitor_script" "${ENCODED_SELECT_COMMANDS[$i]}")
+    container_specs+=$(generate_file_monitor_container "file-monitor-$i" "$i" "$pod_name" "$container_name" "$node_name" "$pod_name" "build_file_monitor_script" "${ENCODED_SELECT_COMMANDS[$i]}" "$WORKDIR_POD")
     container_specs+=$'\n'
   done
 
@@ -3046,12 +3084,12 @@ EOF
 #     $NAMESPACE       - Kubernetes namespace containing the target pod
 #     $CUSTOM_COMMAND  - Custom command to execute (if specified)
 #     $CAPTURE_COMMAND - Encoded command or default tcpdump command
-#     $PLACEHOLDER_CHAR - Character for target substitution in commands (% replaced with pod_name)
+#     $PLACEHOLDER_CHAR - Character for target substitution in commands (% replaced with target pod_name)
 #
 # Example Usage:
 #   SCRIPT_CONTENT=$(build_debug_script "nginx-app" "nginx" "worker1" "pod-debug-123")
 #   # Returns complete bash script for debugging nginx-app pod
-#   # Placeholder % in commands will be replaced with "nginx-app"
+#   # Placeholder % in commands will be replaced with "nginx-app" (target name)
 #
 # Expected Output:
 #   - Complete bash script suitable for execution in debug pod
@@ -3129,23 +3167,23 @@ echo "  Debug Pod: ${safe_debug_pod_name}" >&2
 # Show command that will be executed (with placeholder substitution for display)
 if [[ "${is_custom}" == "true" ]]; then
   PREVIEW_CMD=\$(echo '${cmd_to_use}' | base64 -d)
-  # Replace %p with podname, %n with podname
-  PREVIEW_CMD="\${PREVIEW_CMD//${PLACEHOLDER_CHAR}p/${safe_pod_name}}"
+  # Replace %t with target (pod) name, %n with nodename
+  PREVIEW_CMD="\${PREVIEW_CMD//${PLACEHOLDER_CHAR}t/${safe_pod_name}}"
   PREVIEW_CMD="\${PREVIEW_CMD//${PLACEHOLDER_CHAR}n/${safe_pod_name}}"
   # Replace %f with script path indicator if import file is used
   if [[ -n "$import_file_content" ]]; then
     PREVIEW_CMD="\${PREVIEW_CMD//${PLACEHOLDER_CHAR}f/\\\$IMPORT_SCRIPT_FILE}"
   fi
-  # Note: Only %p, %n, %f are valid. No backward compat for plain %
+  # Note: Only %t, %n, %f are valid. No backward compat for plain %
   echo "  Command: \$PREVIEW_CMD" >&2
 else
   local preview="${cmd_to_use}"
-  preview="\${preview//${PLACEHOLDER_CHAR}p/${safe_pod_name}}"
+  preview="\${preview//${PLACEHOLDER_CHAR}t/${safe_pod_name}}"
   preview="\${preview//${PLACEHOLDER_CHAR}n/${safe_pod_name}}"
   if [[ -n "$import_file_content" ]]; then
     preview="\${preview//${PLACEHOLDER_CHAR}f/\\\$IMPORT_SCRIPT_FILE}"
   fi
-  # Note: Only %p, %n, %f are valid. No backward compat for plain %
+  # Note: Only %t, %n, %f are valid. No backward compat for plain %
   echo "  Command: ${preview}" >&2
 fi
 echo "  Nsenter params: ${safe_nsenter_params}" >&2
@@ -4508,21 +4546,25 @@ create_discovery_pod() {
     containers_yaml+="    - |"$'\n'
     # Generate single-command script and indent
     containers_yaml+="$(build_single_discovery_script "$i" "$target_name" | sed 's/^/      /')"$'\n'
-    containers_yaml+="    securityContext:"$'\n'
-    containers_yaml+="      privileged: true"$'\n'
-    containers_yaml+="    env:"$'\n'
-    containers_yaml+="    - name: CRI_RUNTIME"$'\n'
-    containers_yaml+="      value: \"${CRI_RUNTIME}\""$'\n'
-    containers_yaml+="    - name: CRI_SOCKET"$'\n'
-    containers_yaml+="      value: \"${CRI_SOCKET}\""$'\n'
-    containers_yaml+="    - name: ENCODED_SELECT_COMMAND"$'\n'
-    containers_yaml+="      value: \"${ENCODED_SELECT_COMMANDS[$i]}\""$'\n'
-    containers_yaml+="    - name: PLACEHOLDER_CHAR"$'\n'
-    containers_yaml+="      value: \"${PLACEHOLDER_CHAR}\""$'\n'
-    containers_yaml+="    volumeMounts:"$'\n'
-    containers_yaml+="    - name: host-root"$'\n'
-    containers_yaml+="      mountPath: /host"$'\n'
-    containers_yaml+="      readOnly: false"$'\n'
+     containers_yaml+="    securityContext:"$'\n'
+     containers_yaml+="      privileged: true"$'\n'
+     containers_yaml+="    env:"$'\n'
+     containers_yaml+="    - name: CRI_RUNTIME"$'\n'
+     containers_yaml+="      value: \"${CRI_RUNTIME}\""$'\n'
+     containers_yaml+="    - name: CRI_SOCKET"$'\n'
+     containers_yaml+="      value: \"${CRI_SOCKET}\""$'\n'
+     containers_yaml+="    - name: ENCODED_SELECT_COMMAND"$'\n'
+     containers_yaml+="      value: \"${ENCODED_SELECT_COMMANDS[$i]}\""$'\n'
+     containers_yaml+="    - name: PLACEHOLDER_CHAR"$'\n'
+     containers_yaml+="      value: \"${PLACEHOLDER_CHAR}\""$'\n'
+     containers_yaml+="    volumeMounts:"$'\n'
+     containers_yaml+="    - name: host-root"$'\n'
+     containers_yaml+="      mountPath: /host"$'\n'
+     containers_yaml+="      readOnly: false"$'\n'
+     # Add workingDir if provided
+     if [[ -n "$WORKDIR_POD" ]]; then
+       containers_yaml+="    workingDir: ${WORKDIR_POD}"$'\n'
+     fi
    done
 
    # Validate that we have at least one container spec
@@ -4604,18 +4646,22 @@ create_node_discovery_pod() {
     containers_yaml+="    args:"$'\n'
     containers_yaml+="    - |"$'\n'
     containers_yaml+="$(build_single_node_discovery_script "$i" "$target_name" | sed 's/^/      /')"$'\n'
-    containers_yaml+="    securityContext:"$'\n'
-    containers_yaml+="      privileged: true"$'\n'
-    containers_yaml+="    env:"$'\n'
-    containers_yaml+="    - name: PLACEHOLDER_CHAR"$'\n'
-    containers_yaml+="      value: \"${PLACEHOLDER_CHAR}\""$'\n'
-    containers_yaml+="    - name: ENCODED_NODE_SELECT_COMMAND"$'\n'
-    containers_yaml+="      value: \"${ENCODED_NODE_SELECT_COMMANDS[$i]}\""$'\n'
-    containers_yaml+="    volumeMounts:"$'\n'
-    containers_yaml+="    - name: host-root"$'\n'
-    containers_yaml+="      mountPath: /host"$'\n'
-    containers_yaml+="      readOnly: false"$'\n'
-   done
+     containers_yaml+="    securityContext:"$'\n'
+     containers_yaml+="      privileged: true"$'\n'
+     containers_yaml+="    env:"$'\n'
+     containers_yaml+="    - name: PLACEHOLDER_CHAR"$'\n'
+     containers_yaml+="      value: \"${PLACEHOLDER_CHAR}\""$'\n'
+     containers_yaml+="    - name: ENCODED_NODE_SELECT_COMMAND"$'\n'
+     containers_yaml+="      value: \"${ENCODED_NODE_SELECT_COMMANDS[$i]}\""$'\n'
+     containers_yaml+="    volumeMounts:"$'\n'
+     containers_yaml+="    - name: host-root"$'\n'
+     containers_yaml+="      mountPath: /host"$'\n'
+     containers_yaml+="      readOnly: false"$'\n'
+     # Add workingDir if provided
+     if [[ -n "$WORKDIR_NODE" ]]; then
+       containers_yaml+="    workingDir: ${WORKDIR_NODE}"$'\n'
+     fi
+    done
 
    # Validate that we have at least one container spec
    if [[ -z "$containers_yaml" ]]; then
@@ -4913,53 +4959,56 @@ create_kill_switch_monitor_pods() {
       fi
     fi
 
-    # Determine volume path based on pod type (pod vs node debug pod)
-    local volume_path=""
-    if [[ "$debug_pod" == *"node-debug"* ]]; then
-      volume_path="$NODE_VOLUME"
-    else
-      volume_path="$POD_VOLUME"
-    fi
+     # Determine volume path and workdir based on pod type (pod vs node debug pod)
+     local volume_path=""
+     local workdir=""
+     if [[ "$debug_pod" == *"node-debug"* ]]; then
+       volume_path="$NODE_VOLUME"
+       workdir="$WORKDIR_NODE"
+     else
+       volume_path="$POD_VOLUME"
+       workdir="$WORKDIR_POD"
+     fi
 
-    # Create shorter name with prefix based on debug pod type
-    local debug_pod_hash
-    if command -v md5sum >/dev/null 2>&1; then
-      debug_pod_hash=$(echo "$debug_pod" | md5sum | cut -c1-8)
-    elif command -v md5 >/dev/null 2>&1; then
-      debug_pod_hash=$(echo "$debug_pod" | md5 | cut -c1-8)
-    else
-      # Fallback to simple hash
-      debug_pod_hash=$(echo "$debug_pod" | cksum | cut -d' ' -f1 | cut -c1-8)
-    fi
+     # Create shorter name with prefix based on debug pod type
+     local debug_pod_hash
+     if command -v md5sum >/dev/null 2>&1; then
+       debug_pod_hash=$(echo "$debug_pod" | md5sum | cut -c1-8)
+     elif command -v md5 >/dev/null 2>&1; then
+       debug_pod_hash=$(echo "$debug_pod" | md5 | cut -c1-8)
+     else
+       # Fallback to simple hash
+       debug_pod_hash=$(echo "$debug_pod" | cksum | cut -d' ' -f1 | cut -c1-8)
+     fi
 
-    # Determine prefix based on debug pod type
-    local ks_prefix
-    if [[ "$debug_pod" == pod-debug-* ]]; then
-      ks_prefix="pod-ks"
-    elif [[ "$debug_pod" == node-debug-* ]]; then
-      ks_prefix="node-ks"
-    else
-      # Fallback for legacy naming
-      ks_prefix="ks"
-    fi
+     # Determine prefix based on debug pod type
+     local ks_prefix
+     if [[ "$debug_pod" == pod-debug-* ]]; then
+       ks_prefix="pod-ks"
+     elif [[ "$debug_pod" == node-debug-* ]]; then
+       ks_prefix="node-ks"
+     else
+       # Fallback for legacy naming
+       ks_prefix="ks"
+     fi
 
-    local monitor_pod_name
-    monitor_pod_name=$(truncate_name_with_hash "${ks_prefix}-${debug_pod_hash}")
+     local monitor_pod_name
+     monitor_pod_name=$(truncate_name_with_hash "${ks_prefix}-${debug_pod_hash}")
 
-    # Check if pod name exists and increment until unique
-    local counter=1
-    while $KUBE_CLI get pod "${monitor_pod_name}" -n "${debug_ns}" &>/dev/null; do
-      counter=$((counter + 1))
-      monitor_pod_name=$(truncate_name_with_hash "${ks_prefix}-${debug_pod_hash}-${counter}")
-    done
+     # Check if pod name exists and increment until unique
+     local counter=1
+     while $KUBE_CLI get pod "${monitor_pod_name}" -n "${debug_ns}" &>/dev/null; do
+       counter=$((counter + 1))
+       monitor_pod_name=$(truncate_name_with_hash "${ks_prefix}-${debug_pod_hash}-${counter}")
+     done
 
-    # Temporarily override global kill switch variables for this specific monitor pod
-    local saved_kill_switch_abs="$KILL_SWITCH_ABS"
-    local saved_kill_switch_rel="$KILL_SWITCH_REL"
-    KILL_SWITCH_ABS="$kill_switch_threshold_abs"
-    KILL_SWITCH_REL="$kill_switch_threshold_rel"
+     # Temporarily override global kill switch variables for this specific monitor pod
+     local saved_kill_switch_abs="$KILL_SWITCH_ABS"
+     local saved_kill_switch_rel="$KILL_SWITCH_REL"
+     KILL_SWITCH_ABS="$kill_switch_threshold_abs"
+     KILL_SWITCH_REL="$kill_switch_threshold_rel"
 
-    if create_kill_switch_monitor_pod "$debug_pod" "$node_name" "$monitor_pod_name" "$debug_ns" "$volume_path"; then
+     if create_kill_switch_monitor_pod "$debug_pod" "$node_name" "$monitor_pod_name" "$debug_ns" "$volume_path" "$workdir"; then
       KILL_SWITCH_MONITOR_PODS+=("$monitor_pod_name")
 
       # Look up target metadata from DEBUG_POD_METADATA for filename context
@@ -5027,10 +5076,25 @@ create_kill_switch_monitor_pod() {
   local monitor_pod_name="$3"
   local debug_ns="$4"
   local volume_path="$5"
+  local workdir="${6:-}"  # Optional working directory parameter
 
   # Truncate target pod name for label value (63 char limit)
   local target_pod_label_value
   target_pod_label_value=$(truncate_label_value_with_hash "$target_debug_pod")
+
+  # Build the container spec with conditional workingDir
+  local container_spec="    securityContext:
+      privileged: true"
+
+  # Add workingDir if provided
+  if [[ -n "$workdir" ]]; then
+    container_spec+=$'\n'"    workingDir: ${workdir}"
+  fi
+
+  container_spec+=$'\n'"    volumeMounts:
+    - name: host-root
+      mountPath: /host
+      readOnly: true"
 
   run_kube_cmd "$monitor_pod_name" "apply" apply -f - <<EOF
 apiVersion: v1
@@ -5054,12 +5118,7 @@ spec:
     args:
     - |
 $(build_kill_switch_monitor_script "$target_debug_pod" "$volume_path" | sed 's/^/      /')
-    securityContext:
-      privileged: true
-    volumeMounts:
-    - name: host-root
-      mountPath: /host
-      readOnly: true
+${container_spec}
   volumes:
   - name: host-root
     hostPath:
