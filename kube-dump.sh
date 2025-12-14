@@ -2462,6 +2462,14 @@ create_debug_pods_for_targets() {
 create_node_debug_pods() {
   local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE:-default}}"
 
+  # Encode node select-to-download commands to base64 (if not already encoded)
+  # This is needed for discovery pods created after node debug pods cleanup
+  if [[ ${#NODE_SELECT_TO_DOWNLOAD_COMMANDS[@]} -gt 0 && ${#ENCODED_NODE_SELECT_COMMANDS[@]} -eq 0 ]]; then
+    for cmd in "${NODE_SELECT_TO_DOWNLOAD_COMMANDS[@]}"; do
+      ENCODED_NODE_SELECT_COMMANDS+=("$(printf '%s' "$cmd" | base64 | tr -d '\n')")
+    done
+  fi
+
   # Auto-detect CRI socket from first node if not specified
   if [[ -z "$CRI_SOCKET" ]] && [[ ${#TARGET_NODES[@]} -gt 0 ]]; then
     local first_node="${TARGET_NODES[0]}"
@@ -4515,10 +4523,16 @@ create_discovery_pod() {
     containers_yaml+="    - name: host-root"$'\n'
     containers_yaml+="      mountPath: /host"$'\n'
     containers_yaml+="      readOnly: false"$'\n'
-  done
+   done
 
-  # Create discovery pod using YAML manifest for file discovery
-  run_kube_cmd "$discovery_pod_name" "apply" apply -f - <<EOF
+   # Validate that we have at least one container spec
+   if [[ -z "$containers_yaml" ]]; then
+     format_message "❌ Error: No pod file selection commands found (ENCODED_SELECT_COMMANDS is empty)"
+     return 1
+   fi
+
+   # Create discovery pod using YAML manifest for file discovery
+   run_kube_cmd "$discovery_pod_name" "apply" apply -f - <<EOF
 apiVersion: v1
 kind: Pod
 metadata:
@@ -4601,10 +4615,16 @@ create_node_discovery_pod() {
     containers_yaml+="    - name: host-root"$'\n'
     containers_yaml+="      mountPath: /host"$'\n'
     containers_yaml+="      readOnly: false"$'\n'
-  done
+   done
 
-  # Create node discovery pod using YAML manifest
-  run_kube_cmd "$discovery_pod_name" "apply" apply -f - <<EOF
+   # Validate that we have at least one container spec
+   if [[ -z "$containers_yaml" ]]; then
+     format_message "❌ Error: No node file selection commands found (ENCODED_NODE_SELECT_COMMANDS is empty)"
+     return 1
+   fi
+
+   # Create node discovery pod using YAML manifest
+   run_kube_cmd "$discovery_pod_name" "apply" apply -f - <<EOF
 apiVersion: v1
 kind: Pod
 metadata:
