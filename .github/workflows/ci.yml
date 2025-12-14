@@ -84,7 +84,41 @@ jobs:
           echo "status=⚠️ ISSUES FOUND" >> $GITHUB_OUTPUT
           ISSUE_COUNT=$(wc -l < results/shellcheck-raw.txt || echo "0")
           echo "issues=$ISSUE_COUNT" >> $GITHUB_OUTPUT
-        fi
+         fi
+
+    - name: Generate ShellCheck detailed report
+      run: |
+        echo "Generating ShellCheck detailed report..."
+
+        {
+          echo "# Code Quality Report - ShellCheck Analysis"
+          echo ""
+          echo "**Generated:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "**Script:** kube-dump.sh"
+          echo ""
+
+          if [ -s results/shellcheck-raw.txt ]; then
+            ISSUE_COUNT=$(wc -l < results/shellcheck-raw.txt)
+            echo "## Issues Found: $ISSUE_COUNT"
+            echo ""
+            echo '```'
+            cat results/shellcheck-raw.txt
+            echo '```'
+            echo ""
+            echo "### How to Fix ShellCheck Issues"
+            echo ""
+            echo "1. Review each issue in the report above"
+            echo "2. Install ShellCheck locally: \`sudo apt-get install shellcheck\`"
+            echo "3. Fix issues in kube-dump.sh"
+            echo "4. Run: \`shellcheck kube-dump.sh\` to verify"
+          else
+            echo "## ✅ No Issues Found"
+            echo ""
+            echo "All ShellCheck validations passed successfully!"
+          fi
+        } > docs/code-quality.md
+
+        echo "Report generated at docs/code-quality.md"
 
     - name: Extract container images
       id: extract
@@ -135,6 +169,10 @@ jobs:
         echo "TOTAL_MEDIUM=$TOTAL_MEDIUM" >> $GITHUB_ENV
         echo "TOTAL_LOW=$TOTAL_LOW" >> $GITHUB_ENV
 
+    - name: Get current date
+      id: current-date
+      run: echo "date=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
+
     - name: Determine security status
       id: results
       run: |
@@ -151,7 +189,38 @@ jobs:
          fi
 
          echo "security_status=$SECURITY_STATUS" >> $GITHUB_OUTPUT
-         echo "total_critical=$TOTAL_CRITICAL" >> $GITHUB_OUTPUT
-         echo "total_high=$TOTAL_HIGH" >> $GITHUB_OUTPUT
-         echo "total_medium=$TOTAL_MEDIUM" >> $GITHUB_OUTPUT
-         echo "total_low=$TOTAL_LOW" >> $GITHUB_OUTPUT
+          echo "total_critical=$TOTAL_CRITICAL" >> $GITHUB_OUTPUT
+          echo "total_high=$TOTAL_HIGH" >> $GITHUB_OUTPUT
+          echo "total_medium=$TOTAL_MEDIUM" >> $GITHUB_OUTPUT
+          echo "total_low=$TOTAL_LOW" >> $GITHUB_OUTPUT
+
+    - name: Update README with security dashboard
+      env:
+        SHELLCHECK_STATUS: ${{ steps.shellcheck.outputs.status }}
+        SHELLCHECK_ISSUES: ${{ steps.shellcheck.outputs.issues }}
+        TOTAL_CRITICAL: ${{ env.TOTAL_CRITICAL }}
+        TOTAL_HIGH: ${{ env.TOTAL_HIGH }}
+        TOTAL_MEDIUM: ${{ env.TOTAL_MEDIUM }}
+        TOTAL_LOW: ${{ env.TOTAL_LOW }}
+        CURRENT_DATE: ${{ steps.current-date.outputs.date }}
+      run: |
+        bash scripts/update-documentation.sh \
+          "$SHELLCHECK_STATUS" \
+          "$SHELLCHECK_ISSUES" \
+          "$TOTAL_CRITICAL" \
+          "$TOTAL_HIGH" \
+          "$TOTAL_MEDIUM" \
+          "$TOTAL_LOW"
+
+    - name: Commit and push documentation updates
+      run: |
+        git config user.name "GitHub Actions"
+        git config user.email "actions@github.com"
+
+        if git diff --quiet; then
+          echo "No changes to commit"
+        else
+          git add README.md docs/code-quality.md
+          git commit -m "docs: Update security dashboard and code quality report from CI pipeline"
+          git push origin master || echo "Push failed - repository may not be accessible"
+        fi
