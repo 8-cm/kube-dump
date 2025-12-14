@@ -66,12 +66,18 @@ usage() {
   echo "                       If omitted, auto-detects from kubelet nodefs.available (+5% safety), fallback to 10%"
   echo "  --pod-volume         Volume path to monitor for pod-based kill switches (e.g., /tmp)"
   echo "  --node-volume        Volume path to monitor for node-based kill switches (e.g., /var)"
-  echo "  --workdir-pod        Working directory override for all pod-based operations (debug/discovery/killswitch)"
-  echo "  --workdir-node       Working directory override for all node-based operations (debug/discovery/killswitch)"
-  echo "  --image              Container image for debug/discovery/killswitch pods [default: nicolaka/netshoot]"
-  echo "  --no-glyphs          Disable emojis and use text labels like [INFO], [ERROR], [OK]"
-  echo "  --verbose            Enable verbose logging (max k8s verbosity, per-pod logs to OUTPUT_DIR/debug/)"
-  echo "  -h, --help           Show this help message and exit"
+   echo "  --workdir-pod        Working directory override for all pod-based operations (debug/discovery/killswitch)"
+   echo "  --workdir-node       Working directory override for all node-based operations (debug/discovery/killswitch)"
+   echo "  --cpu-limit          CPU limit for debug/discovery/killswitch containers (optional, affects containers not pods)"
+   echo "                       Example values: 100m (100 millicores), 500m, 1, 2.5"
+   echo "                       Note: Container must have CPU request ≥ limit for scheduling"
+   echo "  --memory-limit       Memory limit for debug/discovery/killswitch containers (optional, affects containers not pods)"
+   echo "                       Example values: 128Mi, 256Mi, 512Mi, 1Gi, 2Gi"
+   echo "                       Valid units: Ki, Mi, Gi, Ti (binary); K, M, G, T (decimal)"
+   echo "  --image              Container image for debug/discovery/killswitch pods [default: nicolaka/netshoot]"
+   echo "  --no-glyphs          Disable emojis and use text labels like [INFO], [ERROR], [OK]"
+   echo "  --verbose            Enable verbose logging (max k8s verbosity, per-pod logs to OUTPUT_DIR/debug/)"
+   echo "  -h, --help           Show this help message and exit"
   echo ""
   echo "Examples:"
   echo "  # Use defaults (dumpme=yes label, tcpdump -i any -nn -s 0):"
@@ -198,11 +204,20 @@ usage() {
   echo "  # Also run commands on nodes hosting selected pods:"
   echo "  $0 -l app=web --include-nodes -E 'ss -tuln'"
   echo ""
-  echo "  # Use custom container image for all debug pods:"
-  echo "  $0 -l app=web --image alpine:latest"
-  echo ""
-  echo "  # Enable verbose logging with max Kubernetes verbosity (requires -o):"
-  echo "  $0 -l app=web -o ./output --verbose"
+   echo "  # Use custom container image for all debug pods:"
+   echo "  $0 -l app=web --image alpine:latest"
+   echo ""
+   echo "  # Set container resource limits (applies to debug/discovery/killswitch containers, not pods):"
+   echo "  $0 -l app=web --cpu-limit 500m --memory-limit 512Mi"
+   echo ""
+   echo "  # Set only CPU limit (memory defaults to unlimited):"
+   echo "  $0 -l app=web --cpu-limit 100m"
+   echo ""
+   echo "  # Set only memory limit (CPU defaults to unlimited):"
+   echo "  $0 -l app=web --memory-limit 1Gi"
+   echo ""
+   echo "  # Enable verbose logging with max Kubernetes verbosity (requires -o):"
+   echo "  $0 -l app=web -o ./output --verbose"
   echo ""
   echo ""
   echo "  # Complex example:"
@@ -228,18 +243,27 @@ usage() {
   echo "  Multiple -S flags: file-monitor-0, file-monitor-1, ... (node mode)"
   echo "  Log files named: {pod-name}-{container-name}.log"
   echo ""
-  echo "Notes:"
-  echo "  - Script automatically selects first container from each pod for PID discovery"
-  echo "  - All containers in a pod share the same network namespace"
-  echo "  - For node commands, debug pods run with host networking and privileged access"
-  echo "  - Multiple commands execute in parallel within separate sidecar containers"
-  echo "  - By default, commands execute in network namespace only (n)"
-  echo "  - Use --nsenter-params to access other namespaces: m (mount), p (PID), u (UTS), etc."
-  echo "  - Specify namespace flags WITHOUT dashes: --nsenter-params p (not -p)"
-  echo "  - When using p (PID namespace), run 'mount -t proc none /proc' first to see target PIDs"
-  echo "  - Debug pod always keeps its own mount namespace to access /host for node access"
-  echo "  - No limit on number of sidecars (within Kubernetes pod limits)"
-  echo "  - Each file monitor independently monitors ALL files from ALL command containers"
+echo "Notes:"
+   echo "  - Script automatically selects first container from each pod for PID discovery"
+   echo "  - All containers in a pod share the same network namespace"
+   echo "  - For node commands, debug pods run with host networking and privileged access"
+   echo "  - Multiple commands execute in parallel within separate sidecar containers"
+   echo "  - By default, commands execute in network namespace only (n)"
+   echo "  - Use --nsenter-params to access other namespaces: m (mount), p (PID), u (UTS), etc."
+   echo "  - Specify namespace flags WITHOUT dashes: --nsenter-params p (not -p)"
+   echo "  - When using p (PID namespace), run 'mount -t proc none /proc' first to see target PIDs"
+   echo "  - Debug pod always keeps its own mount namespace to access /host for node access"
+   echo "  - No limit on number of sidecars (within Kubernetes pod limits)"
+   echo "  - Each file monitor independently monitors ALL files from ALL command containers"
+   echo ""
+   echo "Resource Limits (Container-based):"
+   echo "  - --cpu-limit and --memory-limit apply to containers WITHIN pods, not to pods themselves"
+   echo "  - These limits are optional and affect debug, discovery, and killswitch containers"
+   echo "  - CPU: Use 'm' suffix for millicores (100m, 500m) or plain numbers (1, 2.5)"
+   echo "  - Memory: Use Ki, Mi, Gi, Ti (binary) or K, M, G, T (decimal) suffixes"
+   echo "  - Both limits are independent: set one, both, or neither as needed"
+   echo "  - When no limits specified, containers run without resource constraints"
+   echo "  - Kubernetes will schedule based on node availability when limits are specified"
   exit 0
 }
 
@@ -323,10 +347,12 @@ initialize_variables() {
   KILL_SWITCH_REL=""  # Kill switch relative threshold (e.g., 10%)
   POD_VOLUME=""  # Volume path to monitor for pod-based kill switches
   NODE_VOLUME=""  # Volume path to monitor for node-based kill switches
-  WORKDIR_POD=""  # Working directory override for debug, discovery, and killswitch pods (optional)
-  WORKDIR_NODE=""  # Working directory override for debug, discovery, and killswitch pods on nodes (optional)
-  DEBUG_IMAGE="nicolaka/netshoot"  # Default container image for debug/discovery/killswitch pods
-  KILL_SWITCH_MONITOR_PODS=()  # Array for kill switch monitor pods
+   WORKDIR_POD=""  # Working directory override for debug, discovery, and killswitch pods (optional)
+   WORKDIR_NODE=""  # Working directory override for debug, discovery, and killswitch pods on nodes (optional)
+   CPU_LIMIT=""  # CPU limit for debug/discovery/killswitch containers (optional, e.g., 100m, 500m, 1)
+   MEMORY_LIMIT=""  # Memory limit for debug/discovery/killswitch containers (optional, e.g., 128Mi, 512Mi, 1Gi)
+   DEBUG_IMAGE="nicolaka/netshoot"  # Default container image for debug/discovery/killswitch pods
+   KILL_SWITCH_MONITOR_PODS=()  # Array for kill switch monitor pods
   KILL_SWITCH_MONITOR_NAMES_META=()  # Parallel array: kill switch monitor pod names
   KILL_SWITCH_MONITOR_METADATA_VALUES=()  # Parallel array: metadata "type:target_name:node_name"
   KUBE_CLI=""  # Will be set to 'oc' or '$KUBE_CLI' based on availability
@@ -1118,12 +1144,14 @@ show_configuration() {
     echo "  Node Command:      $NODE_COMMAND"
   fi
   echo ""
-  echo "Container Settings:"
-  echo "  Image:             $DEBUG_IMAGE"
-  echo "  CRI Runtime:       $CRI_RUNTIME"
-  echo "  CRI Socket:        $(get_effective_cri_socket)"
-  echo "  Install Deps:      $INSTALL_DEPS"
-  echo ""
+   echo "Container Settings:"
+   echo "  Image:             $DEBUG_IMAGE"
+   echo "  CPU Limit:         ${CPU_LIMIT:-"(not set)"}"
+   echo "  Memory Limit:      ${MEMORY_LIMIT:-"(not set)"}"
+   echo "  CRI Runtime:       $CRI_RUNTIME"
+   echo "  CRI Socket:        $(get_effective_cri_socket)"
+   echo "  Install Deps:      $INSTALL_DEPS"
+   echo ""
   echo "File Operations:"
   if [[ ${#SELECT_TO_DOWNLOAD_COMMANDS[@]} -gt 0 ]]; then
     echo "  Pod File Commands: ${#SELECT_TO_DOWNLOAD_COMMANDS[@]} command(s)"
@@ -1623,18 +1651,36 @@ parse_arguments() {
            shift
          fi
          ;;
-       --image)
-        if [[ $1 == --image=* ]]; then
-          DEBUG_IMAGE="$val"
-        else
-          validate_option_value "$val" "--image"
-          DEBUG_IMAGE="$val"
-          shift
-        fi
-        ;;
-      --no-glyphs)
-        NO_GLYPHS=true
-        ;;
+        --image)
+         if [[ $1 == --image=* ]]; then
+           DEBUG_IMAGE="$val"
+         else
+           validate_option_value "$val" "--image"
+           DEBUG_IMAGE="$val"
+           shift
+         fi
+         ;;
+       --cpu-limit)
+         if [[ $1 == --cpu-limit=* ]]; then
+           CPU_LIMIT="$val"
+         else
+           validate_option_value "$val" "--cpu-limit"
+           CPU_LIMIT="$val"
+           shift
+         fi
+         ;;
+       --memory-limit)
+         if [[ $1 == --memory-limit=* ]]; then
+           MEMORY_LIMIT="$val"
+         else
+           validate_option_value "$val" "--memory-limit"
+           MEMORY_LIMIT="$val"
+           shift
+         fi
+         ;;
+       --no-glyphs)
+         NO_GLYPHS=true
+         ;;
       --verbose)
         VERBOSE=true
         ;;
@@ -1817,9 +1863,30 @@ validate_arguments() {
     esac
   fi
 
-  # Arrays are initialized in initialize_variables(), no need to validate here
+   # Validate resource limits (optional, so only validate format if provided)
+   if [[ -n "$CPU_LIMIT" ]]; then
+     # Validate CPU limit format: can be plain number (1, 2.5) or with 'm' suffix (100m, 500m)
+     if ! [[ "$CPU_LIMIT" =~ ^[0-9]+([.][0-9]+)?m?$ ]]; then
+       echo "Error: Invalid CPU limit format: $CPU_LIMIT" >&2
+       echo "       Valid examples: 100m, 500m, 1, 2.5" >&2
+       return 1
+     fi
+   fi
 
-  # Execution mode and command details are shown in configuration summary
+   if [[ -n "$MEMORY_LIMIT" ]]; then
+     # Validate memory limit format: number + unit (Ki, Mi, Gi, Ti, K, M, G, T)
+     if ! [[ "$MEMORY_LIMIT" =~ ^[0-9]+([.][0-9]+)?([KMGTkmgt]i?)?$ ]]; then
+       echo "Error: Invalid memory limit format: $MEMORY_LIMIT" >&2
+       echo "       Valid examples: 128Mi, 256Mi, 1Gi, 512M" >&2
+       echo "       Binary units (i suffix): Ki, Mi, Gi, Ti" >&2
+       echo "       Decimal units: K, M, G, T" >&2
+       return 1
+     fi
+   fi
+
+   # Arrays are initialized in initialize_variables(), no need to validate here
+
+   # Execution mode and command details are shown in configuration summary
 }
 
 # -------------------------------------------------------------------------------
@@ -2595,27 +2662,45 @@ generate_command_container() {
   local script_builder_func="$7"
   local workdir="${8:-}"  # Optional working directory parameter
 
-  cat <<EOF
-  - name: ${container_name}
-    image: ${DEBUG_IMAGE}
-    command: ["/bin/bash", "-c"]
-    args:
-    - |
+   cat <<EOF
+   - name: ${container_name}
+     image: ${DEBUG_IMAGE}
+     command: ["/bin/bash", "-c"]
+     args:
+     - |
 $($script_builder_func "$pod_name" "$container_name_target" "$node_name" "$debug_pod_name" "$container_index" | sed 's/^/      /')
-    securityContext:
-      privileged: true
-      runAsUser: 0
-    volumeMounts:
-    - name: host
-      mountPath: /host
+     securityContext:
+       privileged: true
+       runAsUser: 0
+     volumeMounts:
+     - name: host
+       mountPath: /host
 EOF
 
-  # Add workingDir if provided
-  if [[ -n "$workdir" ]]; then
-    cat <<EOF
-    workingDir: ${workdir}
+   # Add workingDir if provided
+   if [[ -n "$workdir" ]]; then
+     cat <<EOF
+     workingDir: ${workdir}
 EOF
-  fi
+   fi
+
+   # Add resource limits if provided
+   if [[ -n "$CPU_LIMIT" || -n "$MEMORY_LIMIT" ]]; then
+     cat <<EOF
+     resources:
+       limits:
+EOF
+     if [[ -n "$CPU_LIMIT" ]]; then
+       cat <<EOF
+         cpu: ${CPU_LIMIT}
+EOF
+     fi
+     if [[ -n "$MEMORY_LIMIT" ]]; then
+       cat <<EOF
+         memory: ${MEMORY_LIMIT}
+EOF
+     fi
+   fi
 }
 
 # -------------------------------------------------------------------------------
@@ -2701,18 +2786,36 @@ EOF
 EOF
   fi
 
-  cat <<EOF
-    volumeMounts:
-    - name: host
-      mountPath: /host
+   cat <<EOF
+     volumeMounts:
+     - name: host
+       mountPath: /host
 EOF
 
-  # Add workingDir if provided
-  if [[ -n "$workdir" ]]; then
-    cat <<EOF
-    workingDir: ${workdir}
+   # Add workingDir if provided
+   if [[ -n "$workdir" ]]; then
+     cat <<EOF
+     workingDir: ${workdir}
 EOF
-  fi
+   fi
+
+   # Add resource limits if provided
+   if [[ -n "$CPU_LIMIT" || -n "$MEMORY_LIMIT" ]]; then
+     cat <<EOF
+     resources:
+       limits:
+EOF
+     if [[ -n "$CPU_LIMIT" ]]; then
+       cat <<EOF
+         cpu: ${CPU_LIMIT}
+EOF
+     fi
+     if [[ -n "$MEMORY_LIMIT" ]]; then
+       cat <<EOF
+         memory: ${MEMORY_LIMIT}
+EOF
+     fi
+   fi
 }
 
 # -------------------------------------------------------------------------------
@@ -4557,15 +4660,26 @@ create_discovery_pod() {
      containers_yaml+="      value: \"${ENCODED_SELECT_COMMANDS[$i]}\""$'\n'
      containers_yaml+="    - name: PLACEHOLDER_CHAR"$'\n'
      containers_yaml+="      value: \"${PLACEHOLDER_CHAR}\""$'\n'
-     containers_yaml+="    volumeMounts:"$'\n'
-     containers_yaml+="    - name: host-root"$'\n'
-     containers_yaml+="      mountPath: /host"$'\n'
-     containers_yaml+="      readOnly: false"$'\n'
-     # Add workingDir if provided
-     if [[ -n "$WORKDIR_POD" ]]; then
-       containers_yaml+="    workingDir: ${WORKDIR_POD}"$'\n'
-     fi
-   done
+      containers_yaml+="    volumeMounts:"$'\n'
+      containers_yaml+="    - name: host-root"$'\n'
+      containers_yaml+="      mountPath: /host"$'\n'
+      containers_yaml+="      readOnly: false"$'\n'
+      # Add workingDir if provided
+      if [[ -n "$WORKDIR_POD" ]]; then
+        containers_yaml+="    workingDir: ${WORKDIR_POD}"$'\n'
+      fi
+      # Add resource limits if provided
+      if [[ -n "$CPU_LIMIT" || -n "$MEMORY_LIMIT" ]]; then
+        containers_yaml+="    resources:"$'\n'
+        containers_yaml+="      limits:"$'\n'
+        if [[ -n "$CPU_LIMIT" ]]; then
+          containers_yaml+="        cpu: ${CPU_LIMIT}"$'\n'
+        fi
+        if [[ -n "$MEMORY_LIMIT" ]]; then
+          containers_yaml+="        memory: ${MEMORY_LIMIT}"$'\n'
+        fi
+      fi
+    done
 
    # Validate that we have at least one container spec
    if [[ -z "$containers_yaml" ]]; then
@@ -4653,15 +4767,26 @@ create_node_discovery_pod() {
      containers_yaml+="      value: \"${PLACEHOLDER_CHAR}\""$'\n'
      containers_yaml+="    - name: ENCODED_NODE_SELECT_COMMAND"$'\n'
      containers_yaml+="      value: \"${ENCODED_NODE_SELECT_COMMANDS[$i]}\""$'\n'
-     containers_yaml+="    volumeMounts:"$'\n'
-     containers_yaml+="    - name: host-root"$'\n'
-     containers_yaml+="      mountPath: /host"$'\n'
-     containers_yaml+="      readOnly: false"$'\n'
-     # Add workingDir if provided
-     if [[ -n "$WORKDIR_NODE" ]]; then
-       containers_yaml+="    workingDir: ${WORKDIR_NODE}"$'\n'
-     fi
-    done
+      containers_yaml+="    volumeMounts:"$'\n'
+      containers_yaml+="    - name: host-root"$'\n'
+      containers_yaml+="      mountPath: /host"$'\n'
+      containers_yaml+="      readOnly: false"$'\n'
+      # Add workingDir if provided
+      if [[ -n "$WORKDIR_NODE" ]]; then
+        containers_yaml+="    workingDir: ${WORKDIR_NODE}"$'\n'
+      fi
+      # Add resource limits if provided
+      if [[ -n "$CPU_LIMIT" || -n "$MEMORY_LIMIT" ]]; then
+        containers_yaml+="    resources:"$'\n'
+        containers_yaml+="      limits:"$'\n'
+        if [[ -n "$CPU_LIMIT" ]]; then
+          containers_yaml+="        cpu: ${CPU_LIMIT}"$'\n'
+        fi
+        if [[ -n "$MEMORY_LIMIT" ]]; then
+          containers_yaml+="        memory: ${MEMORY_LIMIT}"$'\n'
+        fi
+      fi
+     done
 
    # Validate that we have at least one container spec
    if [[ -z "$containers_yaml" ]]; then
@@ -5082,19 +5207,31 @@ create_kill_switch_monitor_pod() {
   local target_pod_label_value
   target_pod_label_value=$(truncate_label_value_with_hash "$target_debug_pod")
 
-  # Build the container spec with conditional workingDir
-  local container_spec="    securityContext:
-      privileged: true"
+   # Build the container spec with conditional workingDir
+   local container_spec="    securityContext:
+       privileged: true"
 
-  # Add workingDir if provided
-  if [[ -n "$workdir" ]]; then
-    container_spec+=$'\n'"    workingDir: ${workdir}"
-  fi
+   # Add workingDir if provided
+   if [[ -n "$workdir" ]]; then
+     container_spec+=$'\n'"    workingDir: ${workdir}"
+   fi
 
-  container_spec+=$'\n'"    volumeMounts:
-    - name: host-root
-      mountPath: /host
-      readOnly: true"
+   container_spec+=$'\n'"    volumeMounts:
+     - name: host-root
+       mountPath: /host
+       readOnly: true"
+
+   # Add resource limits if provided
+   if [[ -n "$CPU_LIMIT" || -n "$MEMORY_LIMIT" ]]; then
+     container_spec+=$'\n'"    resources:"
+     container_spec+=$'\n'"      limits:"
+     if [[ -n "$CPU_LIMIT" ]]; then
+       container_spec+=$'\n'"        cpu: ${CPU_LIMIT}"
+     fi
+     if [[ -n "$MEMORY_LIMIT" ]]; then
+       container_spec+=$'\n'"        memory: ${MEMORY_LIMIT}"
+     fi
+   fi
 
   run_kube_cmd "$monitor_pod_name" "apply" apply -f - <<EOF
 apiVersion: v1
