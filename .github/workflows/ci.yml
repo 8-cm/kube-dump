@@ -1,26 +1,22 @@
 # ===============================================================================
-# GitHub Actions Workflow: Continuous Integration
+# GitHub Actions Workflow: Security Scanning
 # ===============================================================================
 # Description:
-#   Unified CI workflow combining security analysis, code quality checks, and
-#   comprehensive test suite. Runs all checks sequentially to prevent race
-#   conditions when updating documentation.
+#   Automated security analysis workflow combining container vulnerability
+#   scanning (Trivy) and shell script quality checks (ShellCheck).
 #
 # Workflow Components:
-#   1. Security Analysis (Trivy container scanning + ShellCheck)
-#   2. Test Suite (Bats testing with 100% coverage verification)
-#   3. Unified Documentation Updates (single commit with all results)
+#   1. Container Vulnerability Scanning (Trivy)
+#   2. Shell Script Quality Analysis (ShellCheck)
 #
 # Triggered Events:
 #   - Push to master/main branches
 #   - Pull requests to master/main branches
-#   - Scheduled execution (tests: weekly, security: bi-weekly)
+#   - Scheduled execution (weekly on Sundays at 2 AM UTC)
 #   - Manual workflow dispatch
 #
 # Required Permissions:
-#   - contents: write (for documentation updates)
 #   - security-events: write (for security reporting)
-#   - pull-requests: write (for PR comments)
 # ===============================================================================
 
 name: Continuous Integration
@@ -30,29 +26,25 @@ on:
     branches: [ master, main ]
     paths:
       - 'kube-dump.sh'
-      - 'test/**'
       - '.github/workflows/ci.yml'
   pull_request:
     branches: [ master, main ]
     paths:
       - 'kube-dump.sh'
-      - 'test/**'
       - '.github/workflows/ci.yml'
   schedule:
     - cron: '0 2 * * 0'  # Weekly on Sundays at 2 AM UTC
   workflow_dispatch:
 
 permissions:
-  contents: write
   security-events: write
-  pull-requests: write
 
 jobs:
   # ===============================================================================
-  # Job 1: Security Analysis
+  # Job: Security Analysis
   # ===============================================================================
   security:
-    name: Security & Code Quality
+    name: Security Scanning
     runs-on: ubuntu-latest
     outputs:
       security_status: ${{ steps.results.outputs.security_status }}
@@ -135,203 +127,28 @@ jobs:
           fi
         done < unique-images.txt
 
-        echo "TOTAL_CRITICAL=$TOTAL_CRITICAL" >> $GITHUB_ENV
-        echo "TOTAL_HIGH=$TOTAL_HIGH" >> $GITHUB_ENV
-        echo "TOTAL_MEDIUM=$TOTAL_MEDIUM" >> $GITHUB_ENV
-        echo "TOTAL_LOW=$TOTAL_LOW" >> $GITHUB_ENV
+         echo "TOTAL_CRITICAL=$TOTAL_CRITICAL" >> $GITHUB_ENV
+         echo "TOTAL_HIGH=$TOTAL_HIGH" >> $GITHUB_ENV
+         echo "TOTAL_MEDIUM=$TOTAL_MEDIUM" >> $GITHUB_ENV
+         echo "TOTAL_LOW=$TOTAL_LOW" >> $GITHUB_ENV
 
-    - name: Determine security status
-      id: results
-      run: |
-        if [[ $TOTAL_CRITICAL -gt 0 ]]; then
-          SECURITY_STATUS="🔴 CRITICAL ISSUES FOUND"
-        elif [[ $TOTAL_HIGH -gt 0 ]]; then
-          SECURITY_STATUS="🟠 HIGH ISSUES FOUND"
-        elif [[ $TOTAL_MEDIUM -gt 0 ]]; then
-          SECURITY_STATUS="🟡 MEDIUM ISSUES FOUND"
-        elif [[ $TOTAL_LOW -gt 0 ]]; then
-          SECURITY_STATUS="🔵 LOW ISSUES FOUND"
-        else
-          SECURITY_STATUS="✅ NO ISSUES FOUND"
-        fi
-
-        echo "security_status=$SECURITY_STATUS" >> $GITHUB_OUTPUT
-        echo "total_critical=$TOTAL_CRITICAL" >> $GITHUB_OUTPUT
-        echo "total_high=$TOTAL_HIGH" >> $GITHUB_OUTPUT
-        echo "total_medium=$TOTAL_MEDIUM" >> $GITHUB_OUTPUT
-        echo "total_low=$TOTAL_LOW" >> $GITHUB_OUTPUT
-
-  # ===============================================================================
-  # Job 2: Test Suite
-  # ===============================================================================
-  test:
-    name: Test Suite
-    runs-on: ubuntu-latest
-    needs: security
-    outputs:
-      coverage_status: ${{ steps.coverage.outputs.coverage_status }}
-      total_functions: ${{ steps.coverage.outputs.total_functions }}
-      tested_functions: ${{ steps.coverage.outputs.tested_functions }}
-      coverage_percent: ${{ steps.coverage.outputs.coverage_percent }}
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Install test dependencies
-      run: |
-        echo "Installing Bats test framework..."
-        cd test
-        git clone --depth 1 https://github.com/bats-core/bats-core.git
-        git clone --depth 1 https://github.com/bats-core/bats-support.git
-        git clone --depth 1 https://github.com/bats-core/bats-assert.git
-        git clone --depth 1 https://github.com/bats-core/bats-file.git
-        bats-core/bin/bats --version
-
-    - name: Run tests
-      id: run_tests
-      run: |
-        echo "Running test suite..."
-        ./test/run_tests.sh > test-output.log 2>&1 || echo "TESTS_FAILED=true" >> $GITHUB_ENV
-        cat test-output.log
-      continue-on-error: true
-
-    - name: Analyze coverage
-      id: coverage
-      run: |
-        echo "Analyzing coverage..."
-        ./test/analyze_coverage.sh > coverage-output.log 2>&1
-        cat coverage-output.log
-
-        TOTAL_FUNCTIONS=$(grep "Total functions:" coverage-output.log | grep -oP '\d+' || echo "52")
-        TESTED_FUNCTIONS=$(grep "Tested functions:" coverage-output.log | grep -oP '\d+' || echo "52")
-        COVERAGE_PERCENT=$(grep "Coverage:" coverage-output.log | grep -oP '\d+\.\d+' || echo "100.0")
-
-        if [[ "$COVERAGE_PERCENT" == "100.0" ]]; then
-          COVERAGE_STATUS="✅ 100% ($TESTED_FUNCTIONS/$TOTAL_FUNCTIONS functions)"
-        elif (( $(echo "$COVERAGE_PERCENT >= 90.0" | bc -l) )); then
-          COVERAGE_STATUS="🟢 $COVERAGE_PERCENT% ($TESTED_FUNCTIONS/$TOTAL_FUNCTIONS functions)"
-        else
-          COVERAGE_STATUS="🟡 $COVERAGE_PERCENT% ($TESTED_FUNCTIONS/$TOTAL_FUNCTIONS functions)"
-        fi
-
-        echo "coverage_status=$COVERAGE_STATUS" >> $GITHUB_OUTPUT
-        echo "total_functions=$TOTAL_FUNCTIONS" >> $GITHUB_OUTPUT
-        echo "tested_functions=$TESTED_FUNCTIONS" >> $GITHUB_OUTPUT
-        echo "coverage_percent=$COVERAGE_PERCENT" >> $GITHUB_OUTPUT
-      continue-on-error: true
-
-    - name: Upload test results
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: test-results
-        path: |
-          test-output.log
-          coverage-output.log
-        retention-days: 7
-
-    - name: Fail if tests failed
-      if: steps.run_tests.outcome != 'success'
-      run: |
-        echo "❌ Test suite failed"
-        exit 1
-
-  # ===============================================================================
-  # Job 3: Update Documentation
-  # ===============================================================================
-  update-docs:
-    name: Update Documentation
-    runs-on: ubuntu-latest
-    needs: [security, test]
-    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/master'
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Update README dashboard
-      run: |
-        echo "Updating README.md with unified dashboard..."
-
-        TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
-
-        cp README.md README.md.bak
-
-        {
-          sed '/<!-- SECURITY-DASHBOARD-START -->/q' README.md | sed '$d' 2>/dev/null || cat README.md
-          echo "<!-- SECURITY-DASHBOARD-START -->"
-          echo ""
-          echo "## 🛡️ Security & Quality Status"
-          echo ""
-          echo "| Component | Status | Last Updated |"
-          echo "|-----------|--------|--------------|"
-          echo "| **Container Security** | ${{ needs.security.outputs.security_status }} | $TIMESTAMP |"
-          echo "| **Code Quality** | ${{ needs.security.outputs.shellcheck_status }} | $TIMESTAMP |"
-          echo "| **Test Coverage** | ${{ needs.test.outputs.coverage_status }} | $TIMESTAMP |"
-          echo ""
-          echo "**Vulnerability Summary:** Critical: ${{ needs.security.outputs.total_critical }}, High: ${{ needs.security.outputs.total_high }}, Medium: ${{ needs.security.outputs.total_medium }}, Low: ${{ needs.security.outputs.total_low }}"
-          echo ""
-          echo "📋 [View Detailed Security Reports](docs/security-reports.md) for complete vulnerability analysis and recommendations."
-          echo ""
-          echo "🧪 [View Test Coverage Report](docs/test-coverage.md) for detailed test suite information and coverage analysis."
-          echo ""
-          echo "<!-- SECURITY-DASHBOARD-END -->"
-          sed -n '/<!-- SECURITY-DASHBOARD-END -->/,$p' README.md.bak | tail -n +2 2>/dev/null || echo ""
-        } > README.md.new
-
-        mv README.md.new README.md
-
-    - name: Commit and push changes
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-
-        if git diff --quiet README.md; then
-          echo "No changes to README.md"
+     - name: Determine security status
+       id: results
+       run: |
+         if [[ $TOTAL_CRITICAL -gt 0 ]]; then
+           SECURITY_STATUS="🔴 CRITICAL ISSUES FOUND"
+         elif [[ $TOTAL_HIGH -gt 0 ]]; then
+           SECURITY_STATUS="🟠 HIGH ISSUES FOUND"
+         elif [[ $TOTAL_MEDIUM -gt 0 ]]; then
+           SECURITY_STATUS="🟡 MEDIUM ISSUES FOUND"
+         elif [[ $TOTAL_LOW -gt 0 ]]; then
+           SECURITY_STATUS="🔵 LOW ISSUES FOUND"
          else
-           git add README.md
-           git commit -m "ci: Update CI dashboard with latest test results"
+           SECURITY_STATUS="✅ NO ISSUES FOUND"
+         fi
 
-           git push origin HEAD:${{ github.ref_name }}
-          echo "✅ README.md updated successfully"
-        fi
-
-  # ===============================================================================
-  # Job 4: PR Comment
-  # ===============================================================================
-  pr-comment:
-    name: Post PR Comment
-    runs-on: ubuntu-latest
-    needs: [security, test]
-    if: always() && github.event_name == 'pull_request'
-
-    steps:
-    - name: Create PR comment
-      uses: actions/github-script@v7
-      with:
-        script: |
-          const securityStatus = '${{ needs.security.outputs.security_status }}';
-          const codeQuality = '${{ needs.security.outputs.shellcheck_status }}';
-          const testCoverage = '${{ needs.test.outputs.coverage_status }}';
-
-          let comment = `## 🔍 CI Results\n\n`;
-          comment += `| Component | Status |\n`;
-          comment += `|-----------|--------|\n`;
-          comment += `| **Container Security** | ${securityStatus} |\n`;
-          comment += `| **Code Quality** | ${codeQuality} |\n`;
-          comment += `| **Test Coverage** | ${testCoverage} |\n\n`;
-
-          comment += `**Vulnerabilities:** Critical: ${{ needs.security.outputs.total_critical }}, High: ${{ needs.security.outputs.total_high }}, Medium: ${{ needs.security.outputs.total_medium }}, Low: ${{ needs.security.outputs.total_low }}  \n`;
-          comment += `**ShellCheck Issues:** ${{ needs.security.outputs.shellcheck_issues }}  \n`;
-          comment += `**Test Functions:** ${{ needs.test.outputs.tested_functions }}/${{ needs.test.outputs.total_functions }} (${{ needs.test.outputs.coverage_percent }}%)  \n\n`;
-          comment += `**Commit:** \`${process.env.GITHUB_SHA.substring(0, 7)}\``;
-
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: comment
-          });
+         echo "security_status=$SECURITY_STATUS" >> $GITHUB_OUTPUT
+         echo "total_critical=$TOTAL_CRITICAL" >> $GITHUB_OUTPUT
+         echo "total_high=$TOTAL_HIGH" >> $GITHUB_OUTPUT
+         echo "total_medium=$TOTAL_MEDIUM" >> $GITHUB_OUTPUT
+         echo "total_low=$TOTAL_LOW" >> $GITHUB_OUTPUT
