@@ -2761,7 +2761,8 @@ spec:
   hostNetwork: true
   hostIPC: true
   containers:
-${container_specs}  volumes:
+${container_specs}
+  volumes:
   - name: host
     hostPath:
       path: /
@@ -3002,7 +3003,8 @@ metadata:
   namespace: ${debug_ns}
 spec:
   containers:
-${container_specs}  hostNetwork: true
+${container_specs}
+  hostNetwork: true
   hostPID: true
   hostIPC: true
   nodeName: ${node_name}
@@ -4529,7 +4531,8 @@ spec:
   nodeSelector:
     kubernetes.io/hostname: ${node_name}
   containers:
-${containers_yaml}  volumes:
+${containers_yaml}
+  volumes:
   - name: host-root
     hostPath:
       path: /
@@ -4614,7 +4617,8 @@ spec:
   nodeSelector:
     kubernetes.io/hostname: ${node_name}
   containers:
-${containers_yaml}  volumes:
+${containers_yaml}
+  volumes:
   - name: host-root
     hostPath:
       path: /
