@@ -95,7 +95,7 @@ jobs:
           grep -oP "(?<=IMAGE=')[^']+" kube-dump.sh || true
         } | grep -E '^[a-zA-Z0-9._-]+(/[a-zA-Z0-9._-]+)*(:[a-zA-Z0-9._-]+)?$' | sort -u > unique-images.txt
 
-        cat unique-images.txt | sed 's/^/  - /'
+         cat unique-images.txt | sed 's/^/  - /'
 
     - name: Run Trivy security scans
       run: |
@@ -127,14 +127,14 @@ jobs:
           fi
         done < unique-images.txt
 
-         echo "TOTAL_CRITICAL=$TOTAL_CRITICAL" >> $GITHUB_ENV
-         echo "TOTAL_HIGH=$TOTAL_HIGH" >> $GITHUB_ENV
-         echo "TOTAL_MEDIUM=$TOTAL_MEDIUM" >> $GITHUB_ENV
-         echo "TOTAL_LOW=$TOTAL_LOW" >> $GITHUB_ENV
+        echo "TOTAL_CRITICAL=$TOTAL_CRITICAL" >> $GITHUB_ENV
+        echo "TOTAL_HIGH=$TOTAL_HIGH" >> $GITHUB_ENV
+        echo "TOTAL_MEDIUM=$TOTAL_MEDIUM" >> $GITHUB_ENV
+        echo "TOTAL_LOW=$TOTAL_LOW" >> $GITHUB_ENV
 
-     - name: Determine security status
-       id: results
-       run: |
+    - name: Determine security status
+      id: results
+      run: |
          if [[ $TOTAL_CRITICAL -gt 0 ]]; then
            SECURITY_STATUS="🔴 CRITICAL ISSUES FOUND"
          elif [[ $TOTAL_HIGH -gt 0 ]]; then
