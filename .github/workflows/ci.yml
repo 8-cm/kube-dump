@@ -291,18 +291,11 @@ jobs:
 
         if git diff --quiet README.md; then
           echo "No changes to README.md"
-        else
-          git add README.md
-          git commit -m "ci: Update CI dashboard
+         else
+           git add README.md
+           git commit -m "ci: Update CI dashboard with latest test results"
 
-Security: ${{ needs.security.outputs.security_status }}
-Code Quality: ${{ needs.security.outputs.shellcheck_status }}
-Test Coverage: ${{ needs.test.outputs.coverage_status }}
-
-Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
-Commit: ${GITHUB_SHA:0:7}"
-
-          git push origin HEAD:${{ github.ref_name }}
+           git push origin HEAD:${{ github.ref_name }}
           echo "✅ README.md updated successfully"
         fi
 
