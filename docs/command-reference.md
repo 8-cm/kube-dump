@@ -135,6 +135,7 @@ When only volume paths are provided without explicit thresholds, the script auto
 
 ### Cleanup & Monitoring
 - `--no-cleanup` - Skip cleanup, leave debug pods running for log inspection
+- `--skip-prepull` - Skip image pre-pulling on target nodes (use if images are already cached)
 - `--verbose` - Enable verbose logging (max Kubernetes verbosity, per-pod logs to OUTPUT_DIR/debug/)
 - `--no-glyphs` - Disable emojis and use text labels like [INFO], [ERROR], [OK]
 

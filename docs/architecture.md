@@ -11,6 +11,7 @@ sequenceDiagram
     participant User as User (Terminal)
     participant Script as kube-dump.sh (Local)
     participant K8sAPI as Kubernetes API
+    participant PrepullerPod as Pre-Puller Pod
     participant DebugPod as Debug Pod
     participant TargetPod as Target Pod
     participant TargetNode as Target Node
@@ -171,6 +172,55 @@ sequenceDiagram
             
             Note right of Script: Returns: 0|1<br/>Updates: DEBUG_POD_NAMES[]
         end
+    end
+
+    %% ============================================================
+    %% PHASE 1: IMAGE PRE-PULL
+    %% ============================================================
+    rect rgb(255, 250, 240)
+        Note over User,LocalFS: PHASE 1 (continued): Image Pre-Pull on Target Nodes<br/>(skipped if --skip-prepull)
+        
+        Script->>Script: create_image_prepuller_pods()
+        Note right of Script: Collects unique nodes from:<br/>TARGET_PODS[] + TARGET_NODES[]<br/>Creates minimal pod per node
+        
+        loop For each unique node
+            Script->>Script: truncate_name_with_hash("prepull-{hash}-{epoch}")
+            
+            Script->>K8sAPI: $KUBE_CLI apply -f - <<< {prepuller_pod_yaml}
+            Note right of Script: Minimal unprivileged pod:<br/>command: ["tail", "-f", "/dev/null"]<br/>runAsNonRoot: true (uid 65534)<br/>capabilities: drop ALL<br/>automountServiceAccountToken: false<br/>resources: 10m CPU, 16Mi mem
+            K8sAPI->>PrepullerPod: Create pod on target node
+            activate PrepullerPod
+            PrepullerPod->>TargetNode: Pull DEBUG_IMAGE (if not cached)
+            TargetNode-->>PrepullerPod: Image pulled
+            PrepullerPod->>PrepullerPod: tail -f /dev/null (idle)
+            K8sAPI-->>Script: pod/{prepull-pod} created
+        end
+        
+        Note right of Script: Returns: 0|1<br/>Sets: IMAGE_PREPULLER_PODS[]
+        
+        Script->>Script: wait_for_prepuller_pods_ready()
+        Note right of Script: max_wait: 120s<br/>Only Running = ready
+        
+        loop Until all pods ready or timeout
+            loop For each pod in IMAGE_PREPULLER_PODS[]
+                Script->>K8sAPI: $KUBE_CLI get pod {prepuller} -o jsonpath='{.status.phase}'
+                K8sAPI-->>Script: "Pending"|"Running"|"Failed"
+                
+                alt status == "Running"
+                    Note right of Script: Image pulled successfully<br/>ready_pods += pod
+                end
+            end
+        end
+        
+        alt All prepullers Running
+            Script-->>User: "✅ Image cached on all N node(s)"
+        else Some failed
+            Script-->>User: "⚠️ Ready: X, Not Ready: Y, Pending: Z"
+        end
+        
+        Note right of Script: Returns: 0 (at least 1 ready)<br/>Returns: 1 (none ready)
+        
+        Note right of Script: Image now cached on nodes<br/>Pre-puller pods kept until Phase 4 cleanup
     end
 
     %% ============================================================
@@ -359,6 +409,17 @@ sequenceDiagram
                 
                 Script->>K8sAPI: $KUBE_CLI delete pods {KILL_SWITCH_MONITOR_PODS[]}
                 K8sAPI-->>Script: Monitor pods deleted
+            end
+            
+            Script->>Script: cleanup_prepuller_pods()
+            
+            alt Pre-puller pods exist
+                loop For each pod in IMAGE_PREPULLER_PODS[]
+                    Script->>K8sAPI: $KUBE_CLI delete pod {prepuller} --grace-period=0 --force
+                    K8sAPI-->>Script: Pod deleted
+                    deactivate PrepullerPod
+                end
+                Note right of Script: Clears: IMAGE_PREPULLER_PODS[]
             end
             
             Note right of Script: Returns: void
@@ -613,10 +674,18 @@ sequenceDiagram
 | `parse_size_to_bytes()` | `$size_string` | Integer (bytes) |
 | `format_bc_result()` | `$bc_expression` | Formatted number |
 
+### Image Pre-Pull Functions
+| Function | Parameters | Returns | Description |
+|----------|------------|---------|-------------|
+| `create_image_prepuller_pods()` | none | 0\|1 | Creates minimal pods on unique nodes to cache debug image |
+| `wait_for_prepuller_pods_ready()` | none | 0\|1 | Waits for pre-puller pods to reach Running (max 120s) |
+| `cleanup_prepuller_pods()` | none | 0 | Deletes all pre-puller pods after image is cached |
+
 ### Wait Functions
 | Function | Parameters | Returns | Timeout |
 |----------|------------|---------|---------|
-| `wait_for_debug_pods_ready()` | none | 0\|1 | 300s |
+| `wait_for_debug_pods_ready()` | none | 0\|1 | 60s |
+| `wait_for_prepuller_pods_ready()` | none | 0\|1 | 120s |
 | `wait_for_discovery_pods_ready()` | none | 0\|1 | 300s |
 
 ### Cleanup Functions
@@ -663,6 +732,7 @@ POD_NAMES[]                     # Discovered pod names
 NODE_NAMES[]                    # Discovered node names
 TARGET_PODS[]                   # "pod:container:node:namespace"
 TARGET_NODES[]                  # Node names to target
+IMAGE_PREPULLER_PODS[]          # Pre-puller pod names (for image caching)
 DEBUG_POD_NAMES[]               # Created debug pod names
 DEBUG_POD_NAMES_META[]          # Debug pod metadata
 DISCOVERY_POD_NAMES[]           # Created discovery pod names

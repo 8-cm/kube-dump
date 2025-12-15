@@ -78,6 +78,7 @@ usage() {
    echo "                       Example: my-service-account"
    echo "                       Pod will verify account exists in target namespace before creation"
    echo "  --image              Container image for debug/discovery/killswitch pods [default: nicolaka/netshoot]"
+   echo "  --skip-prepull       Skip image pre-pulling on target nodes (use if images are already cached)"
    echo "  --no-glyphs          Disable emojis and use text labels like [INFO], [ERROR], [OK]"
    echo "  --verbose            Enable verbose logging (max k8s verbosity, per-pod logs to OUTPUT_DIR/debug/)"
    echo "  -h, --help           Show this help message and exit"
@@ -364,12 +365,14 @@ initialize_variables() {
    MEMORY_LIMIT=""  # Memory limit for debug/discovery/killswitch containers (optional, e.g., 128Mi, 512Mi, 1Gi)
    SERVICE_ACCOUNT=""  # Service account to use for all diagnostic, discovery, and kill switch pods (optional)
    DEBUG_IMAGE="nicolaka/netshoot"  # Default container image for debug/discovery/killswitch pods
+   SKIP_PREPULL="false"  # Default: pre-pull images on target nodes before creating debug pods
    KILL_SWITCH_MONITOR_PODS=()  # Array for kill switch monitor pods
   KILL_SWITCH_MONITOR_NAMES_META=()  # Parallel array: kill switch monitor pod names
   KILL_SWITCH_MONITOR_METADATA_VALUES=()  # Parallel array: metadata "type:target_name:node_name"
   KUBE_CLI=""  # Will be set to 'oc' or '$KUBE_CLI' based on availability
   VERBOSE="false"  # Default: disable verbose logging
   DEBUG_LOG_DIR=""  # Directory for verbose logs (created as OUTPUT_DIR/debug)
+  IMAGE_PREPULLER_PODS=()  # Array for image pre-puller pod names
 }
 
 # -------------------------------------------------------------------------------
@@ -1703,6 +1706,9 @@ parse_arguments() {
         --no-glyphs)
          NO_GLYPHS=true
          ;;
+        --skip-prepull)
+         SKIP_PREPULL="true"
+         ;;
       --verbose)
         VERBOSE=true
         ;;
@@ -2698,45 +2704,46 @@ generate_command_container() {
   local script_builder_func="$7"
   local workdir="${8:-}"  # Optional working directory parameter
 
-   cat <<EOF
-   - name: ${container_name}
-     image: ${DEBUG_IMAGE}
-     command: ["/bin/bash", "-c"]
-     args:
-     - |
+  cat <<EOF
+  - name: ${container_name}
+    image: ${DEBUG_IMAGE}
+    imagePullPolicy: IfNotPresent
+    command: ["/bin/bash", "-c"]
+    args:
+    - |
 $($script_builder_func "$pod_name" "$container_name_target" "$node_name" "$debug_pod_name" "$container_index" | sed 's/^/      /')
-     securityContext:
-       privileged: true
-       runAsUser: 0
-     volumeMounts:
-     - name: host
-       mountPath: /host
+    securityContext:
+      privileged: true
+      runAsUser: 0
+    volumeMounts:
+    - name: host
+      mountPath: /host
 EOF
 
-   # Add workingDir if provided
-   if [[ -n "$workdir" ]]; then
-     cat <<EOF
-     workingDir: ${workdir}
+  # Add workingDir if provided
+  if [[ -n "$workdir" ]]; then
+    cat <<EOF
+    workingDir: ${workdir}
 EOF
-   fi
+  fi
 
-   # Add resource limits if provided
-   if [[ -n "$CPU_LIMIT" || -n "$MEMORY_LIMIT" ]]; then
-     cat <<EOF
-     resources:
-       limits:
+  # Add resource limits if provided
+  if [[ -n "$CPU_LIMIT" || -n "$MEMORY_LIMIT" ]]; then
+    cat <<EOF
+    resources:
+      limits:
 EOF
-     if [[ -n "$CPU_LIMIT" ]]; then
-       cat <<EOF
-         cpu: ${CPU_LIMIT}
+    if [[ -n "$CPU_LIMIT" ]]; then
+      cat <<EOF
+        cpu: ${CPU_LIMIT}
 EOF
-     fi
-     if [[ -n "$MEMORY_LIMIT" ]]; then
-       cat <<EOF
-         memory: ${MEMORY_LIMIT}
+    fi
+    if [[ -n "$MEMORY_LIMIT" ]]; then
+      cat <<EOF
+        memory: ${MEMORY_LIMIT}
 EOF
-     fi
-   fi
+    fi
+  fi
 }
 
 # -------------------------------------------------------------------------------
@@ -2787,6 +2794,7 @@ generate_file_monitor_container() {
   cat <<EOF
   - name: ${container_name}
     image: ${DEBUG_IMAGE}
+    imagePullPolicy: IfNotPresent
     command: ["/bin/bash", "-c"]
     args:
     - |
@@ -2822,36 +2830,36 @@ EOF
 EOF
   fi
 
-   cat <<EOF
-     volumeMounts:
-     - name: host
-       mountPath: /host
+  cat <<EOF
+    volumeMounts:
+    - name: host
+      mountPath: /host
 EOF
 
-   # Add workingDir if provided
-   if [[ -n "$workdir" ]]; then
-     cat <<EOF
-     workingDir: ${workdir}
+  # Add workingDir if provided
+  if [[ -n "$workdir" ]]; then
+    cat <<EOF
+    workingDir: ${workdir}
 EOF
-   fi
+  fi
 
-   # Add resource limits if provided
-   if [[ -n "$CPU_LIMIT" || -n "$MEMORY_LIMIT" ]]; then
-     cat <<EOF
-     resources:
-       limits:
+  # Add resource limits if provided
+  if [[ -n "$CPU_LIMIT" || -n "$MEMORY_LIMIT" ]]; then
+    cat <<EOF
+    resources:
+      limits:
 EOF
-     if [[ -n "$CPU_LIMIT" ]]; then
-       cat <<EOF
-         cpu: ${CPU_LIMIT}
+    if [[ -n "$CPU_LIMIT" ]]; then
+      cat <<EOF
+        cpu: ${CPU_LIMIT}
 EOF
-     fi
-     if [[ -n "$MEMORY_LIMIT" ]]; then
-       cat <<EOF
-         memory: ${MEMORY_LIMIT}
+    fi
+    if [[ -n "$MEMORY_LIMIT" ]]; then
+      cat <<EOF
+        memory: ${MEMORY_LIMIT}
 EOF
-     fi
-   fi
+    fi
+  fi
 }
 
 # -------------------------------------------------------------------------------
@@ -2931,33 +2939,33 @@ create_single_node_debug_pod() {
     container_specs+=$'\n'
   done
 
-   # Create pod with dynamically generated containers
-   run_kube_cmd "$debug_pod_name" "apply" apply -f - <<EOF
+  # Create pod with dynamically generated containers
+  run_kube_cmd "$debug_pod_name" "apply" apply -f - <<EOF
 apiVersion: v1
 kind: Pod
 metadata:
-   name: ${debug_pod_name}
-   namespace: ${debug_ns}
-   labels:
-     app: debug
-     node: ${node_label_value}
+  name: ${debug_pod_name}
+  namespace: ${debug_ns}
+  labels:
+    app: debug
+    node: ${node_label_value}
 spec:
-   hostPID: true
-   hostNetwork: true
-   hostIPC: true
-   containers:
- ${container_specs}
-    restartPolicy: Never
- $([ -n "$SERVICE_ACCOUNT" ] && echo "    serviceAccountName: ${SERVICE_ACCOUNT}")
-    volumes:
-    - name: host
-      hostPath:
-        path: /
-        type: Directory
-    nodeSelector:
-      kubernetes.io/hostname: ${node_name}
- EOF
- }
+  hostPID: true
+  hostNetwork: true
+  hostIPC: true
+  containers:
+${container_specs}
+  restartPolicy: Never
+$([ -n "$SERVICE_ACCOUNT" ] && echo "  serviceAccountName: ${SERVICE_ACCOUNT}")
+  volumes:
+  - name: host
+    hostPath:
+      path: /
+      type: Directory
+  nodeSelector:
+    kubernetes.io/hostname: ${node_name}
+EOF
+}
 
 # -------------------------------------------------------------------------------
 # Function: build_node_debug_script
@@ -3030,16 +3038,15 @@ build_node_debug_script() {
   final_node_command="${final_node_command//${PLACEHOLDER_CHAR}n/$node_name}"
   
   # Variables for temp file handling
-  local has_import_file="false"
   local import_file_setup=""
   local import_file_cleanup=""
   
   # Get import file content for this command
-  local import_file_content=$(get_node_import_file_for_command "$container_index")
+  local import_file_content
+  import_file_content=$(get_node_import_file_for_command "$container_index")
   
   # Handle %f placeholder (file content) - write to temp file and execute
   if [[ -n "$import_file_content" ]]; then
-    has_import_file="true"
     # Use cat with heredoc to safely embed base64 content (avoids quoting issues)
     import_file_setup="IMPORT_SCRIPT_FILE=\$(mktemp)
 cat > \"\$IMPORT_SCRIPT_FILE\" << 'KUBEDUMP_SCRIPT_EOF'
@@ -3053,10 +3060,11 @@ echo \"Cleaned up imported script file\" >&2"
    # Note: Only %t, %n, %f are valid placeholders. No backward compat for plain %
 
   # Security: Properly escape parameters to prevent shell injection
-  local safe_container_index=$(printf %q "$container_index")
-  local safe_node_name=$(printf %q "$node_name")
-  local safe_debug_pod_name=$(printf %q "$debug_pod_name")
-  local safe_final_node_command=$(printf %q "$final_node_command")
+  local safe_container_index safe_node_name safe_debug_pod_name safe_final_node_command
+  safe_container_index=$(printf %q "$container_index")
+  safe_node_name=$(printf %q "$node_name")
+  safe_debug_pod_name=$(printf %q "$debug_pod_name")
+  safe_final_node_command=$(printf %q "$final_node_command")
 
   cat <<SCRIPT
 set -e
@@ -3181,27 +3189,27 @@ create_single_debug_pod() {
     container_specs+=$'\n'
   done
 
-   # Create pod with dynamically generated containers
-   run_kube_cmd "$debug_pod_name" "apply" apply -f - <<EOF
+  # Create pod with dynamically generated containers
+  run_kube_cmd "$debug_pod_name" "apply" apply -f - <<EOF
 apiVersion: v1
 kind: Pod
 metadata:
-   name: ${debug_pod_name}
-   namespace: ${debug_ns}
+  name: ${debug_pod_name}
+  namespace: ${debug_ns}
 spec:
-   containers:
+  containers:
 ${container_specs}
-   hostNetwork: true
-   hostPID: true
-   hostIPC: true
-   nodeName: ${node_name}
-    restartPolicy: Never
- $([ -n "$SERVICE_ACCOUNT" ] && echo "    serviceAccountName: ${SERVICE_ACCOUNT}")
-    volumes:
-   - name: host
-     hostPath:
-       path: /
-       type: Directory
+  hostNetwork: true
+  hostPID: true
+  hostIPC: true
+  nodeName: ${node_name}
+  restartPolicy: Never
+$([ -n "$SERVICE_ACCOUNT" ] && echo "  serviceAccountName: ${SERVICE_ACCOUNT}")
+  volumes:
+  - name: host
+    hostPath:
+      path: /
+      type: Directory
 EOF
 }
 
@@ -3279,7 +3287,8 @@ build_debug_script() {
   if [[ ${#ENCODED_NSENTER_PARAMS[@]} -gt "$container_index" ]]; then
     local encoded_params="${ENCODED_NSENTER_PARAMS[$container_index]}"
     # Decode (format: "n" or "n,p,m") and add '-' prefix to each flag
-    local decoded_params=$(echo "$encoded_params" | base64 -d)
+    local decoded_params
+    decoded_params=$(echo "$encoded_params" | base64 -d)
     # Convert "n,p,m" to "-n -p -m"
     nsenter_params=$(echo "$decoded_params" | tr ',' '\n' | sed 's/^/-/' | tr '\n' ' ' | sed 's/ $//')
   else
@@ -3288,15 +3297,17 @@ build_debug_script() {
   fi
 
   # Get import file content for this command if available
-  local import_file_content=$(get_import_file_for_command "$container_index")
+  local import_file_content
+  import_file_content=$(get_import_file_for_command "$container_index")
 
   # Security: Properly escape parameters to prevent shell injection
-  local safe_container_index=$(printf %q "$container_index")
-  local safe_pod_name=$(printf %q "$pod_name")
-  local safe_container_name=$(printf %q "$container_name")
-  local safe_node_name=$(printf %q "$node_name")
-  local safe_debug_pod_name=$(printf %q "$debug_pod_name")
-  local safe_nsenter_params=$(printf %q "$nsenter_params")
+  local safe_container_index safe_pod_name safe_container_name safe_node_name safe_debug_pod_name safe_nsenter_params
+  safe_container_index=$(printf %q "$container_index")
+  safe_pod_name=$(printf %q "$pod_name")
+  safe_container_name=$(printf %q "$container_name")
+  safe_node_name=$(printf %q "$node_name")
+  safe_debug_pod_name=$(printf %q "$debug_pod_name")
+  safe_nsenter_params=$(printf %q "$nsenter_params")
 
   cat <<SCRIPT
 set -e
@@ -3319,14 +3330,14 @@ if [[ "${is_custom}" == "true" ]]; then
   # Note: Only %t, %n, %f are valid. No backward compat for plain %
   echo "  Command: \$PREVIEW_CMD" >&2
 else
-  local preview="${cmd_to_use}"
+  preview="${cmd_to_use}"
   preview="\${preview//${PLACEHOLDER_CHAR}t/${safe_pod_name}}"
   preview="\${preview//${PLACEHOLDER_CHAR}n/${safe_pod_name}}"
   if [[ -n "$import_file_content" ]]; then
     preview="\${preview//${PLACEHOLDER_CHAR}f/\\\$IMPORT_SCRIPT_FILE}"
   fi
   # Note: Only %t, %n, %f are valid. No backward compat for plain %
-  echo "  Command: ${preview}" >&2
+  echo "  Command: \$preview" >&2
 fi
 echo "  Nsenter params: ${safe_nsenter_params}" >&2
 echo "======================================================================" >&2
@@ -3586,6 +3597,349 @@ EXECEND
     fi
     echo "tail -f /dev/null"
   fi
+}
+
+# -------------------------------------------------------------------------------
+# Function: create_image_prepuller_pods
+# -------------------------------------------------------------------------------
+# Description:
+#   Creates minimal, security-hardened pods on each unique target node to pre-pull
+#   the debug image before actual debug pods are created. This ensures the container
+#   image is cached on target nodes, reducing startup time for debug pods.
+#   Pre-puller pods are as restricted as possible since they only need to exist
+#   long enough to trigger the image pull.
+#
+# Parameters:
+#   Uses global variables:
+#     $TARGET_PODS[]       - Array of pod targets (extracts node names)
+#     $TARGET_NODES[]      - Array of node targets
+#     $DEBUG_NAMESPACE     - Namespace for pre-puller pod creation
+#     $NAMESPACE           - Fallback namespace if DEBUG_NAMESPACE not set
+#     $DEBUG_IMAGE         - Container image to pre-pull
+#     $KUBE_CLI            - Kubernetes CLI command (kubectl/oc)
+#   Modifies global arrays:
+#     IMAGE_PREPULLER_PODS[] - Names of created pre-puller pods
+#
+# Example Usage:
+#   TARGET_PODS=("pod1:container1:node1:ns1" "pod2:container2:node1:ns2")
+#   TARGET_NODES=("node2" "node3")
+#   create_image_prepuller_pods
+#   # Creates pre-puller pods on node1, node2, and node3 (unique nodes only)
+#
+# Expected Output:
+#   - Progress messages for pre-puller pod creation
+#   - Visual indicators showing which nodes are being prepared
+#   - Updates to IMAGE_PREPULLER_PODS array with created pod names
+#   - Returns 0 on completion (individual failures logged but don't stop process)
+#
+# Security Hardening:
+#   - runAsNonRoot: true (uid/gid 65534 - nobody)
+#   - allowPrivilegeEscalation: false
+#   - privileged: false
+#   - capabilities: drop ALL
+#   - seccompProfile: RuntimeDefault
+#   - automountServiceAccountToken: false
+#   - enableServiceLinks: false
+#   - Uses same resource limits as other pods (from --cpu-limit/--memory-limit)
+#
+# Detailed Behavior:
+#   1. Collects unique node names from both TARGET_PODS and TARGET_NODES
+#   2. For each unique node:
+#      - Creates a minimal pod that runs "tail -f /dev/null"
+#      - Pod uses DEBUG_IMAGE to trigger image pull
+#      - Uses nodeSelector to ensure pod runs on specific node
+#      - Pod is completely unprivileged and security-hardened
+#   3. Pods are designed to start quickly and do nothing - just pull the image
+#   4. After image is cached, pods should be cleaned up with cleanup_prepuller_pods()
+# -------------------------------------------------------------------------------
+create_image_prepuller_pods() {
+  local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE:-default}}"
+  local epoch_time
+  epoch_time=$(date +"%s")
+
+  # Collect unique node names from both pod and node targets
+  # Using regular array for bash 3.x compatibility
+  local unique_nodes
+  local node_name
+  local is_duplicate
+  unique_nodes=()
+  
+  # Extract nodes from TARGET_PODS
+  for target_pod in "${TARGET_PODS[@]}"; do
+    node_name=$(echo "$target_pod" | cut -d':' -f3)
+    if [[ -n "$node_name" ]]; then
+      is_duplicate="false"
+      for existing in "${unique_nodes[@]}"; do
+        if [[ "$existing" == "$node_name" ]]; then
+          is_duplicate="true"
+          break
+        fi
+      done
+      if [[ "$is_duplicate" == "false" ]]; then
+        unique_nodes+=("$node_name")
+      fi
+    fi
+  done
+  
+  # Add nodes from TARGET_NODES
+  for node_name in "${TARGET_NODES[@]}"; do
+    if [[ -n "$node_name" ]]; then
+      is_duplicate="false"
+      for existing in "${unique_nodes[@]}"; do
+        if [[ "$existing" == "$node_name" ]]; then
+          is_duplicate="true"
+          break
+        fi
+      done
+      if [[ "$is_duplicate" == "false" ]]; then
+        unique_nodes+=("$node_name")
+      fi
+    fi
+  done
+
+  local node_count=${#unique_nodes[@]}
+  if [[ $node_count -eq 0 ]]; then
+    format_message "   ⚠️  No target nodes found for image pre-pulling"
+    return 0
+  fi
+
+  format_message "🚀 Creating image pre-puller pods on ${node_count} node(s)..."
+
+  for node_name in "${unique_nodes[@]}"; do
+    # Generate unique pre-puller pod name
+    local node_hash
+    if command -v md5sum >/dev/null 2>&1; then
+      node_hash=$(echo "$node_name" | md5sum | cut -c1-8)
+    elif command -v md5 >/dev/null 2>&1; then
+      node_hash=$(echo "$node_name" | md5 | cut -c1-8)
+    else
+      node_hash=$(echo "$node_name" | cksum | cut -d' ' -f1 | cut -c1-8)
+    fi
+    local prepuller_pod_name
+    prepuller_pod_name=$(truncate_name_with_hash "prepull-${node_hash}-${epoch_time}")
+
+    format_message "   📥 Pre-pulling image on node ${node_name}..."
+
+    # Build resource limits JSON if specified
+    local resources_json=""
+    if [[ -n "$CPU_LIMIT" || -n "$MEMORY_LIMIT" ]]; then
+      resources_json='"resources": { "limits": {'
+      local limits=()
+      [[ -n "$CPU_LIMIT" ]] && limits+=('"cpu": "'"$CPU_LIMIT"'"')
+      [[ -n "$MEMORY_LIMIT" ]] && limits+=('"memory": "'"$MEMORY_LIMIT"'"')
+      local IFS=','
+      resources_json+="${limits[*]}"
+      resources_json+='}},'
+    fi
+
+    # Create minimal, unprivileged pre-puller pod
+    # Purpose: Only pull the image to cache it on the node
+    # Security: Drop all capabilities, non-root user
+    local pod_json
+    pod_json=$(cat <<EOF
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "${prepuller_pod_name}",
+    "namespace": "${debug_ns}",
+    "labels": {
+      "app": "kube-dump-prepuller",
+      "kube-dump-role": "image-prepuller"
+    }
+  },
+  "spec": {
+    "nodeSelector": {
+      "kubernetes.io/hostname": "${node_name}"
+    },
+    "automountServiceAccountToken": false,
+    "enableServiceLinks": false,
+    "containers": [{
+      "name": "prepuller",
+      "image": "${DEBUG_IMAGE}",
+      "command": ["tail", "-f", "/dev/null"],
+      "imagePullPolicy": "IfNotPresent",
+      ${resources_json}
+      "securityContext": {
+        "allowPrivilegeEscalation": false,
+        "privileged": false,
+        "runAsNonRoot": true,
+        "runAsUser": 65534,
+        "runAsGroup": 65534,
+        "capabilities": {
+          "drop": ["ALL"]
+        },
+        "seccompProfile": {
+          "type": "RuntimeDefault"
+        }
+      }
+    }],
+    "restartPolicy": "Never",
+    "terminationGracePeriodSeconds": 0
+  }
+}
+EOF
+)
+
+    if echo "$pod_json" | $KUBE_CLI apply -f - >/dev/null 2>&1; then
+      IMAGE_PREPULLER_PODS+=("$prepuller_pod_name")
+    else
+      format_message "      ⚠️  Failed to create pre-puller pod on ${node_name}"
+    fi
+  done
+
+  if [[ ${#IMAGE_PREPULLER_PODS[@]} -eq 0 ]]; then
+    format_message "   ⚠️  No pre-puller pods were created"
+    return 1
+  fi
+
+  format_message "   ✅ Created ${#IMAGE_PREPULLER_PODS[@]} pre-puller pod(s)"
+  return 0
+}
+
+# -------------------------------------------------------------------------------
+# Function: wait_for_prepuller_pods_ready
+# -------------------------------------------------------------------------------
+# Description:
+#   Waits for all image pre-puller pods to reach Running status, indicating that
+#   the debug image has been successfully pulled to each target node. This function
+#   monitors pod startup with a shorter timeout since pre-puller pods are minimal.
+#
+# Parameters:
+#   Uses global variables:
+#     $IMAGE_PREPULLER_PODS[] - Array of pre-puller pod names to monitor
+#     $DEBUG_NAMESPACE        - Namespace where pre-puller pods are created
+#     $NAMESPACE              - Fallback namespace if DEBUG_NAMESPACE not set
+#     $KUBE_CLI               - Kubernetes CLI command (kubectl/oc)
+#
+# Example Usage:
+#   wait_for_prepuller_pods_ready
+#   # Waits for all pre-puller pods to reach Running status
+#
+# Expected Output:
+#   - Progress indicators showing pod readiness checking
+#   - Status summary of ready/failed/pending pods
+#   - Returns 0 if at least one pod becomes ready, 1 if none ready
+#
+# Detailed Behavior:
+#   1. Sets maximum wait time to 120 seconds (image pull may take time)
+#   2. Polls every 2 seconds to check pod status
+#   3. Only Running status counts as ready
+#   4. Failed/Succeeded/Unknown are terminal non-ready states
+#   5. Returns success if at least one pod is ready (partial success OK)
+# -------------------------------------------------------------------------------
+wait_for_prepuller_pods_ready() {
+  local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE:-default}}"
+  local max_wait=120
+
+  if [[ ${#IMAGE_PREPULLER_PODS[@]} -eq 0 ]]; then
+    return 0
+  fi
+
+  local ready_pods=()
+  local not_ready_pods=()
+  local wait_time=0
+
+  printf "%s\n" "$(format_message "🔄 Waiting for image pull on ${#IMAGE_PREPULLER_PODS[@]} node(s)...")"
+
+  while [ $wait_time -lt $max_wait ] && [ ${#ready_pods[@]} -lt ${#IMAGE_PREPULLER_PODS[@]} ]; do
+    for prepuller_pod in "${IMAGE_PREPULLER_PODS[@]}"; do
+      # Skip if already categorized
+      if [[ " ${ready_pods[*]} " == *" $prepuller_pod "* ]] || [[ " ${not_ready_pods[*]} " == *" $prepuller_pod "* ]]; then
+        continue
+      fi
+
+      local pod_status
+      pod_status=$($KUBE_CLI get pod "${prepuller_pod}" -n "${debug_ns}" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+      
+      if [[ "$pod_status" == "Running" ]]; then
+        ready_pods+=("$prepuller_pod")
+      elif [[ "$pod_status" == "Failed" ]] || [[ "$pod_status" == "Succeeded" ]] || [[ "$pod_status" == "Unknown" ]]; then
+        not_ready_pods+=("$prepuller_pod:$pod_status")
+      fi
+    done
+
+    # Exit early if all pods are in terminal states
+    local terminal_count=$((${#ready_pods[@]} + ${#not_ready_pods[@]}))
+    if [ $terminal_count -ge ${#IMAGE_PREPULLER_PODS[@]} ]; then
+      break
+    fi
+
+    if [ ${#ready_pods[@]} -lt ${#IMAGE_PREPULLER_PODS[@]} ]; then
+      sleep 2
+      wait_time=$((wait_time + 2))
+      printf "."
+    fi
+  done
+
+  echo ""
+
+  local pending_count=$((${#IMAGE_PREPULLER_PODS[@]} - ${#ready_pods[@]} - ${#not_ready_pods[@]}))
+
+  if [ ${#ready_pods[@]} -eq ${#IMAGE_PREPULLER_PODS[@]} ]; then
+    format_message "   ✅ Image cached on all ${#ready_pods[@]} node(s)"
+  else
+    format_message "   ⚠️  Ready: ${#ready_pods[@]}, Not Ready: ${#not_ready_pods[@]}, Pending: ${pending_count}, Total: ${#IMAGE_PREPULLER_PODS[@]}"
+    for not_ready_entry in "${not_ready_pods[@]}"; do
+      local pod_name="${not_ready_entry%%:*}"
+      local pod_status="${not_ready_entry#*:}"
+      format_message "      ❌ $pod_name ($pod_status)"
+    done
+  fi
+
+  if [ ${#ready_pods[@]} -eq 0 ]; then
+    format_message "   ❌ Error: Image pre-pull failed on all nodes"
+    return 1
+  fi
+
+  return 0
+}
+
+# -------------------------------------------------------------------------------
+# Function: cleanup_prepuller_pods
+# -------------------------------------------------------------------------------
+# Description:
+#   Deletes all image pre-puller pods after the debug image has been cached on
+#   target nodes. This cleanup ensures no orphaned pods remain after the pre-pull
+#   phase completes.
+#
+# Parameters:
+#   Uses global variables:
+#     $IMAGE_PREPULLER_PODS[] - Array of pre-puller pod names to delete
+#     $DEBUG_NAMESPACE        - Namespace where pre-puller pods are created
+#     $NAMESPACE              - Fallback namespace if DEBUG_NAMESPACE not set
+#     $KUBE_CLI               - Kubernetes CLI command (kubectl/oc)
+#
+# Example Usage:
+#   cleanup_prepuller_pods
+#   # Deletes all pre-puller pods
+#
+# Expected Output:
+#   - Progress message indicating cleanup
+#   - Confirmation of deleted pod count
+#
+# Detailed Behavior:
+#   1. Skips if no pre-puller pods exist
+#   2. Deletes all pods in IMAGE_PREPULLER_PODS array
+#   3. Uses --grace-period=0 for immediate termination
+#   4. Clears the IMAGE_PREPULLER_PODS array after cleanup
+# -------------------------------------------------------------------------------
+cleanup_prepuller_pods() {
+  local debug_ns="${DEBUG_NAMESPACE:-${NAMESPACE:-default}}"
+
+  if [[ ${#IMAGE_PREPULLER_PODS[@]} -eq 0 ]]; then
+    return 0
+  fi
+
+  format_message "🧹 Cleaning up ${#IMAGE_PREPULLER_PODS[@]} pre-puller pod(s)..."
+  
+  for prepuller_pod in "${IMAGE_PREPULLER_PODS[@]}"; do
+    $KUBE_CLI delete pod "${prepuller_pod}" -n "${debug_ns}" --grace-period=0 --force >/dev/null 2>&1 || true
+  done
+
+  format_message "   ✅ Pre-puller pods cleaned up"
+  IMAGE_PREPULLER_PODS=()
+  return 0
 }
 
 # -------------------------------------------------------------------------------
@@ -4377,8 +4731,9 @@ build_single_discovery_script() {
 
   # Security: Properly escape parameters to prevent shell injection
   # Use printf %q to safely quote values for shell
-  local safe_container_index=$(printf %q "$container_index")
-  local safe_target_name=$(printf %q "$target_name")
+  local safe_container_index safe_target_name
+  safe_container_index=$(printf %q "$container_index")
+  safe_target_name=$(printf %q "$target_name")
 
   cat <<DISCOVERY_SCRIPT
 #!/bin/bash
@@ -4455,11 +4810,12 @@ build_discovery_script() {
   local target_name="${5:-$pod_name}"  # Use target pod name for placeholder substitution
 
   # Security: Properly escape parameters to prevent shell injection
-  local safe_pod_name=$(printf %q "$pod_name")
-  local safe_container_name=$(printf %q "$container_name")
-  local safe_node_name=$(printf %q "$node_name")
-  local safe_discovery_pod_name=$(printf %q "$discovery_pod_name")
-  local safe_target_name=$(printf %q "$target_name")
+  local safe_pod_name safe_container_name safe_node_name safe_discovery_pod_name safe_target_name
+  safe_pod_name=$(printf %q "$pod_name")
+  safe_container_name=$(printf %q "$container_name")
+  safe_node_name=$(printf %q "$node_name")
+  safe_discovery_pod_name=$(printf %q "$discovery_pod_name")
+  safe_target_name=$(printf %q "$target_name")
 
   cat <<DISCOVERY_SCRIPT
 #!/bin/bash
@@ -4529,8 +4885,9 @@ build_single_node_discovery_script() {
 
   # Security: Properly escape parameters to prevent shell injection
   # Use printf %q to safely quote values for shell
-  local safe_container_index=$(printf %q "$container_index")
-  local safe_target_name=$(printf %q "$target_name")
+  local safe_container_index safe_target_name
+  safe_container_index=$(printf %q "$container_index")
+  safe_target_name=$(printf %q "$target_name")
 
   cat <<NODE_DISCOVERY_SCRIPT
 #!/bin/bash
@@ -4603,9 +4960,10 @@ build_node_discovery_script() {
   local target_name="${3:-$node_name}"  # Use target node name for placeholder substitution
 
   # Security: Properly escape parameters to prevent shell injection
-  local safe_node_name=$(printf %q "$node_name")
-  local safe_discovery_pod_name=$(printf %q "$discovery_pod_name")
-  local safe_target_name=$(printf %q "$target_name")
+  local safe_node_name safe_discovery_pod_name safe_target_name
+  safe_node_name=$(printf %q "$node_name")
+  safe_discovery_pod_name=$(printf %q "$discovery_pod_name")
+  safe_target_name=$(printf %q "$target_name")
 
   cat <<NODE_DISCOVERY_SCRIPT
 #!/bin/bash
@@ -4699,75 +5057,73 @@ create_discovery_pod() {
   for ((i=0; i<${#ENCODED_SELECT_COMMANDS[@]}; i++)); do
     containers_yaml+="  - name: discovery-$i"$'\n'
     containers_yaml+="    image: ${DEBUG_IMAGE}"$'\n'
+    containers_yaml+="    imagePullPolicy: IfNotPresent"$'\n'
     containers_yaml+="    command: [\"/bin/bash\", \"-c\"]"$'\n'
     containers_yaml+="    args:"$'\n'
     containers_yaml+="    - |"$'\n'
     # Generate single-command script and indent
     containers_yaml+="$(build_single_discovery_script "$i" "$target_name" | sed 's/^/      /')"$'\n'
-     containers_yaml+="    securityContext:"$'\n'
-     containers_yaml+="      privileged: true"$'\n'
-     containers_yaml+="    env:"$'\n'
-     containers_yaml+="    - name: CRI_RUNTIME"$'\n'
-     containers_yaml+="      value: \"${CRI_RUNTIME}\""$'\n'
-     containers_yaml+="    - name: CRI_SOCKET"$'\n'
-     containers_yaml+="      value: \"${CRI_SOCKET}\""$'\n'
-     containers_yaml+="    - name: ENCODED_SELECT_COMMAND"$'\n'
-     containers_yaml+="      value: \"${ENCODED_SELECT_COMMANDS[$i]}\""$'\n'
-     containers_yaml+="    - name: PLACEHOLDER_CHAR"$'\n'
-     containers_yaml+="      value: \"${PLACEHOLDER_CHAR}\""$'\n'
-      containers_yaml+="    volumeMounts:"$'\n'
-      containers_yaml+="    - name: host-root"$'\n'
-      containers_yaml+="      mountPath: /host"$'\n'
-      containers_yaml+="      readOnly: false"$'\n'
-      # Add workingDir if provided
-      if [[ -n "$WORKDIR_POD" ]]; then
-        containers_yaml+="    workingDir: ${WORKDIR_POD}"$'\n'
+    containers_yaml+="    securityContext:"$'\n'
+    containers_yaml+="      privileged: true"$'\n'
+    containers_yaml+="    env:"$'\n'
+    containers_yaml+="    - name: CRI_RUNTIME"$'\n'
+    containers_yaml+="      value: \"${CRI_RUNTIME}\""$'\n'
+    containers_yaml+="    - name: CRI_SOCKET"$'\n'
+    containers_yaml+="      value: \"${CRI_SOCKET}\""$'\n'
+    containers_yaml+="    - name: ENCODED_SELECT_COMMAND"$'\n'
+    containers_yaml+="      value: \"${ENCODED_SELECT_COMMANDS[$i]}\""$'\n'
+    containers_yaml+="    - name: PLACEHOLDER_CHAR"$'\n'
+    containers_yaml+="      value: \"${PLACEHOLDER_CHAR}\""$'\n'
+    containers_yaml+="    volumeMounts:"$'\n'
+    containers_yaml+="    - name: host-root"$'\n'
+    containers_yaml+="      mountPath: /host"$'\n'
+    containers_yaml+="      readOnly: false"$'\n'
+    # Add workingDir if provided
+    if [[ -n "$WORKDIR_POD" ]]; then
+      containers_yaml+="    workingDir: ${WORKDIR_POD}"$'\n'
+    fi
+    # Add resource limits if provided
+    if [[ -n "$CPU_LIMIT" || -n "$MEMORY_LIMIT" ]]; then
+      containers_yaml+="    resources:"$'\n'
+      containers_yaml+="      limits:"$'\n'
+      if [[ -n "$CPU_LIMIT" ]]; then
+        containers_yaml+="        cpu: ${CPU_LIMIT}"$'\n'
       fi
-      # Add resource limits if provided
-      if [[ -n "$CPU_LIMIT" || -n "$MEMORY_LIMIT" ]]; then
-        containers_yaml+="    resources:"$'\n'
-        containers_yaml+="      limits:"$'\n'
-        if [[ -n "$CPU_LIMIT" ]]; then
-          containers_yaml+="        cpu: ${CPU_LIMIT}"$'\n'
-        fi
-        if [[ -n "$MEMORY_LIMIT" ]]; then
-          containers_yaml+="        memory: ${MEMORY_LIMIT}"$'\n'
-        fi
+      if [[ -n "$MEMORY_LIMIT" ]]; then
+        containers_yaml+="        memory: ${MEMORY_LIMIT}"$'\n'
       fi
-    done
+    fi
+  done
 
-   # Validate that we have at least one container spec
-   if [[ -z "$containers_yaml" ]]; then
-     format_message "❌ Error: No pod file selection commands found (ENCODED_SELECT_COMMANDS is empty)"
-     return 1
-   fi
+  # Validate that we have at least one container spec
+  if [[ -z "$containers_yaml" ]]; then
+    format_message "❌ Error: No pod file selection commands found (ENCODED_SELECT_COMMANDS is empty)"
+    return 1
+  fi
 
-    # Create discovery pod using YAML manifest for file discovery
-    local sa_line=""
-    [[ -n "$SERVICE_ACCOUNT" ]] && sa_line=$'  serviceAccountName: '"${SERVICE_ACCOUNT}"$'\n'
-
-    run_kube_cmd "$discovery_pod_name" "apply" apply -f - <<EOF
- apiVersion: v1
- kind: Pod
- metadata:
-   name: ${discovery_pod_name}
-   namespace: ${debug_ns}
- spec:
-    restartPolicy: Never
-    hostNetwork: true
-    hostPID: true
- $([ -n "$SERVICE_ACCOUNT" ] && echo "    serviceAccountName: ${SERVICE_ACCOUNT}")
-    nodeSelector:
-      kubernetes.io/hostname: ${node_name}
-    containers:
- ${containers_yaml}
-    volumes:
-    - name: host-root
-      hostPath:
-        path: /
-        type: Directory
- EOF
- }
+  # Create discovery pod using YAML manifest for file discovery
+  run_kube_cmd "$discovery_pod_name" "apply" apply -f - <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${discovery_pod_name}
+  namespace: ${debug_ns}
+spec:
+  restartPolicy: Never
+  hostNetwork: true
+  hostPID: true
+$([ -n "$SERVICE_ACCOUNT" ] && echo "  serviceAccountName: ${SERVICE_ACCOUNT}")
+  nodeSelector:
+    kubernetes.io/hostname: ${node_name}
+  containers:
+${containers_yaml}
+  volumes:
+  - name: host-root
+    hostPath:
+      path: /
+      type: Directory
+EOF
+}
 
 # -------------------------------------------------------------------------------
 # Function: create_node_discovery_pod
@@ -4815,70 +5171,68 @@ create_node_discovery_pod() {
   for ((i=0; i<${#ENCODED_NODE_SELECT_COMMANDS[@]}; i++)); do
     containers_yaml+="  - name: discovery-$i"$'\n'
     containers_yaml+="    image: ${DEBUG_IMAGE}"$'\n'
+    containers_yaml+="    imagePullPolicy: IfNotPresent"$'\n'
     containers_yaml+="    command: [\"/bin/bash\", \"-c\"]"$'\n'
     containers_yaml+="    args:"$'\n'
     containers_yaml+="    - |"$'\n'
     containers_yaml+="$(build_single_node_discovery_script "$i" "$target_name" | sed 's/^/      /')"$'\n'
-     containers_yaml+="    securityContext:"$'\n'
-     containers_yaml+="      privileged: true"$'\n'
-     containers_yaml+="    env:"$'\n'
-     containers_yaml+="    - name: PLACEHOLDER_CHAR"$'\n'
-     containers_yaml+="      value: \"${PLACEHOLDER_CHAR}\""$'\n'
-     containers_yaml+="    - name: ENCODED_NODE_SELECT_COMMAND"$'\n'
-     containers_yaml+="      value: \"${ENCODED_NODE_SELECT_COMMANDS[$i]}\""$'\n'
-      containers_yaml+="    volumeMounts:"$'\n'
-      containers_yaml+="    - name: host-root"$'\n'
-      containers_yaml+="      mountPath: /host"$'\n'
-      containers_yaml+="      readOnly: false"$'\n'
-      # Add workingDir if provided
-      if [[ -n "$WORKDIR_NODE" ]]; then
-        containers_yaml+="    workingDir: ${WORKDIR_NODE}"$'\n'
+    containers_yaml+="    securityContext:"$'\n'
+    containers_yaml+="      privileged: true"$'\n'
+    containers_yaml+="    env:"$'\n'
+    containers_yaml+="    - name: PLACEHOLDER_CHAR"$'\n'
+    containers_yaml+="      value: \"${PLACEHOLDER_CHAR}\""$'\n'
+    containers_yaml+="    - name: ENCODED_NODE_SELECT_COMMAND"$'\n'
+    containers_yaml+="      value: \"${ENCODED_NODE_SELECT_COMMANDS[$i]}\""$'\n'
+    containers_yaml+="    volumeMounts:"$'\n'
+    containers_yaml+="    - name: host-root"$'\n'
+    containers_yaml+="      mountPath: /host"$'\n'
+    containers_yaml+="      readOnly: false"$'\n'
+    # Add workingDir if provided
+    if [[ -n "$WORKDIR_NODE" ]]; then
+      containers_yaml+="    workingDir: ${WORKDIR_NODE}"$'\n'
+    fi
+    # Add resource limits if provided
+    if [[ -n "$CPU_LIMIT" || -n "$MEMORY_LIMIT" ]]; then
+      containers_yaml+="    resources:"$'\n'
+      containers_yaml+="      limits:"$'\n'
+      if [[ -n "$CPU_LIMIT" ]]; then
+        containers_yaml+="        cpu: ${CPU_LIMIT}"$'\n'
       fi
-      # Add resource limits if provided
-      if [[ -n "$CPU_LIMIT" || -n "$MEMORY_LIMIT" ]]; then
-        containers_yaml+="    resources:"$'\n'
-        containers_yaml+="      limits:"$'\n'
-        if [[ -n "$CPU_LIMIT" ]]; then
-          containers_yaml+="        cpu: ${CPU_LIMIT}"$'\n'
-        fi
-        if [[ -n "$MEMORY_LIMIT" ]]; then
-          containers_yaml+="        memory: ${MEMORY_LIMIT}"$'\n'
-        fi
+      if [[ -n "$MEMORY_LIMIT" ]]; then
+        containers_yaml+="        memory: ${MEMORY_LIMIT}"$'\n'
       fi
-     done
+    fi
+  done
 
-   # Validate that we have at least one container spec
-   if [[ -z "$containers_yaml" ]]; then
-     format_message "❌ Error: No node file selection commands found (ENCODED_NODE_SELECT_COMMANDS is empty)"
-     return 1
-   fi
+  # Validate that we have at least one container spec
+  if [[ -z "$containers_yaml" ]]; then
+    format_message "❌ Error: No node file selection commands found (ENCODED_NODE_SELECT_COMMANDS is empty)"
+    return 1
+  fi
 
-    # Create node discovery pod using YAML manifest
-    local sa_line=""
-    [[ -n "$SERVICE_ACCOUNT" ]] && sa_line=$'  serviceAccountName: '"${SERVICE_ACCOUNT}"$'\n'
-
-    run_kube_cmd "$discovery_pod_name" "apply" apply -f - <<EOF
- apiVersion: v1
- kind: Pod
- metadata:
-    name: ${discovery_pod_name}
-    namespace: ${debug_ns}
- spec:
-    restartPolicy: Never
-    hostNetwork: true
-    hostPID: true
- $([ -n "$SERVICE_ACCOUNT" ] && echo "    serviceAccountName: ${SERVICE_ACCOUNT}")
-    nodeSelector:
-      kubernetes.io/hostname: ${node_name}
-    containers:
- ${containers_yaml}
-    volumes:
-    - name: host-root
-      hostPath:
-        path: /
-        type: Directory
- EOF
- }
+  # Create node discovery pod using YAML manifest
+  run_kube_cmd "$discovery_pod_name" "apply" apply -f - <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${discovery_pod_name}
+  namespace: ${debug_ns}
+spec:
+  restartPolicy: Never
+  hostNetwork: true
+  hostPID: true
+$([ -n "$SERVICE_ACCOUNT" ] && echo "  serviceAccountName: ${SERVICE_ACCOUNT}")
+  nodeSelector:
+    kubernetes.io/hostname: ${node_name}
+  containers:
+${containers_yaml}
+  volumes:
+  - name: host-root
+    hostPath:
+      path: /
+      type: Directory
+EOF
+}
 
 # -------------------------------------------------------------------------------
 # Function: wait_for_discovery_pods_ready
@@ -5270,61 +5624,62 @@ create_kill_switch_monitor_pod() {
   local target_pod_label_value
   target_pod_label_value=$(truncate_label_value_with_hash "$target_debug_pod")
 
-   # Build the container spec with conditional workingDir
-   local container_spec="    securityContext:
-       privileged: true"
+  # Build the container spec with conditional workingDir
+  local container_spec="    securityContext:
+      privileged: true"
 
-   # Add workingDir if provided
-   if [[ -n "$workdir" ]]; then
-     container_spec+=$'\n'"    workingDir: ${workdir}"
-   fi
+  # Add workingDir if provided
+  if [[ -n "$workdir" ]]; then
+    container_spec+=$'\n'"    workingDir: ${workdir}"
+  fi
 
-   container_spec+=$'\n'"    volumeMounts:
-     - name: host-root
-       mountPath: /host
-       readOnly: true"
+  container_spec+=$'\n'"    volumeMounts:
+    - name: host-root
+      mountPath: /host
+      readOnly: true"
 
-   # Add resource limits if provided
-   if [[ -n "$CPU_LIMIT" || -n "$MEMORY_LIMIT" ]]; then
-     container_spec+=$'\n'"    resources:"
-     container_spec+=$'\n'"      limits:"
-     if [[ -n "$CPU_LIMIT" ]]; then
-       container_spec+=$'\n'"        cpu: ${CPU_LIMIT}"
-     fi
-     if [[ -n "$MEMORY_LIMIT" ]]; then
-       container_spec+=$'\n'"        memory: ${MEMORY_LIMIT}"
-     fi
-   fi
+  # Add resource limits if provided
+  if [[ -n "$CPU_LIMIT" || -n "$MEMORY_LIMIT" ]]; then
+    container_spec+=$'\n'"    resources:"
+    container_spec+=$'\n'"      limits:"
+    if [[ -n "$CPU_LIMIT" ]]; then
+      container_spec+=$'\n'"        cpu: ${CPU_LIMIT}"
+    fi
+    if [[ -n "$MEMORY_LIMIT" ]]; then
+      container_spec+=$'\n'"        memory: ${MEMORY_LIMIT}"
+    fi
+  fi
 
-   run_kube_cmd "$monitor_pod_name" "apply" apply -f - <<EOF
+  run_kube_cmd "$monitor_pod_name" "apply" apply -f - <<EOF
 apiVersion: v1
 kind: Pod
 metadata:
-   name: ${monitor_pod_name}
-   namespace: ${debug_ns}
-   labels:
-     app: kill-switch-monitor
-     target-pod: ${target_pod_label_value}
- spec:
-    restartPolicy: Never
-    hostNetwork: true
-    hostPID: true
- $([ -n "$SERVICE_ACCOUNT" ] && echo "    serviceAccountName: ${SERVICE_ACCOUNT}")
-    nodeSelector:
-      kubernetes.io/hostname: ${node_name}
-    containers:
-    - name: monitor
-      image: ${DEBUG_IMAGE}
-      command: ["/bin/bash", "-c"]
-      args:
-      - |
- $(build_kill_switch_monitor_script "$target_debug_pod" "$volume_path" | sed 's/^/      /')
- ${container_spec}
-   volumes:
-   - name: host-root
-     hostPath:
-       path: /
-       type: Directory
+  name: ${monitor_pod_name}
+  namespace: ${debug_ns}
+  labels:
+    app: kill-switch-monitor
+    target-pod: ${target_pod_label_value}
+spec:
+  restartPolicy: Never
+  hostNetwork: true
+  hostPID: true
+$([ -n "$SERVICE_ACCOUNT" ] && echo "  serviceAccountName: ${SERVICE_ACCOUNT}")
+  nodeSelector:
+    kubernetes.io/hostname: ${node_name}
+  containers:
+  - name: monitor
+    image: ${DEBUG_IMAGE}
+    imagePullPolicy: IfNotPresent
+    command: ["/bin/bash", "-c"]
+    args:
+    - |
+$(build_kill_switch_monitor_script "$target_debug_pod" "$volume_path" | sed 's/^/      /')
+${container_spec}
+  volumes:
+  - name: host-root
+    hostPath:
+      path: /
+      type: Directory
 EOF
 }
 
@@ -5381,7 +5736,8 @@ build_kill_switch_monitor_script() {
   local volume_path="$2"
 
   # Security: Properly escape parameters to prevent shell injection
-  local safe_target_debug_pod=$(printf %q "$target_debug_pod")
+  local safe_target_debug_pod
+  safe_target_debug_pod=$(printf %q "$target_debug_pod")
 
   cat <<SCRIPT
 set -e
@@ -6199,6 +6555,14 @@ main() {
       exit 1
     fi
 
+    # Pre-pull debug image on target nodes (unless --skip-prepull)
+    if [[ "$SKIP_PREPULL" != "true" ]]; then
+      echo ""
+      if create_image_prepuller_pods; then
+        wait_for_prepuller_pods_ready
+      fi
+    fi
+
     echo ""
     format_message "🚀 Creating debug pods for pod targets..."
     if ! create_debug_pods_for_targets; then
@@ -6209,6 +6573,14 @@ main() {
     echo ""
     if ! select_target_nodes; then
       exit 1
+    fi
+
+    # Pre-pull debug image on target nodes (unless --skip-prepull)
+    if [[ "$SKIP_PREPULL" != "true" ]]; then
+      echo ""
+      if create_image_prepuller_pods; then
+        wait_for_prepuller_pods_ready
+      fi
     fi
 
     echo ""
@@ -6234,6 +6606,14 @@ main() {
     format_message "🖥️  Handling node targets..."
     if ! select_target_nodes; then
       exit 1
+    fi
+
+    # Pre-pull debug image on all target nodes (pods + nodes combined, unless --skip-prepull)
+    if [[ "$SKIP_PREPULL" != "true" ]]; then
+      echo ""
+      if create_image_prepuller_pods; then
+        wait_for_prepuller_pods_ready
+      fi
     fi
 
     echo ""
@@ -6302,6 +6682,7 @@ main() {
     format_message "🗑️  Deleting ${#DEBUG_POD_NAMES[@]} debug pods..."
     cleanup_debug_pods
     cleanup_kill_switch_monitor_pods
+    cleanup_prepuller_pods
     format_message "   ✅ All debug pods cleaned up"
     echo
 

@@ -2,14 +2,20 @@
 # Diagnostics script for --import-file feature
 #
 # Usage:
-#   ./kube-dump.sh -l app=web -e '%f %p' --import-file ./examples/diagnostics.sh
+#   ./kube-dump.sh -l app=web -f ./examples/diagnostics.sh -e '%f %t'
 #
-# Arguments: $1 = podname (from %p)
+# Arguments:
+#   $1 = script path (from %f)
+#   $2 = target name - pod or node (from %t)
+#
+# IMPORTANT: Output files must be written to /host/tmp/ (not /tmp/) when using
+# --pod-volume or --node-volume mounts, so they persist on the host filesystem
+# and can be collected by the -s/-S download commands.
 
-POD_NAME="${1:-unknown}"
-OUT="/tmp/diag-${POD_NAME}-$(date +%s)"
+TARGET_NAME="${2:-unknown}"
+OUT="/host/tmp/diag-${TARGET_NAME}-$(date +%s)"
 
-echo "=== Diagnostics for $POD_NAME ==="
+echo "=== Diagnostics for $TARGET_NAME ==="
 mkdir -p "$OUT"
 
 ip addr > "$OUT/ip.txt" 2>&1

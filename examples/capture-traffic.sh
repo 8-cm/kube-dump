@@ -3,15 +3,24 @@
 # Captures network traffic and names the file with the pod name
 #
 # Usage:
-#   ./kube-dump.sh -l app=web -e 'echo %f | base64 -d | bash -s %p' --import-file ./examples/capture-traffic.sh
+#   ./kube-dump.sh -l app=web -e '%f %t 30 any' -f ./examples/capture-traffic.sh \
+#     -s 'ls /host/tmp/*.pcap 2>/dev/null'
+#
+# Arguments:
+#   $1 = target name (pod or node name from %t)
+#   $2 = duration in seconds (default: 30)
+#   $3 = interface (default: any)
+#
+# Output files are written to /host/tmp/ so they persist on the node
+# and can be discovered by the -s selection command.
 
-POD_NAME="${1:-unknown}"
+TARGET_NAME="${1:-unknown}"
 DURATION="${2:-30}"  # Default 30 seconds
 INTERFACE="${3:-any}"
-OUTPUT_FILE="/tmp/${POD_NAME}-capture.pcap"
+OUTPUT_FILE="/host/tmp/${TARGET_NAME}-capture.pcap"
 
 echo "=== Network Capture Script ==="
-echo "Pod: ${POD_NAME}"
+echo "Target: ${TARGET_NAME}"
 echo "Duration: ${DURATION} seconds"
 echo "Interface: ${INTERFACE}"
 echo "Output: ${OUTPUT_FILE}"

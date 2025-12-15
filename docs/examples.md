@@ -100,6 +100,68 @@ Real-world examples and use cases for kube-dump.
 
 ## Advanced Operations
 
+### Comprehensive ArgoCD Debugging Example
+```bash
+# Full debugging session targeting all ArgoCD components across multiple nodes
+# This example demonstrates:
+# - Multiple pod label selectors (-l)
+# - Multiple node label selectors (-L)
+# - Import file scripts with arguments (-f, -e, -E)
+# - File collection from both pods and nodes (-s, -S)
+# - Kill switch protection (--kill-switch-rel)
+# - Custom image with resource limits
+# - Download verification with hash checking
+
+bash kube-dump.sh \
+  -l "app.kubernetes.io/name=argocd-server" \
+  -l "app.kubernetes.io/name=argocd-repo-server" \
+  -l "app.kubernetes.io/name=argocd-application-controller" \
+  -l "app.kubernetes.io/name=argocd-applicationset-controller" \
+  -l "app.kubernetes.io/name=argocd-dex-server" \
+  -l "app.kubernetes.io/name=argocd-notifications-controller" \
+  -l "app.kubernetes.io/name=argocd-redis" \
+  -L "kubernetes.io/hostname=k8s-node-00" \
+  -L "kubernetes.io/hostname=k8s-node-01" \
+  -L "kubernetes.io/hostname=k8s-node-02" \
+  -n "argocd" \
+  --to-namespace="argocd" \
+  --cri="containerd" \
+  --cri-socket="/run/containerd/containerd.sock" \
+  -f "./examples/capture-traffic.sh" \
+  -e "%f %t 30 any" \
+  --nsenter-params="n,m" \
+  -f "./examples/diagnostics.sh" \
+  -E "%f %t" \
+  -s "ls /host/tmp/*.pcap /host/tmp/diag-*/*.txt 2>/dev/null" \
+  -S "ls /host/tmp/*.pcap /host/tmp/diag-*/*.txt 2>/dev/null" \
+  -o "./argocd-dump" \
+  --download-verification="hash" \
+  -I "%" \
+  --include-nodes \
+  --install-deps \
+  --kill-switch-rel="10%" \
+  --pod-volume="/host/tmp" \
+  --node-volume="/host/tmp" \
+  --workdir-pod="/host/tmp" \
+  --workdir-node="/host/tmp" \
+  --image="nicolaka/netshoot" \
+  --cpu-limit="50m" \
+  --memory-limit="56Mi" \
+  --service-account="default" \
+  --no-glyphs \
+  --verbose
+```
+
+**What this does:**
+1. Targets all 7 ArgoCD components via pod labels
+2. Targets 3 specific nodes via node labels
+3. Captures network traffic for 30 seconds on all interfaces using `capture-traffic.sh`
+4. Runs diagnostics (ip, routes, sockets, dns, env) using `diagnostics.sh`
+5. Collects resulting `.pcap` and diagnostic files from `/host/tmp/`
+6. Verifies downloads with hash checking
+7. Protects against disk fill with 10% relative kill switch
+8. Uses minimal resources (50m CPU, 56Mi memory)
+
 ### Mixed Mode Debugging
 ```bash
 # Debug both pods and their nodes
