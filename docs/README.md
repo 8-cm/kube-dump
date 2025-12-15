@@ -8,20 +8,24 @@ Complete documentation for the kube-dump Kubernetes debugging tool.
 - [Quick Start Examples](examples.md) - Common usage patterns and real-world scenarios
 - [Command Reference](command-reference.md) - Complete CLI options and parameters
 
-## Architecture & Design
+## Technical Architecture
 
-- [Architecture Overview](kube-dump-architecture.md) - System architecture and component interactions
-- [Execution Flow](kube-dump-flowchart.md) - Visual workflow and process diagrams
-- [Main Execution Flow](main-execution-flow.md) - Detailed execution phases
-- [Pod Lifecycle Management](pod-lifecycle-management.md) - Pod creation, monitoring, and cleanup
-- [File Download Flow](file-download-flow.md) - File discovery and transfer processes
+- [Architecture & Function Call Flow](architecture.md) - Complete technical architecture, function hierarchy, execution flow, and component interactions
 
-## Security & Quality
+## Configuration & Customization
 
-- [Security Reports](security-reports.md) - Security scans, vulnerability analysis, and code quality
-- [Kill Switch Architecture](kill-switch-architecture.md) - Resource protection and automatic termination
+- [Custom Container Images](custom-images.md) - Configure debug pod images for specific needs
+- [Dependencies](dependencies.md) - Required tools, container runtimes, and system dependencies
 
-## Use Cases & Examples
+## Quality & Compliance
+
+- [Security Reports](security-reports.md) - Security scans, vulnerability analysis
+- [Code Quality](code-quality.md) - ShellCheck code quality findings
+- [Test Coverage](test-coverage.md) - Test suite coverage and validation
+
+---
+
+## Quick Usage Examples
 
 ### Network Debugging
 ```bash
@@ -123,7 +127,7 @@ export DEBUG=1
 ## Contributing
 
 - Report issues and feature requests in the GitHub repository
-- Review [Architecture](kube-dump-architecture.md) before making changes
+- Review [Architecture](architecture.md) before making changes
 - Follow the existing code style and patterns
 - Update documentation for new features
 
