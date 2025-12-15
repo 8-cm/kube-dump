@@ -391,6 +391,7 @@ CMD ["/bin/sh"]
 | **File operations** | ✅ | ✅ | ✅ | ✅ |
 
 ¹ Add tcpdump package for network capture
+
 ² Use `--install-deps` flag or pre-install crictl
 
 ---
