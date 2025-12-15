@@ -3636,8 +3636,7 @@ wait_for_debug_pods_ready() {
   local max_wait=60
 
   local ready_pods=()
-  local failed_pods=()
-  local error_pods=()
+  local not_ready_pods=()
   local wait_time=0
 
   # Show initial status
@@ -3645,33 +3644,25 @@ wait_for_debug_pods_ready() {
 
   while [ $wait_time -lt $max_wait ] && [ ${#ready_pods[@]} -lt ${#DEBUG_POD_NAMES[@]} ]; do
     for debug_pod in "${DEBUG_POD_NAMES[@]}"; do
-      # Skip if already ready, failed, or error
-      if [[ " ${ready_pods[*]} " == *" $debug_pod "* ]] || [[ " ${failed_pods[*]} " == *" $debug_pod "* ]] || [[ " ${error_pods[*]} " == *" $debug_pod "* ]]; then
+      # Skip if already categorized
+      if [[ " ${ready_pods[*]} " == *" $debug_pod "* ]] || [[ " ${not_ready_pods[*]} " == *" $debug_pod "* ]]; then
         continue
       fi
 
       local pod_status
-      local container_status
-      if pod_status=$($KUBE_CLI get pod "${debug_pod}" -n "${debug_ns}" -o jsonpath='{.status.phase}' 2>/dev/null); then
-        if [[ "$pod_status" == "Running" ]]; then
-          ready_pods+=("$debug_pod")
-        elif [[ "$pod_status" == "Failed" ]]; then
-          failed_pods+=("$debug_pod")
-        elif [[ "$pod_status" == "Pending" ]]; then
-          # Check for container errors while pending (ImagePullBackOff, ErrImagePull, etc.)
-          container_status=$($KUBE_CLI get pod "${debug_pod}" -n "${debug_ns}" -o jsonpath='{.status.containerStatuses[0].state.waiting.reason}' 2>/dev/null || echo "")
-          if [[ "$container_status" == "ImagePullBackOff" ]] || [[ "$container_status" == "ErrImagePull" ]] || [[ "$container_status" == "CrashLoopBackOff" ]] || [[ "$container_status" == "CreateContainerConfigError" ]] || [[ "$container_status" == "InvalidImageName" ]]; then
-            error_pods+=("$debug_pod:$container_status")
-          fi
-        fi
-      else
-        # Pod not found or kubectl error
-        error_pods+=("$debug_pod:NotFound")
+      pod_status=$($KUBE_CLI get pod "${debug_pod}" -n "${debug_ns}" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+      
+      if [[ "$pod_status" == "Running" ]]; then
+        ready_pods+=("$debug_pod")
+      elif [[ "$pod_status" == "Failed" ]] || [[ "$pod_status" == "Succeeded" ]] || [[ "$pod_status" == "Unknown" ]]; then
+        # Terminal non-running states - won't become ready
+        not_ready_pods+=("$debug_pod:$pod_status")
       fi
+      # Pending pods are not added to either array - they might still become ready
     done
 
-    # Exit early if all pods are in terminal states (ready, failed, or error)
-    local terminal_count=$((${#ready_pods[@]} + ${#failed_pods[@]} + ${#error_pods[@]}))
+    # Exit early if all pods are in terminal states
+    local terminal_count=$((${#ready_pods[@]} + ${#not_ready_pods[@]}))
     if [ $terminal_count -ge ${#DEBUG_POD_NAMES[@]} ]; then
       break
     fi
@@ -3685,25 +3676,22 @@ wait_for_debug_pods_ready() {
 
   echo ""
 
-  # Calculate pods that are still pending (not ready, not failed, not error)
-  local pending_count=$((${#DEBUG_POD_NAMES[@]} - ${#ready_pods[@]} - ${#failed_pods[@]} - ${#error_pods[@]}))
+  # Calculate pods that are still pending (timed out waiting)
+  local pending_count=$((${#DEBUG_POD_NAMES[@]} - ${#ready_pods[@]} - ${#not_ready_pods[@]}))
 
-  # Show final status
-  if [ ${#failed_pods[@]} -gt 0 ] || [ ${#error_pods[@]} -gt 0 ] || [ $pending_count -gt 0 ]; then
-    format_message "   ⚠️  Ready: ${#ready_pods[@]}, Failed: ${#failed_pods[@]}, Error: ${#error_pods[@]}, Pending: ${pending_count}, Total: ${#DEBUG_POD_NAMES[@]}"
-    for failed_pod in "${failed_pods[@]}"; do
-      format_message "      ❌ $failed_pod failed to start"
-    done
-    for error_entry in "${error_pods[@]}"; do
-      local error_pod="${error_entry%%:*}"
-      local error_reason="${error_entry#*:}"
-      format_message "      ❌ $error_pod error: $error_reason"
+  # Show final status - only show "all ready" if ALL pods are Running
+  if [ ${#ready_pods[@]} -eq ${#DEBUG_POD_NAMES[@]} ]; then
+    format_message "   ✅ All ${#ready_pods[@]} debug pods are ready"
+  else
+    format_message "   ⚠️  Ready: ${#ready_pods[@]}, Not Ready: ${#not_ready_pods[@]}, Pending: ${pending_count}, Total: ${#DEBUG_POD_NAMES[@]}"
+    for not_ready_entry in "${not_ready_pods[@]}"; do
+      local pod_name="${not_ready_entry%%:*}"
+      local pod_status="${not_ready_entry#*:}"
+      format_message "      ❌ $pod_name ($pod_status)"
     done
     if [ $pending_count -gt 0 ]; then
       format_message "      ⏳ $pending_count pod(s) still pending after ${max_wait}s timeout"
     fi
-  else
-    format_message "   ✅ All ${#ready_pods[@]} debug pods are ready"
   fi
   echo ""
 
