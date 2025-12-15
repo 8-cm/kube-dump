@@ -84,7 +84,7 @@ jobs:
           echo "status=⚠️ ISSUES FOUND" >> $GITHUB_OUTPUT
           ISSUE_COUNT=$(wc -l < results/shellcheck-raw.txt || echo "0")
           echo "issues=$ISSUE_COUNT" >> $GITHUB_OUTPUT
-         fi
+        fi
 
     - name: Generate ShellCheck detailed report
       run: |
@@ -95,15 +95,31 @@ jobs:
           echo ""
           echo "**Generated:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
           echo "**Script:** kube-dump.sh"
+          echo "**ShellCheck Version:** $(shellcheck --version | head -2 | tail -1)"
           echo ""
 
           if [ -s results/shellcheck-raw.txt ]; then
             ISSUE_COUNT=$(wc -l < results/shellcheck-raw.txt)
-            echo "## Issues Found: $ISSUE_COUNT"
+            echo "## ⚠️ Issues Found: $ISSUE_COUNT"
+            echo ""
+            echo "### Issue Details"
             echo ""
             echo '```'
             cat results/shellcheck-raw.txt
             echo '```'
+            echo ""
+            echo "### Issue Summary by Type"
+            echo ""
+            echo "| Severity | Count |"
+            echo "|----------|-------|"
+            ERROR_COUNT=$(grep -c ":error:" results/shellcheck-raw.txt 2>/dev/null || echo "0")
+            WARNING_COUNT=$(grep -c ":warning:" results/shellcheck-raw.txt 2>/dev/null || echo "0")
+            INFO_COUNT=$(grep -c ":info:" results/shellcheck-raw.txt 2>/dev/null || echo "0")
+            STYLE_COUNT=$(grep -c ":style:" results/shellcheck-raw.txt 2>/dev/null || echo "0")
+            echo "| Error | $ERROR_COUNT |"
+            echo "| Warning | $WARNING_COUNT |"
+            echo "| Info | $INFO_COUNT |"
+            echo "| Style | $STYLE_COUNT |"
             echo ""
             echo "### How to Fix ShellCheck Issues"
             echo ""
@@ -111,10 +127,19 @@ jobs:
             echo "2. Install ShellCheck locally: \`sudo apt-get install shellcheck\`"
             echo "3. Fix issues in kube-dump.sh"
             echo "4. Run: \`shellcheck kube-dump.sh\` to verify"
+            echo ""
+            echo "### Common Fixes"
+            echo ""
+            echo "- **SC2086**: Double quote variables to prevent word splitting"
+            echo "- **SC2046**: Quote command substitutions to prevent word splitting"
+            echo "- **SC2034**: Remove unused variables or export them"
+            echo "- **SC2155**: Declare and assign separately to avoid masking return values"
           else
             echo "## ✅ No Issues Found"
             echo ""
             echo "All ShellCheck validations passed successfully!"
+            echo ""
+            echo "The script follows shell scripting best practices."
           fi
         } > docs/code-quality.md
 
@@ -132,7 +157,7 @@ jobs:
           grep -oP "(?<=IMAGE=')[^']+" kube-dump.sh || true
         } | grep -E '^[a-zA-Z0-9._-]+(/[a-zA-Z0-9._-]+)*(:[a-zA-Z0-9._-]+)?$' | sort -u > unique-images.txt
 
-         cat unique-images.txt | sed 's/^/  - /'
+        cat unique-images.txt | sed 's/^/  - /'
 
     - name: Run Trivy security scans
       run: |
@@ -176,23 +201,23 @@ jobs:
     - name: Determine security status
       id: results
       run: |
-         if [[ $TOTAL_CRITICAL -gt 0 ]]; then
-           SECURITY_STATUS="🔴 CRITICAL ISSUES FOUND"
-         elif [[ $TOTAL_HIGH -gt 0 ]]; then
-           SECURITY_STATUS="🟠 HIGH ISSUES FOUND"
-         elif [[ $TOTAL_MEDIUM -gt 0 ]]; then
-           SECURITY_STATUS="🟡 MEDIUM ISSUES FOUND"
-         elif [[ $TOTAL_LOW -gt 0 ]]; then
-           SECURITY_STATUS="🔵 LOW ISSUES FOUND"
-         else
-           SECURITY_STATUS="✅ NO ISSUES FOUND"
-         fi
+        if [[ $TOTAL_CRITICAL -gt 0 ]]; then
+          SECURITY_STATUS="🔴 CRITICAL ISSUES FOUND"
+        elif [[ $TOTAL_HIGH -gt 0 ]]; then
+          SECURITY_STATUS="🟠 HIGH ISSUES FOUND"
+        elif [[ $TOTAL_MEDIUM -gt 0 ]]; then
+          SECURITY_STATUS="🟡 MEDIUM ISSUES FOUND"
+        elif [[ $TOTAL_LOW -gt 0 ]]; then
+          SECURITY_STATUS="🔵 LOW ISSUES FOUND"
+        else
+          SECURITY_STATUS="✅ NO ISSUES FOUND"
+        fi
 
-         echo "security_status=$SECURITY_STATUS" >> $GITHUB_OUTPUT
-          echo "total_critical=$TOTAL_CRITICAL" >> $GITHUB_OUTPUT
-          echo "total_high=$TOTAL_HIGH" >> $GITHUB_OUTPUT
-          echo "total_medium=$TOTAL_MEDIUM" >> $GITHUB_OUTPUT
-          echo "total_low=$TOTAL_LOW" >> $GITHUB_OUTPUT
+        echo "security_status=$SECURITY_STATUS" >> $GITHUB_OUTPUT
+        echo "total_critical=$TOTAL_CRITICAL" >> $GITHUB_OUTPUT
+        echo "total_high=$TOTAL_HIGH" >> $GITHUB_OUTPUT
+        echo "total_medium=$TOTAL_MEDIUM" >> $GITHUB_OUTPUT
+        echo "total_low=$TOTAL_LOW" >> $GITHUB_OUTPUT
 
     - name: Update README with security dashboard
       env:

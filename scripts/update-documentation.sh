@@ -1,5 +1,5 @@
 #!/bin/bash
-# Script to update README and generate code quality reports from CI pipeline
+# Script to update README security dashboard from CI pipeline
 
 set -e
 
@@ -13,39 +13,27 @@ TOTAL_LOW="${6:-0}"
 CURRENT_DATE=$(date +%Y-%m-%d)
 
 echo "Updating README.md security dashboard..."
+echo "  SHELLCHECK_STATUS: $SHELLCHECK_STATUS"
+echo "  SHELLCHECK_ISSUES: $SHELLCHECK_ISSUES"
+echo "  TOTAL_CRITICAL: $TOTAL_CRITICAL"
+echo "  TOTAL_HIGH: $TOTAL_HIGH"
+echo "  TOTAL_MEDIUM: $TOTAL_MEDIUM"
+echo "  TOTAL_LOW: $TOTAL_LOW"
 
-# Generate code quality report
-{
-  echo "# Code Quality Report - ShellCheck Analysis"
-  echo ""
-  echo "**Generated:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-  echo "**Script:** kube-dump.sh"
-  echo ""
+# Determine container security status based on vulnerability counts
+if [[ "$TOTAL_CRITICAL" -gt 0 ]]; then
+  CONTAINER_STATUS="🔴 CRITICAL ISSUES FOUND"
+elif [[ "$TOTAL_HIGH" -gt 0 ]]; then
+  CONTAINER_STATUS="🟠 HIGH ISSUES FOUND"
+elif [[ "$TOTAL_MEDIUM" -gt 0 ]]; then
+  CONTAINER_STATUS="🟡 MEDIUM ISSUES FOUND"
+elif [[ "$TOTAL_LOW" -gt 0 ]]; then
+  CONTAINER_STATUS="🔵 LOW ISSUES FOUND"
+else
+  CONTAINER_STATUS="✅ NO ISSUES FOUND"
+fi
 
-  if [ -s results/shellcheck-raw.txt ]; then
-    ISSUE_COUNT=$(wc -l < results/shellcheck-raw.txt)
-    echo "## Issues Found: $ISSUE_COUNT"
-    echo ""
-    echo '```'
-    cat results/shellcheck-raw.txt
-    echo '```'
-    echo ""
-    echo "### How to Fix ShellCheck Issues"
-    echo ""
-    echo "1. Review each issue in the report above"
-    echo "2. Install ShellCheck locally: \`sudo apt-get install shellcheck\`"
-    echo "3. Fix issues in kube-dump.sh"
-    echo "4. Run: \`shellcheck kube-dump.sh\` to verify"
-  else
-    echo "## ✅ No Issues Found"
-    echo ""
-    echo "All ShellCheck validations passed successfully!"
-  fi
-} > docs/code-quality.md
-
-echo "Code quality report generated at docs/code-quality.md"
-
-# Update README security dashboard
+# Update README security dashboard using Python
 cat > /tmp/update_readme.py << 'PYEOF'
 import re
 import os
@@ -56,6 +44,7 @@ with open('README.md', 'r') as f:
 current_date = os.environ.get('CURRENT_DATE')
 shellcheck_status = os.environ.get('SHELLCHECK_STATUS')
 shellcheck_issues = os.environ.get('SHELLCHECK_ISSUES')
+container_status = os.environ.get('CONTAINER_STATUS')
 total_critical = os.environ.get('TOTAL_CRITICAL')
 total_high = os.environ.get('TOTAL_HIGH')
 total_medium = os.environ.get('TOTAL_MEDIUM')
@@ -67,13 +56,15 @@ dashboard = f"""<!-- SECURITY-DASHBOARD-START -->
 
 | Component | Status | Last Updated |
 |-----------|--------|--------------|
-| **Container Security** | 🔴 CRITICAL ISSUES FOUND | {current_date} |
-| **Code Quality** | {shellcheck_status} | Automated |
+| **Container Security** | {container_status} | {current_date} |
+| **Code Quality (ShellCheck)** | {shellcheck_status} | {current_date} |
 
 **Vulnerability Summary:** Critical: {total_critical}, High: {total_high}, Medium: {total_medium}, Low: {total_low}
 
+**ShellCheck Issues:** {shellcheck_issues}
+
 📋 [View Detailed Security Reports](docs/security-reports.md) for complete vulnerability analysis and recommendations.
-📄 [View Code Quality Report](docs/code-quality.md) for ShellCheck findings ({shellcheck_issues} issues).
+📄 [View Code Quality Report](docs/code-quality.md) for ShellCheck findings.
 
 <!-- SECURITY-DASHBOARD-END -->"""
 
@@ -89,6 +80,7 @@ PYEOF
 CURRENT_DATE="$CURRENT_DATE" \
 SHELLCHECK_STATUS="$SHELLCHECK_STATUS" \
 SHELLCHECK_ISSUES="$SHELLCHECK_ISSUES" \
+CONTAINER_STATUS="$CONTAINER_STATUS" \
 TOTAL_CRITICAL="$TOTAL_CRITICAL" \
 TOTAL_HIGH="$TOTAL_HIGH" \
 TOTAL_MEDIUM="$TOTAL_MEDIUM" \
