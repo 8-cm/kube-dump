@@ -3668,12 +3668,18 @@ wait_for_debug_pods_ready() {
 
   echo ""
 
+  # Calculate pods that are still pending (not ready and not failed)
+  local pending_count=$((${#DEBUG_POD_NAMES[@]} - ${#ready_pods[@]} - ${#failed_pods[@]}))
+
   # Show final status
-  if [ ${#failed_pods[@]} -gt 0 ]; then
-    format_message "   ⚠️  Ready: ${#ready_pods[@]}, Failed: ${#failed_pods[@]}, Total: ${#DEBUG_POD_NAMES[@]}"
+  if [ ${#failed_pods[@]} -gt 0 ] || [ $pending_count -gt 0 ]; then
+    format_message "   ⚠️  Ready: ${#ready_pods[@]}, Failed: ${#failed_pods[@]}, Pending: ${pending_count}, Total: ${#DEBUG_POD_NAMES[@]}"
     for failed_pod in "${failed_pods[@]}"; do
       format_message "      ❌ $failed_pod failed to start"
     done
+    if [ $pending_count -gt 0 ]; then
+      format_message "      ⏳ $pending_count pod(s) still pending after ${max_wait}s timeout"
+    fi
   else
     format_message "   ✅ All ${#ready_pods[@]} debug pods are ready"
   fi
