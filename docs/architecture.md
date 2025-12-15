@@ -180,25 +180,35 @@ sequenceDiagram
         Note over User,LocalFS: PHASE 1 (continued): Wait for Debug Pods Ready
         
         Script->>Script: wait_for_debug_pods_ready()
+        Note right of Script: Initializes:<br/>ready_pods=[]<br/>not_ready_pods=[]<br/>max_wait=60s
         
-        loop Until all pods ready or timeout
+        loop Until all pods in terminal state or timeout (60s)
             loop For each pod in DEBUG_POD_NAMES[]
-                Script->>Script: run_kube_cmd(get pod {name} -o jsonpath={status})
                 Script->>K8sAPI: $KUBE_CLI get pod {name} -n {ns} -o jsonpath='{.status.phase}'
-                K8sAPI-->>Script: "Pending"|"Running"|"Succeeded"|"Failed"
+                K8sAPI-->>Script: "Pending"|"Running"|"Succeeded"|"Failed"|"Unknown"
                 
-                alt Pod status == "Running"
-                    Script->>K8sAPI: $KUBE_CLI get pod {name} -o jsonpath='{.status.containerStatuses}'
-                    K8sAPI-->>Script: Container ready status
+                alt status == "Running"
+                    Note right of Script: ready_pods += pod<br/>(ONLY Running = ready)
+                else status == "Failed"|"Succeeded"|"Unknown"
+                    Note right of Script: not_ready_pods += "pod:status"<br/>(Terminal non-running states)
+                else status == "Pending"
+                    Note right of Script: Keep waiting<br/>(May still become Running)
                 end
             end
             
-            alt Not all ready
-                Script->>Script: sleep 1
+            alt Not all in terminal state
+                Script->>Script: sleep 2
             end
         end
         
-        Note right of Script: Returns: 0 (all ready) | 1 (timeout/failed)<br/>Timeout: 300 seconds default
+        alt All pods Running
+            Script-->>User: "✅ All N debug pods are ready"
+        else Some pods not Running
+            Script-->>User: "⚠️ Ready: X, Not Ready: Y, Pending: Z, Total: N"
+            Note right of Script: Shows each not_ready pod<br/>with its status (Failed/Succeeded/Unknown)<br/>Shows pending count after timeout
+        end
+        
+        Note right of Script: Returns: 0 (at least 1 ready)<br/>Returns: 1 (none ready)<br/>Continues even if not all ready
     end
 
     %% ============================================================
@@ -399,12 +409,28 @@ sequenceDiagram
             Note right of Script: Returns: 0|1<br/>Waits for: status.phase == "Succeeded"
             
             Script->>Script: handle_file_downloads()
+            Note right of Script: Initializes:<br/>successful_pods=[]<br/>failed_pods=[]<br/>downloaded_files=[]
             
             loop For each discovery_pod in DISCOVERY_POD_INFO[]
-                Script->>K8sAPI: $KUBE_CLI logs {discovery_pod} -n {ns}
+                Script->>K8sAPI: $KUBE_CLI exec {discovery_pod} -- true
+                K8sAPI-->>Script: Pod accessibility check
+                
+                Script->>K8sAPI: $KUBE_CLI exec {discovery_pod} -- {select_command}
                 K8sAPI-->>Script: File list (one path per line)
                 
-                loop For each file_path in file_list
+                loop For each file_path in file_list (max 3 attempts per file)
+                    Note right of Script: Get verification data BEFORE download
+                    
+                    alt DOWNLOAD_VERIFICATION == "hash"
+                        Script->>K8sAPI: $KUBE_CLI exec -- md5sum {file_path}
+                        K8sAPI-->>Script: expected_md5
+                        Script->>K8sAPI: $KUBE_CLI exec -- sha256sum {file_path}
+                        K8sAPI-->>Script: expected_sha256
+                    else DOWNLOAD_VERIFICATION == "size"
+                        Script->>K8sAPI: $KUBE_CLI exec -- stat -c%s {file_path}
+                        K8sAPI-->>Script: expected_size (bytes)
+                    end
+                    
                     Script->>K8sAPI: $KUBE_CLI cp {pod}:{file_path} {local_path}
                     
                     alt Pod target
@@ -416,31 +442,75 @@ sequenceDiagram
                     end
                     
                     K8sAPI-->>Script: File transferred
-                    Script->>LocalFS: Write to downloads/{target}/{filename}
+                    Script->>LocalFS: Write to files/{target}_{filename}
                     LocalFS-->>Script: File saved
                     
                     alt DOWNLOAD_VERIFICATION == "hash"
-                        Script->>Script: Verify MD5 + SHA256
+                        Script->>Script: Calculate local MD5 + SHA256
+                        Script->>Script: Compare: actual_md5 == expected_md5<br/>AND actual_sha256 == expected_sha256
                     else DOWNLOAD_VERIFICATION == "size"
-                        Script->>Script: Verify file size
+                        Script->>Script: Get local file size
+                        Script->>Script: Compare: actual_size == expected_size
+                    else DOWNLOAD_VERIFICATION == "none"
+                        Note right of Script: Skip verification<br/>File exists = success
                     end
+                    
+                    alt Verification PASSED
+                        Note right of Script: downloaded_files += file_path<br/>Log: "✅ filename (size, hashes)"
+                    else Verification FAILED (attempt < 3)
+                        Note right of Script: Log: "⚠️ Retrying..."<br/>sleep 1, retry download
+                    else Verification FAILED (attempt == 3)
+                        Note right of Script: Log: "❌ hash/size mismatch"<br/>pod_had_failure = true
+                    end
+                end
+                
+                rect rgb(255, 230, 230)
+                    Note over Script,TargetNode: DELETE SOURCE FILES AFTER SUCCESSFUL DOWNLOAD
+                    loop For each file_path in downloaded_files[]
+                        Script->>K8sAPI: $KUBE_CLI exec {discovery_pod} -- rm -f {file_path}
+                        alt Pod target
+                            K8sAPI->>TargetPod: Delete file from container filesystem
+                            TargetPod-->>K8sAPI: File deleted
+                        else Node target
+                            K8sAPI->>TargetNode: Delete file from /host filesystem
+                            TargetNode-->>K8sAPI: File deleted
+                        end
+                        K8sAPI-->>Script: File removed from source
+                    end
+                    Note right of Script: Source files cleaned up<br/>to free disk space
+                end
+                
+                alt pod_had_failure == false
+                    Note right of Script: successful_pods += discovery_pod
+                else pod_had_failure == true
+                    Note right of Script: failed_pods += discovery_pod
                 end
             end
             
             deactivate DiscoveryPod
             
-            Note right of Script: Returns: void<br/>Files saved to: OUTPUT_DIR/downloads/
+            Note right of Script: Files saved to: OUTPUT_DIR/files/<br/>Source files deleted after verification
             
-            Script->>Script: cleanup_discovery_pods()
-            
-            loop For each pod in DISCOVERY_POD_NAMES[]
-                Script->>K8sAPI: $KUBE_CLI logs {discovery_pod}
-                K8sAPI-->>Script: Discovery logs
-                Script->>LocalFS: Write to discovery-logs/{pod}.log
+            Note over Script,LocalFS: Download discovery pod logs
+            loop For each pod in (successful_pods + failed_pods)
+                Script->>K8sAPI: $KUBE_CLI logs {discovery_pod} -c discovery-N
+                K8sAPI-->>Script: Discovery container logs
+                Script->>LocalFS: Write to discovery-logs/{pod}-discovery-N_{target}_{node}.log
             end
             
-            Script->>K8sAPI: $KUBE_CLI delete pods {DISCOVERY_POD_NAMES[]}
-            K8sAPI-->>Script: Discovery pods deleted
+            alt successful_pods[] not empty
+                Script-->>User: "🧹 Cleaning up N successful discovery pods..."
+                Script->>K8sAPI: $KUBE_CLI delete pods {successful_pods[]}
+                K8sAPI-->>Script: Successful pods deleted
+            end
+            
+            alt failed_pods[] not empty
+                Script-->>User: "⚠️ Keeping N discovery pods with issues for inspection:"
+                loop For each pod in failed_pods[]
+                    Script-->>User: "🔍 {pod_name}"
+                end
+                Note right of Script: Failed pods kept for debugging<br/>User can inspect with kubectl logs
+            end
             
             Note right of Script: Returns: void
         end
