@@ -1,434 +1,621 @@
-# Kube-Dump Architecture & Function Call Flow
+# Kube-Dump Architecture
 
-Complete technical architecture documentation for kube-dump, including function call hierarchy, execution flow, and component interactions.
+Complete technical architecture diagram showing all function interactions between the local script, Kubernetes API, target pods, and target nodes.
 
-## Table of Contents
+## Complete Function Interaction Diagram
 
-1. [Architecture Overview](#architecture-overview)
-2. [Complete Function Call Hierarchy](#complete-function-call-hierarchy)
-3. [Main Execution Flow](#main-execution-flow)
-4. [Function Categories](#function-categories)
-5. [Execution Modes](#execution-modes)
-6. [Component Interactions](#component-interactions)
+```mermaid
+sequenceDiagram
+    autonumber
+    
+    participant User as User (Terminal)
+    participant Script as kube-dump.sh (Local)
+    participant K8sAPI as Kubernetes API
+    participant DebugPod as Debug Pod
+    participant TargetPod as Target Pod
+    participant TargetNode as Target Node
+    participant KillSwitch as Kill Switch Monitor
+    participant DiscoveryPod as Discovery Pod
+    participant LocalFS as Local Filesystem
 
----
+    %% ============================================================
+    %% PHASE 0: INITIALIZATION
+    %% ============================================================
+    rect rgb(240, 248, 255)
+        Note over User,LocalFS: PHASE 0: Initialization & Validation
+        
+        User->>Script: ./kube-dump.sh [args]
+        activate Script
+        
+        Script->>Script: main()
+        Script->>Script: initialize_variables()
+        Note right of Script: Returns: void<br/>Sets: POD_LABELS=["dumpme=yes"]<br/>EXECUTION_MODE="pod"<br/>CRI_RUNTIME="containerd"<br/>DEBUG_IMAGE="nicolaka/netshoot"<br/>Arrays: DEBUG_POD_NAMES=[]<br/>TARGET_PODS=[], TARGET_NODES=[]
+        
+        Script->>Script: detect_kube_cli()
+        Note right of Script: Checks: command -v oc<br/>Checks: command -v kubectl<br/>Returns: void<br/>Sets: KUBE_CLI="oc"|"kubectl"<br/>Exits 1 if neither found
+        
+        Script->>Script: parse_arguments($@)
+        Note right of Script: Parses: -l, -L, -e, -E, -s, -S,<br/>-n, -o, -f, --kill-switch-*,<br/>--cri, --image, --verbose, etc.<br/>Returns: void<br/>Sets: All config variables<br/>Calls: validate_option_value() for each arg<br/>Calls: usage() if -h/--help
+        
+        alt No arguments provided
+            Script->>Script: usage()
+            Script-->>User: Display help text
+            Note right of Script: Returns: exit 0
+        end
+        
+        Script->>Script: validate_arguments()
+        Note right of Script: Validates: Label selectors syntax<br/>Validates: Command combinations<br/>Validates: File paths exist<br/>Validates: Threshold formats<br/>Returns: void or exit 1<br/>Sets: EXECUTION_MODE="pod"|"node"|"mixed"
+        
+        Script->>Script: show_configuration()
+        Note right of Script: Displays: All settings summary<br/>Waits: User confirmation (Enter)<br/>Returns: void
+        
+        alt OUTPUT_DIR specified
+            Script->>LocalFS: mkdir -p $OUTPUT_DIR
+            Script->>Script: setup_output_directories()
+            Note right of Script: Creates: downloads/, debug/,<br/>killswitch-logs/, discovery-logs/<br/>Returns: 0|1
+            LocalFS-->>Script: Directory created
+            
+            Script->>LocalFS: Create kube-dump-{date}_{epoch}.log
+            LocalFS-->>Script: Log file initialized
+        end
+        
+        alt VERBOSE enabled
+            Script->>Script: setup_debug_logging()
+            Note right of Script: Creates: DEBUG_LOG_DIR<br/>Sets: KUBE_CLI with -v=10<br/>Returns: 0|1
+        end
+        
+        Script->>Script: validate_all_requirements()
+        Script->>K8sAPI: $KUBE_CLI cluster-info
+        K8sAPI-->>Script: Cluster info response
+        Note right of Script: Validates: Cluster connectivity<br/>Validates: RBAC permissions<br/>Validates: Namespace exists<br/>Returns: void or exit 1
+    end
 
-## Architecture Overview
+    %% ============================================================
+    %% PHASE 1: TARGET SELECTION (POD MODE)
+    %% ============================================================
+    rect rgb(255, 248, 240)
+        Note over User,LocalFS: PHASE 1: Target Selection & Debug Pod Creation
+        
+        alt EXECUTION_MODE == "pod"
+            Script->>Script: select_target_pods()
+            
+            loop For each label in POD_LABELS[]
+                Script->>Script: find_pods_by_label(label)
+                Script->>K8sAPI: $KUBE_CLI get pods -l {label} -o json --all-namespaces
+                K8sAPI-->>Script: JSON: [{name, namespace, nodeName, containers[]}]
+                Note right of Script: Returns: void<br/>Appends to: POD_NAMES[]<br/>Format: "name:namespace:node"
+            end
+            
+            Note right of Script: Returns: 0|1<br/>User selects pods interactively<br/>Sets: POD_NAMES[] filtered
+            
+            Script->>Script: prepare_target_pods()
+            
+            loop For each pod in POD_NAMES[]
+                Script->>K8sAPI: $KUBE_CLI get pod {name} -n {ns} -o json
+                K8sAPI-->>Script: JSON: {status.phase, containers[0].name, spec.nodeName}
+                
+                Script->>Script: truncate_name_with_hash(pod_name)
+                Note right of Script: Input: Original name<br/>Returns: Truncated name (≤63 chars)<br/>Uses: MD5 hash suffix if truncated
+                
+                Script->>Script: truncate_label_value_with_hash(label_value)
+                Note right of Script: Input: Label value<br/>Returns: Valid K8s label (≤63 chars)
+            end
+            
+            Note right of Script: Returns: 0|1<br/>Sets: TARGET_PODS[]<br/>Format: "pod:container:node:namespace"
+            
+            Script->>Script: create_debug_pods_for_targets()
+            
+            loop For each target in TARGET_PODS[]
+                Script->>Script: generate_command_container(index, target_name)
+                Note right of Script: Generates: Container YAML spec<br/>Includes: nsenter command wrapper<br/>Includes: Resource limits if set<br/>Returns: YAML string
+                
+                Script->>Script: build_debug_script(pod_name, container, node)
+                Note right of Script: Generates: Entrypoint bash script<br/>Includes: CRI socket detection<br/>Includes: PID discovery via crictl<br/>Includes: nsenter execution<br/>Returns: Base64-encoded script
+                
+                alt File monitors configured (-s)
+                    loop For each SELECT_TO_DOWNLOAD_COMMANDS[]
+                        Script->>Script: generate_file_monitor_container(index)
+                        Script->>Script: build_file_monitor_script(pod, container, node, target, index)
+                        Note right of Script: Generates: Sidecar container spec<br/>Monitors: File list command output<br/>Returns: YAML string
+                    end
+                end
+                
+                Script->>Script: create_single_debug_pod(pod_name, node, yaml_spec)
+                Script->>K8sAPI: $KUBE_CLI apply -f - <<< {pod_yaml}
+                K8sAPI-->>Script: pod/{debug-pod-name} created
+                
+                Note right of Script: Sets: DEBUG_POD_NAMES[] += debug_pod<br/>Sets: DEBUG_POD_NAMES_META[] += metadata
+            end
+            
+            Note right of Script: Returns: 0|1<br/>Updates: DEBUG_POD_NAMES[]
+        end
+    end
 
-kube-dump is a Kubernetes debugging tool that creates temporary debug pods to execute commands and collect files from running pods and nodes. The architecture is built on a modular function-based design with clear separation of concerns.
+    %% ============================================================
+    %% PHASE 1: TARGET SELECTION (NODE MODE)
+    %% ============================================================
+    rect rgb(248, 255, 240)
+        Note over User,LocalFS: PHASE 1 (continued): Node Target Selection
+        
+        alt EXECUTION_MODE == "node" or "mixed"
+            Script->>Script: select_target_nodes()
+            
+            loop For each label in NODE_LABELS[]
+                Script->>K8sAPI: $KUBE_CLI get nodes -l {label} -o json
+                K8sAPI-->>Script: JSON: [{metadata.name, status.conditions}]
+            end
+            
+            Note right of Script: Returns: 0|1<br/>User selects nodes interactively<br/>Sets: TARGET_NODES[]
+            
+            Script->>Script: create_node_debug_pods()
+            
+            loop For each node in TARGET_NODES[]
+                Script->>Script: detect_cri_socket_from_node(node_name)
+                Script->>K8sAPI: $KUBE_CLI debug node/{node} --image={image}
+                activate TargetNode
+                K8sAPI->>TargetNode: Create ephemeral debug container
+                TargetNode-->>K8sAPI: Check socket paths
+                K8sAPI-->>Script: CRI socket path detected
+                deactivate TargetNode
+                Note right of Script: Checks: /run/containerd/containerd.sock<br/>Checks: /var/run/crio/crio.sock<br/>Checks: /var/run/docker.sock<br/>Returns: Socket path string
+                
+                Script->>Script: build_node_debug_script(node_name)
+                Note right of Script: Generates: Node debug bash script<br/>Uses: chroot /host<br/>Includes: CRI socket config<br/>Returns: Base64-encoded script
+                
+                Script->>Script: create_single_node_debug_pod(node, yaml_spec)
+                Script->>K8sAPI: $KUBE_CLI apply -f - <<< {node_debug_pod_yaml}
+                K8sAPI-->>Script: pod/{node-debug-pod} created
+                
+                Note right of Script: Pod spec includes:<br/>hostNetwork: true<br/>hostPID: true<br/>privileged: true<br/>nodeSelector: {node}
+            end
+            
+            Note right of Script: Returns: 0|1<br/>Updates: DEBUG_POD_NAMES[]
+        end
+    end
 
-**Core Principles:**
-- **Modular Design**: Each function has a single responsibility
-- **Function Composition**: Higher-level functions orchestrate lower-level utilities
-- **Error Handling**: Comprehensive validation at each level
-- **Resource Management**: Proper cleanup and lifecycle management
+    %% ============================================================
+    %% PHASE 1: WAIT FOR PODS READY
+    %% ============================================================
+    rect rgb(255, 255, 240)
+        Note over User,LocalFS: PHASE 1 (continued): Wait for Debug Pods Ready
+        
+        Script->>Script: wait_for_debug_pods_ready()
+        
+        loop Until all pods ready or timeout
+            loop For each pod in DEBUG_POD_NAMES[]
+                Script->>Script: run_kube_cmd(get pod {name} -o jsonpath={status})
+                Script->>K8sAPI: $KUBE_CLI get pod {name} -n {ns} -o jsonpath='{.status.phase}'
+                K8sAPI-->>Script: "Pending"|"Running"|"Succeeded"|"Failed"
+                
+                alt Pod status == "Running"
+                    Script->>K8sAPI: $KUBE_CLI get pod {name} -o jsonpath='{.status.containerStatuses}'
+                    K8sAPI-->>Script: Container ready status
+                end
+            end
+            
+            alt Not all ready
+                Script->>Script: sleep 1
+            end
+        end
+        
+        Note right of Script: Returns: 0 (all ready) | 1 (timeout/failed)<br/>Timeout: 300 seconds default
+    end
 
----
+    %% ============================================================
+    %% PHASE 1: KILL SWITCH SETUP (OPTIONAL)
+    %% ============================================================
+    rect rgb(255, 240, 245)
+        Note over User,LocalFS: PHASE 1 (continued): Kill Switch Monitor Setup
+        
+        alt Kill switch configured (--kill-switch-* or --*-volume)
+            Script->>Script: detect_kubelet_eviction_threshold()
+            Script->>K8sAPI: $KUBE_CLI get --raw /api/v1/nodes/{node}/proxy/configz
+            K8sAPI-->>Script: JSON: {kubeletconfig.evictionHard.nodefs.available}
+            Note right of Script: Parses: nodefs.available threshold<br/>Adds: 5% safety margin<br/>Returns: Threshold value<br/>Fallback: 10% if detection fails
+            
+            Script->>Script: create_kill_switch_monitor_pods()
+            
+            loop For each debug pod
+                Script->>Script: create_kill_switch_monitor_pod(debug_pod, type, target)
+                Script->>Script: get_effective_cri_socket()
+                Note right of Script: Returns: CRI socket path<br/>Priority: User-specified > Auto-detected
+                
+                Script->>Script: build_kill_switch_monitor_script()
+                Note right of Script: Generates: Disk monitoring script<br/>Uses: df command<br/>Threshold: Absolute or relative<br/>Action: Exit 0 when exceeded
+                
+                Script->>Script: parse_size_to_bytes(threshold)
+                Note right of Script: Input: "1GB", "500MB", "10%"<br/>Returns: Bytes (integer)<br/>Calls: format_bc_result() for calc
+                
+                Script->>K8sAPI: $KUBE_CLI apply -f - <<< {monitor_pod_yaml}
+                K8sAPI-->>Script: pod/{kill-switch-monitor} created
+            end
+            
+            Note right of Script: Sets: KILL_SWITCH_MONITOR_PODS[]<br/>Returns: void
+            
+            Script->>Script: monitor_kill_switches() &
+            Note right of Script: Runs: Background process<br/>Polls: Every 1 second<br/>Checks: Monitor pod status<br/>Action: Delete debug pod if triggered
+            
+            activate KillSwitch
+            
+            loop Background monitoring loop
+                Script->>K8sAPI: $KUBE_CLI get pod {monitor} -o jsonpath='{.status.phase}'
+                K8sAPI-->>Script: Pod status
+                
+                alt Monitor status == "Succeeded"
+                    KillSwitch-->>Script: Kill switch triggered!
+                    Script->>K8sAPI: $KUBE_CLI delete pod {target_debug_pod}
+                    K8sAPI-->>Script: Pod deleted
+                    Script->>LocalFS: Save monitor logs
+                end
+            end
+        end
+    end
 
-## Complete Function Call Hierarchy
+    %% ============================================================
+    %% PHASE 2: DEBUG PODS RUNNING
+    %% ============================================================
+    rect rgb(240, 255, 240)
+        Note over User,LocalFS: PHASE 2: Debug Pods Running - Command Execution
+        
+        Script-->>User: Display: "Debug pods are running"
+        Script-->>User: Display: kubectl logs commands
+        
+        par Debug Pod Execution (Pod Target)
+            activate DebugPod
+            DebugPod->>DebugPod: Execute entrypoint script
+            DebugPod->>DebugPod: configure_crictl_socket()
+            Note right of DebugPod: Sets: CONTAINER_RUNTIME_ENDPOINT<br/>Configures: crictl for CRI
+            
+            DebugPod->>K8sAPI: crictl inspect {container_id}
+            K8sAPI->>TargetPod: Get container PID
+            TargetPod-->>K8sAPI: Container info JSON
+            K8sAPI-->>DebugPod: PID of target container
+            
+            DebugPod->>DebugPod: generate_exec_command()
+            Note right of DebugPod: Builds: nsenter command<br/>Params: -t {PID} -n [-m] [-p] [-u]<br/>Command: User-specified or tcpdump
+            
+            DebugPod->>TargetPod: nsenter -t {PID} -n {command}
+            activate TargetPod
+            Note right of TargetPod: Executes in target's<br/>network namespace
+            TargetPod-->>DebugPod: Command output (streaming)
+            deactivate TargetPod
+        and Debug Pod Execution (Node Target)
+            DebugPod->>TargetNode: chroot /host {command}
+            activate TargetNode
+            Note right of TargetNode: Executes with<br/>host filesystem access
+            TargetNode-->>DebugPod: Command output (streaming)
+            deactivate TargetNode
+        and File Monitor Sidecar (if configured)
+            DebugPod->>DebugPod: File monitor loop (every 1s)
+            DebugPod->>DebugPod: Execute SELECT_TO_DOWNLOAD_COMMANDS
+            DebugPod-->>DebugPod: File list with sizes
+        end
+    end
 
+    %% ============================================================
+    %% PHASE 3: USER INPUT
+    %% ============================================================
+    rect rgb(255, 255, 255)
+        Note over User,LocalFS: PHASE 3: Waiting for User Input
+        
+        Script-->>User: "Press Enter to cleanup, or Ctrl+C to leave running"
+        User->>Script: Press Enter
+        
+        alt User presses Ctrl+C
+            Note over Script: Exit without cleanup<br/>Debug pods remain running
+        end
+    end
+
+    %% ============================================================
+    %% PHASE 4: CLEANUP DEBUG PODS
+    %% ============================================================
+    rect rgb(255, 245, 238)
+        Note over User,LocalFS: PHASE 4: Cleanup Debug Pods
+        
+        alt NO_CLEANUP != true
+            opt Kill switch monitoring active
+                Script->>Script: kill $MONITOR_PID
+                deactivate KillSwitch
+            end
+            
+            Script->>Script: cleanup_debug_pods()
+            
+            alt OUTPUT_DIR specified
+                loop For each debug_pod in DEBUG_POD_NAMES[]
+                    Script->>Script: get_pod_log_file(debug_pod)
+                    Note right of Script: Returns: Log file path<br/>Format: {OUTPUT_DIR}/debug/{pod}.log
+                    
+                    Script->>K8sAPI: $KUBE_CLI logs {debug_pod} -n {ns} --all-containers
+                    K8sAPI-->>Script: All container logs
+                    Script->>LocalFS: Write to debug/{pod}-{container}.log
+                    LocalFS-->>Script: Logs saved
+                end
+            end
+            
+            Script->>K8sAPI: $KUBE_CLI delete pods {DEBUG_POD_NAMES[]} -n {ns}
+            K8sAPI-->>Script: Pods deleted
+            deactivate DebugPod
+            
+            Note right of Script: Returns: void<br/>Clears: DEBUG_POD_NAMES[]
+            
+            Script->>Script: cleanup_kill_switch_monitor_pods()
+            
+            alt Kill switch pods exist
+                loop For each monitor in KILL_SWITCH_MONITOR_PODS[]
+                    Script->>K8sAPI: $KUBE_CLI logs {monitor} -n {ns}
+                    K8sAPI-->>Script: Monitor logs
+                    Script->>LocalFS: Write to killswitch-logs/{monitor}.log
+                end
+                
+                Script->>K8sAPI: $KUBE_CLI delete pods {KILL_SWITCH_MONITOR_PODS[]}
+                K8sAPI-->>Script: Monitor pods deleted
+            end
+            
+            Note right of Script: Returns: void
+        end
+    end
+
+    %% ============================================================
+    %% PHASE 5: FILE DISCOVERY & DOWNLOAD
+    %% ============================================================
+    rect rgb(240, 248, 255)
+        Note over User,LocalFS: PHASE 5: File Discovery & Download
+        
+        alt OUTPUT_DIR specified AND (SELECT_TO_DOWNLOAD_COMMANDS[] or NODE_SELECT_TO_DOWNLOAD_COMMANDS[])
+            Script->>Script: create_file_discovery_pods()
+            
+            loop For each target (pod or node)
+                alt Pod target
+                    Script->>Script: build_single_discovery_script(target)
+                    Script->>Script: build_discovery_script(pod, container, node)
+                    Note right of Script: Generates: File listing script<br/>Outputs: File paths to stdout<br/>Returns: Base64-encoded script
+                    
+                    Script->>Script: create_discovery_pod(target_info)
+                    Script->>K8sAPI: $KUBE_CLI apply -f - <<< {discovery_pod_yaml}
+                    K8sAPI-->>Script: pod/{discovery-pod} created
+                else Node target
+                    Script->>Script: build_single_node_discovery_script(target)
+                    Script->>Script: build_node_discovery_script(node)
+                    Note right of Script: Generates: Node file listing script<br/>Uses: chroot /host<br/>Returns: Base64-encoded script
+                    
+                    Script->>Script: create_node_discovery_pod(node_info)
+                    Script->>K8sAPI: $KUBE_CLI apply -f - <<< {node_discovery_pod_yaml}
+                    K8sAPI-->>Script: pod/{node-discovery-pod} created
+                end
+            end
+            
+            Note right of Script: Sets: DISCOVERY_POD_NAMES[]<br/>Sets: DISCOVERY_POD_INFO[]<br/>Returns: 0|1
+            
+            Script->>Script: wait_for_discovery_pods_ready()
+            activate DiscoveryPod
+            
+            loop Until all discovery pods complete
+                loop For each pod in DISCOVERY_POD_NAMES[]
+                    Script->>K8sAPI: $KUBE_CLI get pod {discovery_pod} -o jsonpath='{.status.phase}'
+                    K8sAPI-->>Script: "Running"|"Succeeded"|"Failed"
+                end
+            end
+            
+            Note right of Script: Returns: 0|1<br/>Waits for: status.phase == "Succeeded"
+            
+            Script->>Script: handle_file_downloads()
+            
+            loop For each discovery_pod in DISCOVERY_POD_INFO[]
+                Script->>K8sAPI: $KUBE_CLI logs {discovery_pod} -n {ns}
+                K8sAPI-->>Script: File list (one path per line)
+                
+                loop For each file_path in file_list
+                    Script->>K8sAPI: $KUBE_CLI cp {pod}:{file_path} {local_path}
+                    
+                    alt Pod target
+                        K8sAPI->>TargetPod: Read file from container
+                        TargetPod-->>K8sAPI: File contents
+                    else Node target
+                        K8sAPI->>TargetNode: Read file from /host
+                        TargetNode-->>K8sAPI: File contents
+                    end
+                    
+                    K8sAPI-->>Script: File transferred
+                    Script->>LocalFS: Write to downloads/{target}/{filename}
+                    LocalFS-->>Script: File saved
+                    
+                    alt DOWNLOAD_VERIFICATION == "hash"
+                        Script->>Script: Verify MD5 + SHA256
+                    else DOWNLOAD_VERIFICATION == "size"
+                        Script->>Script: Verify file size
+                    end
+                end
+            end
+            
+            deactivate DiscoveryPod
+            
+            Note right of Script: Returns: void<br/>Files saved to: OUTPUT_DIR/downloads/
+            
+            Script->>Script: cleanup_discovery_pods()
+            
+            loop For each pod in DISCOVERY_POD_NAMES[]
+                Script->>K8sAPI: $KUBE_CLI logs {discovery_pod}
+                K8sAPI-->>Script: Discovery logs
+                Script->>LocalFS: Write to discovery-logs/{pod}.log
+            end
+            
+            Script->>K8sAPI: $KUBE_CLI delete pods {DISCOVERY_POD_NAMES[]}
+            K8sAPI-->>Script: Discovery pods deleted
+            
+            Note right of Script: Returns: void
+        end
+    end
+
+    %% ============================================================
+    %% COMPLETION
+    %% ============================================================
+    rect rgb(240, 255, 240)
+        Note over User,LocalFS: Session Complete
+        
+        alt KUBE_DUMP_LOG_FILE exists
+            Script->>LocalFS: Append session end timestamp
+            Script-->>User: "Session log saved to: {log_file}"
+        end
+        
+        Script-->>User: "All operations completed!"
+        deactivate Script
+    end
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                            MAIN ENTRY POINT                         │
-│                          main() function                            │
-└──────────────────────────┬──────────────────────────────────────────┘
-                           │
-        ┌──────────────────┼──────────────────┐
-        │                  │                  │
-        ▼                  ▼                  ▼
-   ┌─────────┐       ┌──────────┐       ┌─────────┐
-   │ INIT    │       │ VALIDATE │       │ SETUP   │
-   └────┬────┘       └────┬─────┘       └────┬────┘
-        │                 │                   │
-        ├─initialize_     ├─validate_        ├─setup_
-        │ variables()     │ arguments()       │ output_
-        │                 │                  │ directories()
-        ├─detect_        ├─validate_        │
-        │ kube_cli()      │ all_            ├─setup_
-        │                 │ requirements()   │ debug_
-        └─parse_         │                  │ logging()
-          arguments()     ├─validate_        │
-                          │ variable()       └─show_
-                          │                   configuration()
-                          └─validate_
-                            option_value()
 
-        ┌──────────────────────────────────────────────────────┐
-        │        MAIN EXECUTION: Determine Mode                │
-        │   (pod / node / discovery)                           │
-        └──────────────────┬───────────────────────────────────┘
-                           │
-        ┌──────────────────┼──────────────────┬────────────────┐
-        │                  │                  │                │
-        ▼                  ▼                  ▼                ▼
-   ┌─────────┐        ┌──────────┐      ┌─────────┐      ┌──────────┐
-   │POD MODE │        │NODE MODE │      │DISCOVERY│      │KILL SWITCH
-   └────┬────┘        └────┬─────┘      │  MODE   │      │MONITORING
-        │                  │             └────┬────┘      └────┬─────┘
-        │                  │                   │               │
-        ├─select_         ├─select_           ├─create_       ├─detect_
-        │ target_pods()   │ target_nodes()    │ file_          │ kubelet_
-        │                 │                   │ discovery_     │ eviction_
-        ├─prepare_       ├─create_           │ pods()         │ threshold()
-        │ target_        │ node_              │                │
-        │ pods()          │ debug_pods()      ├─wait_for_     ├─get_
-        │                 │                   │ discovery_     │ effective_
-        └─create_        └─build_            │ pods_ready()   │ cri_socket()
-          debug_pods_      node_              │                │
-          for_targets()    debug_script()     └─handle_        ├─create_
-                           │                   file_downloads()│ kill_
-                           └─wait_for_                         │ switch_
-                             debug_pods_                       │ monitor_
-                             ready()                           │ pods()
-                                                               │
-                                                               └─monitor_
-                                                                 kill_
-                                                                 switches()
+## Function Reference
 
-        ┌──────────────────────────────────────────────────────────┐
-        │                   CLEANUP PHASE                          │
-        └──────────────────┬───────────────────────────────────────┘
-                           │
-        ┌──────────────────┼──────────────────┐
-        │                  │                  │
-        ▼                  ▼                  ▼
-   ┌─────────────────┐ ┌──────────────────┐ ┌────────────────────┐
-   │cleanup_debug_   │ │cleanup_discovery_│ │cleanup_kill_switch_│
-   │pods()           │ │pods()            │ │monitor_pods()      │
-   └─────────────────┘ └──────────────────┘ └────────────────────┘
-```
+### Entry Point Functions
+| Function | Parameters | Returns | Description |
+|----------|------------|---------|-------------|
+| `main()` | `$@` (all CLI args) | exit 0\|1 | Main orchestrator - coordinates entire workflow |
+| `usage()` | none | exit 0 | Displays help text and exits |
 
----
+### Initialization Functions
+| Function | Parameters | Returns | Sets |
+|----------|------------|---------|------|
+| `initialize_variables()` | none | void | All global variables to defaults |
+| `detect_kube_cli()` | none | void | `KUBE_CLI` = "oc"\|"kubectl" |
+| `parse_arguments()` | `$@` | void | All config variables from CLI |
+| `validate_arguments()` | none | void\|exit 1 | `EXECUTION_MODE` |
+| `validate_option_value()` | `$val`, `$option_name` | void\|exit 1 | - |
+| `validate_variable()` | `$name`, `$value`, `$pattern` | 0\|1 | - |
+| `validate_all_requirements()` | none | void\|exit 1 | - |
 
-## Main Execution Flow
-
-### Phase 1: Initialization & Setup (Pre-Execution)
-```
-initialize_variables() ──→ Sets defaults for labels, modes, timeouts
-detect_kube_cli()      ──→ Detects kubectl or oc
-parse_arguments()      ──→ Parses CLI arguments
-validate_arguments()   ──→ Validates argument syntax & semantics
-validate_all_requirements() ──→ Checks prerequisites
-setup_output_directories() ──→ Creates log/output directories
-setup_debug_logging()  ──→ Configures logging if -v specified
-show_configuration()   ──→ Displays summary and waits for confirmation
-```
-
-### Phase 2: Mode-Specific Execution
-#### POD Debugging Mode
-```
-find_pods_by_label()              ──→ Query pods by label
-select_target_pods()              ──→ Interactive pod selection
-prepare_target_pods()             ──→ Validate pods are running
-create_debug_pods_for_targets()   ──→ Create debug pod for each target
-  ├─ generate_command_container() ──→ Build container spec
-  ├─ generate_file_monitor_container() ──→ Build monitor spec (if file ops)
-  └─ create_single_debug_pod()    ──→ Create individual pod via kubectl
-wait_for_debug_pods_ready()       ──→ Wait for all pods to be ready
-```
-
-#### NODE Debugging Mode
-```
-select_target_nodes()         ──→ Interactive node selection
-create_node_debug_pods()      ──→ Create debug pod for each node
-  ├─ detect_cri_socket_from_node() ──→ Detect container runtime
-  ├─ build_node_debug_script()     ──→ Build node-level debug script
-  └─ create_single_node_debug_pod() ──→ Create individual node debug pod
-wait_for_debug_pods_ready()   ──→ Wait for all pods to be ready
-```
-
-#### File Discovery Mode
-```
-create_file_discovery_pods()      ──→ Create discovery pods
-  ├─ build_file_monitor_script()  ──→ Build file discovery script
-  ├─ create_single_debug_pod()    ──→ Create discovery pod
-  └─ build_discovery_script()     ──→ Generate discovery command
-wait_for_discovery_pods_ready()   ──→ Wait for pods to complete
-handle_file_downloads()           ──→ Copy files to local system
-  └─ get_pod_log_file()           ──→ Get file from pod
-cleanup_discovery_pods()          ──→ Remove discovery pods
-```
-
-### Phase 3: Kill Switch Monitoring (Optional)
-```
-detect_kubelet_eviction_threshold() ──→ Read eviction thresholds
-create_kill_switch_monitor_pods()   ──→ Create monitor pod
-  └─ build_kill_switch_monitor_script() ──→ Build monitoring script
-monitor_kill_switches()              ──→ Poll disk usage & cleanup if needed
-cleanup_kill_switch_monitor_pods()   ──→ Remove monitor pods
-```
-
-### Phase 4: Cleanup
-```
-cleanup_debug_pods()            ──→ Remove all debug pods
-cleanup_discovery_pods()        ──→ Remove discovery pods
-cleanup_kill_switch_monitor_pods() ──→ Remove monitor pods
-```
-
----
-
-## Function Categories
-
-### Core Orchestration Functions
-- **main()** - Main entry point, orchestrates execution flow
-- **show_configuration()** - Display summary and wait for confirmation
-
-### Initialization & Configuration
-- **initialize_variables()** - Set default values and variables
-- **detect_kube_cli()** - Detect kubectl or oc
-- **parse_arguments()** - Parse command-line arguments
-- **setup_output_directories()** - Create output and log directories
-- **setup_debug_logging()** - Configure debug logging
-
-### Validation Functions
-- **validate_arguments()** - Validate argument combinations
-- **validate_all_requirements()** - Verify all prerequisites
-- **validate_option_value()** - Validate specific option values
-- **validate_variable()** - Validate variable values
+### Setup Functions
+| Function | Parameters | Returns | Creates |
+|----------|------------|---------|---------|
+| `setup_output_directories()` | none | 0\|1 | downloads/, debug/, killswitch-logs/, discovery-logs/ |
+| `setup_debug_logging()` | none | 0\|1 | DEBUG_LOG_DIR |
+| `show_configuration()` | none | void | - |
 
 ### Target Selection Functions
-- **find_pods_by_label()** - Query pods by label selector
-- **select_target_pods()** - Interactive pod selection
-- **prepare_target_pods()** - Verify pods are running
-- **select_target_nodes()** - Interactive node selection
+| Function | Parameters | Returns | Sets |
+|----------|------------|---------|------|
+| `select_target_pods()` | none | 0\|1 | `POD_NAMES[]` |
+| `find_pods_by_label()` | `$label` | void | Appends to `POD_NAMES[]` |
+| `prepare_target_pods()` | none | 0\|1 | `TARGET_PODS[]` |
+| `select_target_nodes()` | none | 0\|1 | `TARGET_NODES[]` |
 
 ### Debug Pod Creation Functions
-- **create_debug_pods_for_targets()** - Create debug pods for pod targets
-- **create_single_debug_pod()** - Create individual debug pod
-- **create_node_debug_pods()** - Create debug pods for node targets
-- **create_single_node_debug_pod()** - Create individual node debug pod
-- **create_discovery_pod()** - Create file discovery pod
-- **create_file_discovery_pods()** - Create multiple discovery pods
+| Function | Parameters | Returns | Creates |
+|----------|------------|---------|---------|
+| `create_debug_pods_for_targets()` | none | 0\|1 | Debug pods for pod targets |
+| `create_node_debug_pods()` | none | 0\|1 | Debug pods for node targets |
+| `create_single_debug_pod()` | `$name`, `$node`, `$yaml` | 0\|1 | Single debug pod |
+| `create_single_node_debug_pod()` | `$node`, `$yaml` | 0\|1 | Single node debug pod |
 
-### Pod Building/Generation Functions
-- **generate_command_container()** - Generate container spec for command execution
-- **generate_file_monitor_container()** - Generate container spec for file monitoring
-- **generate_exec_command()** - Generate kubectl exec command
-- **build_debug_script()** - Build debug script for debug pod
-- **build_node_debug_script()** - Build debug script for node debug pod
-- **build_discovery_script()** - Build discovery script
-- **build_file_monitor_script()** - Build file monitoring script
-- **build_node_discovery_script()** - Build node discovery script
-- **build_node_file_monitor_script()** - Build node file monitoring script
-- **build_single_discovery_script()** - Build single pod discovery script
-- **build_single_node_discovery_script()** - Build single node discovery script
+### Container Generation Functions
+| Function | Parameters | Returns |
+|----------|------------|---------|
+| `generate_command_container()` | `$index`, `$target` | YAML string |
+| `generate_file_monitor_container()` | `$index` | YAML string |
+| `generate_exec_command()` | `$pid`, `$cmd`, `$nsenter_flags` | Command string |
 
-### Kubernetes Interaction Functions
-- **run_kube_cmd()** - Execute kubectl/oc command with error handling
-- **wait_for_debug_pods_ready()** - Poll pod status until ready
-- **wait_for_discovery_pods_ready()** - Poll discovery pods until ready
-- **detect_cri_socket_from_node()** - Detect container runtime socket
-- **get_effective_cri_socket()** - Get CRI socket path
-- **configure_crictl_socket()** - Configure crictl socket
+### Script Building Functions
+| Function | Parameters | Returns |
+|----------|------------|---------|
+| `build_debug_script()` | `$pod`, `$container`, `$node` | Base64 script |
+| `build_node_debug_script()` | `$node` | Base64 script |
+| `build_file_monitor_script()` | `$pod`, `$container`, `$node`, `$target`, `$index` | Bash script |
+| `build_node_file_monitor_script()` | `$pod`, `$container`, `$node`, `$target`, `$index` | Bash script |
+| `build_discovery_script()` | `$pod`, `$container`, `$node` | Base64 script |
+| `build_node_discovery_script()` | `$node` | Base64 script |
+| `build_single_discovery_script()` | `$target` | Base64 script |
+| `build_single_node_discovery_script()` | `$target` | Base64 script |
+| `build_kill_switch_monitor_script()` | none | Bash script |
+
+### Discovery & Download Functions
+| Function | Parameters | Returns | Creates |
+|----------|------------|---------|---------|
+| `create_file_discovery_pods()` | none | 0\|1 | Discovery pods |
+| `create_discovery_pod()` | `$target_info` | 0\|1 | Single discovery pod |
+| `create_node_discovery_pod()` | `$node_info` | 0\|1 | Single node discovery pod |
+| `wait_for_discovery_pods_ready()` | none | 0\|1 | - |
+| `handle_file_downloads()` | none | void | Downloaded files |
 
 ### Kill Switch Functions
-- **detect_kubelet_eviction_threshold()** - Read kubelet eviction thresholds
-- **create_kill_switch_monitor_pods()** - Create monitoring pods
-- **create_kill_switch_monitor_pod()** - Create single monitor pod
-- **monitor_kill_switches()** - Monitor disk usage and cleanup
-- **cleanup_kill_switch_monitor_pods()** - Remove monitor pods
+| Function | Parameters | Returns |
+|----------|------------|---------|
+| `detect_kubelet_eviction_threshold()` | none | Threshold value |
+| `create_kill_switch_monitor_pods()` | none | void |
+| `create_kill_switch_monitor_pod()` | `$debug_pod`, `$type`, `$target` | 0\|1 |
+| `monitor_kill_switches()` | none | never returns (background) |
+| `parse_size_to_bytes()` | `$size_string` | Integer (bytes) |
+| `format_bc_result()` | `$bc_expression` | Formatted number |
 
-### File Operations Functions
-- **create_file_discovery_pods()** - Create discovery pods for files
-- **handle_file_downloads()** - Download files from pods
-- **get_pod_log_file()** - Retrieve individual file from pod
+### Wait Functions
+| Function | Parameters | Returns | Timeout |
+|----------|------------|---------|---------|
+| `wait_for_debug_pods_ready()` | none | 0\|1 | 300s |
+| `wait_for_discovery_pods_ready()` | none | 0\|1 | 300s |
 
 ### Cleanup Functions
-- **cleanup_debug_pods()** - Remove debug pods
-- **cleanup_discovery_pods()** - Remove discovery pods
-- **cleanup_kill_switch_monitor_pods()** - Remove monitor pods
+| Function | Parameters | Returns | Deletes |
+|----------|------------|---------|---------|
+| `cleanup_debug_pods()` | none | void | DEBUG_POD_NAMES[] |
+| `cleanup_discovery_pods()` | none | void | DISCOVERY_POD_NAMES[] |
+| `cleanup_kill_switch_monitor_pods()` | none | void | KILL_SWITCH_MONITOR_PODS[] |
 
 ### Utility Functions
-- **format_message()** - Format console output
-- **format_message_stderr()** - Format error output
-- **get_pod_log_file()** - Get pod log file path
-- **truncate_name_with_hash()** - Truncate long names with hash
-- **truncate_label_value_with_hash()** - Truncate long label values
-- **parse_size_to_bytes()** - Convert size string to bytes
-- **format_bc_result()** - Format bc calculator results
-- **get_import_file_for_command()** - Get import file for command
-- **get_node_import_file_for_command()** - Get import file for node command
-- **usage()** - Display usage information
+| Function | Parameters | Returns |
+|----------|------------|---------|
+| `run_kube_cmd()` | `$@` (kubectl args) | Command output |
+| `format_message()` | `$message` | void (prints to stdout) |
+| `format_message_stderr()` | `$message` | void (prints to stderr) |
+| `get_pod_log_file()` | `$pod_name` | File path string |
+| `truncate_name_with_hash()` | `$name` | Truncated name (≤63 chars) |
+| `truncate_label_value_with_hash()` | `$value` | Valid K8s label |
+| `get_import_file_for_command()` | `$index` | Base64 content |
+| `get_node_import_file_for_command()` | `$index` | Base64 content |
+| `get_effective_cri_socket()` | none | Socket path |
+| `configure_crictl_socket()` | none | void |
+| `detect_cri_socket_from_node()` | `$node_name` | Socket path |
 
----
+## Global Variables
 
-## Execution Modes
-
-### 1. POD Debugging Mode (`-l label`)
-**Function Call Chain:**
+### Configuration Arrays
 ```
-main()
-├─ find_pods_by_label()
-├─ select_target_pods()
-├─ prepare_target_pods()
-├─ create_debug_pods_for_targets()
-│  ├─ generate_command_container()
-│  ├─ generate_file_monitor_container()
-│  └─ create_single_debug_pod()
-├─ wait_for_debug_pods_ready()
-└─ cleanup_debug_pods()
-```
-
-### 2. NODE Debugging Mode (`-L label`)
-**Function Call Chain:**
-```
-main()
-├─ select_target_nodes()
-├─ create_node_debug_pods()
-│  ├─ detect_cri_socket_from_node()
-│  ├─ build_node_debug_script()
-│  └─ create_single_node_debug_pod()
-├─ wait_for_debug_pods_ready()
-└─ cleanup_debug_pods()
+POD_LABELS[]                    # Label selectors for pods
+NODE_LABELS[]                   # Label selectors for nodes
+CUSTOM_COMMANDS[]               # Base64 encoded -e commands
+CUSTOM_NODE_COMMANDS[]          # Base64 encoded -E commands
+SELECT_TO_DOWNLOAD_COMMANDS[]   # -s file selection commands
+NODE_SELECT_TO_DOWNLOAD_COMMANDS[] # -S node file selection commands
+NSENTER_PARAMS_INDICES[]        # Command indices with custom nsenter
+NSENTER_PARAMS_VALUES[]         # nsenter params for each index
+IMPORT_FILE_INDICES[]           # Command indices with import files
+IMPORT_FILE_CONTENTS[]          # Base64 encoded import file contents
 ```
 
-### 3. File Discovery Mode (`-s` / `-S`)
-**Function Call Chain:**
+### Runtime State Arrays
 ```
-main()
-├─ create_file_discovery_pods()
-│  ├─ build_file_monitor_script()
-│  ├─ create_single_debug_pod()
-│  └─ build_discovery_script()
-├─ wait_for_discovery_pods_ready()
-├─ handle_file_downloads()
-│  └─ get_pod_log_file()
-└─ cleanup_discovery_pods()
-```
-
-### 4. Kill Switch Monitoring (Optional `--kill-switch-*`)
-**Function Call Chain:**
-```
-main()
-├─ detect_kubelet_eviction_threshold()
-├─ create_kill_switch_monitor_pods()
-│  └─ build_kill_switch_monitor_script()
-├─ monitor_kill_switches()
-└─ cleanup_kill_switch_monitor_pods()
+POD_NAMES[]                     # Discovered pod names
+NODE_NAMES[]                    # Discovered node names
+TARGET_PODS[]                   # "pod:container:node:namespace"
+TARGET_NODES[]                  # Node names to target
+DEBUG_POD_NAMES[]               # Created debug pod names
+DEBUG_POD_NAMES_META[]          # Debug pod metadata
+DISCOVERY_POD_NAMES[]           # Created discovery pod names
+DISCOVERY_POD_INFO[]            # Discovery pod info
+KILL_SWITCH_MONITOR_PODS[]      # Kill switch monitor pod names
 ```
 
----
-
-## Component Interactions
-
-### Data Flow
-
+### Configuration Variables
 ```
-User Input
-    ↓
-parse_arguments() → validate_arguments()
-    ↓
-Execution Mode Determination
-    ↓
-Target Selection (pods/nodes)
-    ↓
-Debug Pod Creation
-    ├─ generate_*_container() → Generate container specs
-    ├─ build_*_script() → Generate execution scripts
-    └─ run_kube_cmd() → Create pods via kubectl
-    ↓
-Wait for Pod Readiness
-    ├─ wait_for_debug_pods_ready()
-    └─ wait_for_discovery_pods_ready()
-    ↓
-Execution/Monitoring
-    ├─ User interaction (if interactive)
-    └─ monitor_kill_switches() (if enabled)
-    ↓
-File Operations (if applicable)
-    ├─ handle_file_downloads()
-    └─ get_pod_log_file()
-    ↓
-Cleanup
-    ├─ cleanup_debug_pods()
-    ├─ cleanup_discovery_pods()
-    └─ cleanup_kill_switch_monitor_pods()
+EXECUTION_MODE                  # "pod" | "node" | "mixed"
+DEBUG_NAMESPACE                 # Namespace for debug pods
+CRI_RUNTIME                     # "containerd" | "crio" | "docker"
+CRI_SOCKET                      # Custom CRI socket path
+DEBUG_IMAGE                     # Container image for debug pods
+OUTPUT_DIR                      # Output directory for downloads
+PLACEHOLDER_CHAR                # Placeholder prefix (default: %)
+KILL_SWITCH_ABS                 # Absolute threshold (e.g., "1GB")
+KILL_SWITCH_REL                 # Relative threshold (e.g., "10%")
+POD_VOLUME                      # Volume path for pod kill switch
+NODE_VOLUME                     # Volume path for node kill switch
+CPU_LIMIT                       # Container CPU limit
+MEMORY_LIMIT                    # Container memory limit
+SERVICE_ACCOUNT                 # Service account for pods
+KUBE_CLI                        # "kubectl" | "oc"
+VERBOSE                         # "true" | "false"
 ```
-
-### Function Dependencies
-
-**High-Level Dependencies:**
-```
-main()
-├─ Depends on: parse_arguments, validate_*, initialize_variables
-├─ Depends on: detect_kube_cli, setup_*
-├─ Calls: (mode-specific orchestration)
-└─ Calls: cleanup_* functions
-
-create_debug_pods_for_targets()
-├─ Depends on: generate_*_container, create_single_debug_pod
-├─ Calls: run_kube_cmd indirectly
-└─ Calls: wait_for_debug_pods_ready
-
-create_single_debug_pod()
-├─ Depends on: run_kube_cmd
-├─ Depends on: generate_exec_command
-└─ Calls: Kubernetes API via kubectl/oc
-
-wait_for_debug_pods_ready()
-├─ Depends on: run_kube_cmd
-└─ Polls: kubectl get pods until ready
-
-handle_file_downloads()
-├─ Depends on: get_pod_log_file
-├─ Depends on: run_kube_cmd
-└─ Copies: files from pod to local filesystem
-```
-
----
-
-## Technical Characteristics
-
-### Error Handling Strategy
-- **Pre-execution validation**: Check all requirements before creating pods
-- **Runtime validation**: Verify pod readiness before proceeding
-- **Cleanup on failure**: Ensure pods are cleaned up even if operations fail
-
-### Resource Management
-- **Pod Lifecycle Tracking**: Arrays track created pods for reliable cleanup
-- **Timeout Handling**: Configurable timeouts for pod readiness
-- **Kill Switch Protection**: Automatic cleanup when disk usage exceeds thresholds
-
-### CRI Socket Detection
-```
-detect_cri_socket_from_node()
-├─ SSH to node via debug pod
-├─ Check /run/containerd/containerd.sock
-├─ Check /var/run/crio/crio.sock
-├─ Check /var/run/docker.sock
-└─ Return detected socket path
-
-configure_crictl_socket()
-├─ Export CONTAINER_RUNTIME_ENDPOINT
-└─ Use for crictl commands
-```
-
-### Kill Switch Monitoring Algorithm
-```
-detect_kubelet_eviction_threshold()
-├─ Parse kubelet config
-├─ Get eviction hard/soft thresholds
-└─ Return memory/disk limits
-
-monitor_kill_switches()
-├─ Loop: Check disk usage
-│  ├─ Calculate free space
-│  ├─ Compare to threshold
-│  ├─ If exceeded: cleanup_* pods
-│  └─ Sleep and repeat
-└─ Exit: When user terminates or threshold hit
-```
-
----
-
-## Summary
-
-The kube-dump architecture implements a modular, function-based design with:
-- **62 functions** organized into 10 functional categories
-- **Clear separation of concerns** between orchestration, validation, and execution
-- **Multiple execution modes** (pod, node, discovery) with shared utilities
-- **Comprehensive error handling** and resource cleanup
-- **Flexible CRI support** with runtime detection
-- **Automatic protection** via kill switch monitoring
-
-All functions work together to provide a safe, efficient debugging experience for Kubernetes clusters.
