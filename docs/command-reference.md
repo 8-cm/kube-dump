@@ -49,11 +49,28 @@ tcpdump -i any -nn -s 0
 - `--cri-socket SOCKET` - Custom CRI socket path (absolute path on node)
 - `--install-deps` - Allow automatic installation of CRI dependencies (crictl only)
 
+### Resource Limits
+- `--cpu-limit LIMIT` - CPU limit for containers (e.g., `100m`, `500m`, `1`, `2.5`)
+- `--memory-limit LIMIT` - Memory limit for containers (e.g., `128Mi`, `512Mi`, `1Gi`)
+- `--service-account NAME` - Service account for pods (must exist in target namespace)
+
+### Working Directory
+- `--workdir-pod PATH` - Working directory override for pod-based operations
+- `--workdir-node PATH` - Working directory override for node-based operations
+
+### Namespace Entry
+- `--nsenter-params FLAGS` - Comma-separated nsenter namespace flags for corresponding `-e` command
+  - Specify WITHOUT leading dashes (e.g., `n,m` for network+mount)
+  - Valid flags: `n` (network), `p` (PID), `m` (mount), `i` (IPC), `u` (UTS), `C` (cgroup), `U` (user), `T` (time)
+  - Unspecified commands default to `n` (network namespace only)
+  - When using `p` (PID), mount `/proc` first: `mount -t proc none /proc && ps auxf`
+
 ## File Operations
 
 ### Output & Downloads
 - `-o, --output PATH` - Output directory for downloaded files
-- `-I, --placeholder CHAR` - Set placeholder character for hostname/file substitution (default: `%`)
+- `-I, --placeholder CHAR` - Set placeholder character for target/file substitution (default: `%`)
+- `--download-verification METHOD` - Verification method for downloads: `hash` (MD5+SHA256), `size`, `none` (default: `none`)
 
 ### Script Import
 Run local scripts on remote targets:
@@ -63,20 +80,21 @@ Run local scripts on remote targets:
 
 ### File Selection & Placeholders
 Commands support the following placeholders (% is default, configurable via `-I`):
-- `%p` - Target pod name
-- `%n` - Target node name
+- `%t` - Target name (pod name or node name depending on mode)
+- `%n` - Node name (where the pod runs, or the target node itself)
 - `%f` - Path to the imported temporary script file (requires `--import-file`)
 
 Examples:
-- `PLACEHOLDER_CHARp` is replaced with the target pod name
-- `PLACEHOLDER_CHARf` is replaced with the temp file path (e.g. `/tmp/kube-dump-import-PID.sh`)
+- `%t` is replaced with the target pod/node name
+- `%f` is replaced with the temp file path (e.g., `/tmp/kube-dump-import-PID.sh`)
 - Use single quotes to prevent shell interpretation
-
 
 ```bash
 # Examples
--s 'find /tmp -name "*PLACEHOLDER_CHAR*"'  # Find files with hostname
--S 'ls /var/log/PLACEHOLDER_CHAR/'         # List logs by hostname
+-e 'tcpdump -i any -w %t.pcap'           # Output file named after target
+-s 'find /tmp -name "%t*"'               # Find files with target name prefix
+-S 'ls /var/log/%t/'                     # List logs by target name
+--import-file ./script.sh -e 'bash %f'   # Run imported script
 ```
 
 ## Resource Protection

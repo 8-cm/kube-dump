@@ -232,13 +232,13 @@ usage() {
   echo "  # Complex example:"
   echo "  $0 -l app=argocd-redis -l app=falcosidekick -n argocd \\"
   echo "    --import-file ./examples/simple-test.sh \\"
-  echo "    -e 'echo \"Pod: \$(hostname)\" > /host/tmp/%p.info' --nsenter-params n \\"
+  echo "    -e 'echo \"Pod: \$(hostname)\" > /host/tmp/%t.info' --nsenter-params n \\"
   echo "    --import-file ./examples/variant-A.sh \\"
-  echo "    -e 'bash %f | tee /host/tmp/%p_A.log' \\"
+  echo "    -e 'bash %f | tee /host/tmp/%t_A.log' \\"
   echo "    --include-nodes \\"
   echo "    -L kubernetes.io/hostname=node-00 \\"
   echo "    --import-file ./examples/variant-B.sh \\"
-  echo "    -E 'bash %f | tee /host/tmp/%p_node_B.log' \\"
+  echo "    -E 'bash %f | tee /host/tmp/%t_node_B.log' \\"
   echo "    -s 'ls /host/tmp/*.log' -S 'ls /host/tmp/*.log' \\"
   echo "    -o ./output --pod-volume /host/tmp --node-volume /host/tmp \\"
   echo "    --kill-switch-abs 11M --image nicolaka/netshoot \\"
@@ -3521,8 +3521,8 @@ generate_exec_command() {
 
   if [[ "$is_custom" == "true" ]]; then
     printf "DECODED_CMD=\$(echo '%s' | base64 -d | tr -d '\\\\n')\n" "$cmd_to_use"
-    # Handle %p placeholder (podname) and %n placeholder (in pod context, use podname)
-    echo "FINAL_CMD=\$(echo \"\$DECODED_CMD\" | sed 's/${PLACEHOLDER_CHAR}p/${target_pod_name}/g')"
+    # Handle %t placeholder (target name) and %n placeholder (in pod context, use podname)
+    echo "FINAL_CMD=\$(echo \"\$DECODED_CMD\" | sed 's/${PLACEHOLDER_CHAR}t/${target_pod_name}/g')"
     echo "FINAL_CMD=\$(echo \"\$FINAL_CMD\" | sed 's/${PLACEHOLDER_CHAR}n/${target_pod_name}/g')"
     if [[ -n "$import_file_content" ]]; then
       # When import file is used: write decoded content to temp file using heredoc
@@ -3561,8 +3561,8 @@ fi
 wait \$TAIL_PID
 EXECEND
   else
-    # Handle %p placeholder (podname) and %n placeholder (in pod context, use podname)
-    local final_capture_cmd="${CAPTURE_COMMAND//${PLACEHOLDER_CHAR}p/$target_pod_name}"
+    # Handle %t placeholder (target name) and %n placeholder (in pod context, use podname)
+    local final_capture_cmd="${CAPTURE_COMMAND//${PLACEHOLDER_CHAR}t/$target_pod_name}"
     final_capture_cmd="${final_capture_cmd//${PLACEHOLDER_CHAR}n/$target_pod_name}"
     if [[ -n "$import_file_content" ]]; then
       # When import file is used: write decoded content to temp file using heredoc
