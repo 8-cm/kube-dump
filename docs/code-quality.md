@@ -1,6 +1,6 @@
 # Code Quality Report - ShellCheck Analysis
 
-**Generated:** 2026-01-04 03:52:24 UTC
+**Generated:** 2026-01-11 03:51:32 UTC
 **Script:** kube-dump.sh
 **ShellCheck Version:** version: 0.9.0
 
