@@ -34,3 +34,8 @@ dependencies/
 tester/
 final-test/
 final-test-renamed/
+
+# Capture output directories (may contain sensitive cluster data)
+argocd-dump/
+captures/
+test-kind-out/

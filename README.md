@@ -1,4 +1,10 @@
+<p align="center">
+  <img src="logo.png" alt="kube-dump logo" width="120"/>
+</p>
+
 # kube-dump
+
+> **Warning:** This project was heavily built with AI assistance (Claude). Effort was made to properly test it, but use your own judgment, especially in production. I use it in prod myself, but you should review the code before you do.
 
 <!-- SECURITY-DASHBOARD-START -->
 
