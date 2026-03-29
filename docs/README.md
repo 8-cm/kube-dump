@@ -20,7 +20,6 @@ Complete documentation for the kube-dump Kubernetes debugging tool.
 ## Quality & Compliance
 
 - [Code Quality](code-quality.md) - ShellCheck code quality findings
-- [Test Coverage](test-coverage.md) - Test suite coverage and validation
 
 ---
 
