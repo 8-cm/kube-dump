@@ -8,19 +8,11 @@
 
 <!-- SECURITY-DASHBOARD-START -->
 
-## 🛡️ Security Status
+## Code Quality
 
-| Component | Status | Last Updated |
-|-----------|--------|--------------|
-| **Container Security** | ✅ NO ISSUES FOUND | 2026-03-29 |
-| **Code Quality (ShellCheck)** | ✅ PASSED | 2026-03-29 |
+**ShellCheck:** ✅ PASSED | **Issues:** 0 | **Last updated:** 2026-03-29
 
-**Vulnerability Summary:** Critical: 0, High: 0, Medium: 0, Low: 0
-
-**ShellCheck Issues:** 0
-
-📋 [View Detailed Security Reports](docs/security-reports.md) for complete vulnerability analysis and recommendations.
-📄 [View Code Quality Report](docs/code-quality.md) for ShellCheck findings.
+📄 [View Code Quality Report](docs/code-quality.md)
 
 <!-- SECURITY-DASHBOARD-END -->
 
@@ -67,7 +59,7 @@ git clone <repository-url> && cd kube-dump && chmod +x kube-dump.sh
 
 ## Documentation
 
-📖 **[Complete Documentation](docs/)** | 🏗️ **[Architecture](docs/kube-dump-architecture.md)** | 🔒 **[Security Reports](docs/security-reports.md)**
+📖 **[Complete Documentation](docs/)** | 🏗️ **[Architecture](docs/architecture.md)**
 
 ### Quick Navigation
 - [Installation Guide](docs/installation.md) - Setup and prerequisites
