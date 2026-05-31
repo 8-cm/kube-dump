@@ -10,7 +10,7 @@
 
 ## Code Quality
 
-**ShellCheck:** ✅ PASSED | **Issues:** 0 | **Last updated:** 2026-05-24
+**ShellCheck:** ✅ PASSED | **Issues:** 0 | **Last updated:** 2026-05-31
 
 📄 [View Code Quality Report](docs/code-quality.md)
 
